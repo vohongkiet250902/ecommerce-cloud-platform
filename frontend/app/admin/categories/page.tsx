@@ -80,7 +80,10 @@ const categories: Category[] = [
     id: "5",
     name: "Đồng hồ thông minh",
     slug: "dong-ho-thong-minh",
-    productCount: 50,
+    children: [
+      { id: "5-1", name: "Apple Watch", slug: "apple-watch", productCount: 50 },
+      { id: "5-2", name: "Galaxy Watch", slug: "galaxy-watch", productCount: 50 },
+    ],
   },
 ];
 
