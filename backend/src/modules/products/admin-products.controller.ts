@@ -11,30 +11,41 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ProductsService } from './products.service';
+import { UploadService } from '../upload/upload.service';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { JwtGuard } from '../../common/guards/jwt.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
-import { cloudinaryStorage } from '../../config/cloudinary.storage';
+import { memoryStorage } from 'multer';
+
 @Roles('admin')
 @UseGuards(JwtGuard, RolesGuard)
 @Controller('admin/products')
 export class AdminProductsController {
-  constructor(private readonly productsService: ProductsService) {}
+  constructor(
+    private readonly productsService: ProductsService,
+    private readonly uploadService: UploadService,
+  ) {}
 
   @Post('upload')
   @UseInterceptors(
     FileInterceptor('file', {
-      storage: cloudinaryStorage,
+      storage: memoryStorage(),
     }),
   )
-  upload(@UploadedFile() file: any) {
-    if (!file) {
-      throw new Error('FILE IS UNDEFINED');
+  async upload(@UploadedFile() file: Express.Multer.File) {
+    try {
+      console.log('FILE:', file);
+
+      if (!file) {
+        throw new Error('FILE IS UNDEFINED');
+      }
+
+      const url = await this.uploadService.uploadImage(file, 'products');
+      return { url };
+    } catch (err) {
+      console.error('UPLOAD ERROR:', err);
+      throw err;
     }
-    console.log('UPLOAD RESULT:', file);
-    return {
-      url: file.path,
-    };
   }
 
   @Post()
