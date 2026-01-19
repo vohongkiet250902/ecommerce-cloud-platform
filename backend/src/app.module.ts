@@ -9,6 +9,8 @@ import { OrdersModule } from './modules/orders/orders.module';
 import { SearchModule } from './modules/search/search.module';
 import { MongooseModule } from '@nestjs/mongoose';
 import { LoggerMiddleware } from './common/middleware/logger.middleware';
+import { CategoriesModule } from './modules/categories/categories.module';
+import { BrandsModule } from './modules/brands/brands.module';
 
 @Module({
   imports: [
@@ -25,6 +27,8 @@ import { LoggerMiddleware } from './common/middleware/logger.middleware';
       }),
       inject: [ConfigService],
     }),
+    CategoriesModule,
+    BrandsModule,
   ],
   controllers: [AppController],
   providers: [AppService],
