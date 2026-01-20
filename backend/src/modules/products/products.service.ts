@@ -6,31 +6,111 @@ import {
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { Product } from './schemas/product.schema';
-import { SortOrder } from 'mongoose';
+import { UploadService } from '../upload/upload.service';
+
 @Injectable()
 export class ProductsService {
   constructor(
     @InjectModel(Product.name)
     private readonly productModel: Model<Product>,
+    private readonly uploadService: UploadService,
   ) {}
 
+  /* ================== PRIVATE HELPERS ================== */
+
+  private validateUniqueSku(variants: any[]) {
+    const skus = variants.map((v) => v.sku);
+    const unique = new Set(skus);
+
+    if (skus.length !== unique.size) {
+      throw new BadRequestException('Duplicate SKU in product variants');
+    }
+  }
+
+  private calculateTotalStock(variants: any[] = []) {
+    return variants.reduce((sum, v) => sum + (v.stock || 0), 0);
+  }
+
+  /* ================== CRUD ================== */
+
   async create(dto: any) {
+    if (dto.variants?.length) {
+      this.validateUniqueSku(dto.variants);
+      dto.totalStock = this.calculateTotalStock(dto.variants);
+    }
+
     const exists = await this.productModel.findOne({ slug: dto.slug });
     if (exists) throw new BadRequestException('Slug already exists');
 
     return this.productModel.create(dto);
   }
 
-  async update(id: string, dto: any) {
-    const product = await this.productModel.findByIdAndUpdate(id, dto, {
-      new: true,
-    });
+  async findAll(query: any) {
+    const { page = 1, limit = 10, categoryId, brandId, keyword } = query;
+
+    const filter: any = {};
+    if (categoryId) filter.categoryId = categoryId;
+    if (brandId) filter.brandId = brandId;
+
+    if (keyword) {
+      filter.$text = { $search: keyword };
+    }
+
+    return this.productModel
+      .find(filter)
+      .skip((+page - 1) * +limit)
+      .limit(+limit)
+      .sort({ createdAt: -1 });
+  }
+
+  async findOne(id: string) {
+    const product = await this.productModel.findById(id);
     if (!product) throw new NotFoundException('Product not found');
     return product;
   }
 
+  async update(id: string, dto: any) {
+    const product = await this.productModel.findById(id);
+    if (!product) throw new NotFoundException('Product not found');
+
+    // ===== 1. HANDLE IMAGE DELETE =====
+    if (dto.images) {
+      const oldImages = product.images || [];
+      const newImages = dto.images || [];
+
+      const newPublicIds = newImages.map((img) => img.publicId);
+
+      const removedImages = oldImages.filter(
+        (img) => !newPublicIds.includes(img.publicId),
+      );
+
+      // delete removed images from Cloudinary
+      await Promise.all(
+        removedImages.map((img) =>
+          this.uploadService.deleteImage(img.publicId),
+        ),
+      );
+    }
+
+    // ===== 2. HANDLE VARIANTS (nếu có) =====
+    if (dto.variants?.length) {
+      this.validateUniqueSku(dto.variants);
+      dto.totalStock = this.calculateTotalStock(dto.variants);
+    }
+
+    // ===== 3. UPDATE DB =====
+    const updatedProduct = await this.productModel.findByIdAndUpdate(id, dto, {
+      new: true,
+    });
+
+    return updatedProduct;
+  }
+
   async remove(id: string) {
-    return this.productModel.findByIdAndDelete(id);
+    const product = await this.productModel.findById(id);
+    if (!product) throw new NotFoundException('Product not found');
+
+    return product.deleteOne();
   }
 
   async findBySlug(slug: string) {
@@ -39,46 +119,33 @@ export class ProductsService {
       .populate('categoryId')
       .populate('brandId');
 
-    if (!product) throw new NotFoundException('Product not found');
+    if (!product) {
+      throw new NotFoundException('Product not found');
+    }
+
     return product;
   }
 
-  async findAll(query: any) {
-    const { page = 1, limit = 10, category, brand, sort } = query;
-
-    const filter: any = { status: 'active' };
-    if (category) filter.categoryId = category;
-    if (brand) filter.brandId = brand;
-
-    // ✅ KHAI BÁO 1 LẦN DUY NHẤT
-    let sortOption: Record<string, SortOrder> = {
-      createdAt: -1,
-    };
-
-    if (sort === 'price_asc') {
-      sortOption = { 'variants.price': 1 };
+  async removeImage(productId: string, publicId: string) {
+    const product = await this.productModel.findById(productId);
+    if (!product) {
+      throw new NotFoundException('Product not found');
     }
 
-    if (sort === 'price_desc') {
-      sortOption = { 'variants.price': -1 };
+    const imageExists = product.images.some((img) => img.publicId === publicId);
+
+    if (!imageExists) {
+      throw new BadRequestException('Image not found in product');
     }
 
-    const skip = (Number(page) - 1) * Number(limit);
+    // 1. Delete image from Cloudinary
+    await this.uploadService.deleteImage(publicId);
 
-    const [items, total] = await Promise.all([
-      this.productModel
-        .find(filter)
-        .sort(sortOption)
-        .skip(skip)
-        .limit(Number(limit)),
-      this.productModel.countDocuments(filter),
-    ]);
+    // 2. Remove image from DB
+    product.images = product.images.filter((img) => img.publicId !== publicId);
 
-    return {
-      items,
-      total,
-      page: Number(page),
-      totalPages: Math.ceil(total / Number(limit)),
-    };
+    await product.save();
+
+    return product;
   }
 }

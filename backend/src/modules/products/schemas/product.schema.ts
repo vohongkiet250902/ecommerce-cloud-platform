@@ -1,30 +1,8 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Types } from 'mongoose';
-
-@Schema()
-export class ProductVariant {
-  @Prop({ required: true })
-  sku: string;
-
-  @Prop({ type: Map, of: String })
-  attributes: {
-    color?: string;
-    ram?: string;
-    storage?: string;
-    version?: string;
-  };
-
-  @Prop({ required: true })
-  price: number;
-
-  @Prop({ default: 0 })
-  stock: number;
-}
-
-const ProductVariantSchema = SchemaFactory.createForClass(ProductVariant);
+import { Document, Types } from 'mongoose';
 
 @Schema({ timestamps: true })
-export class Product {
+export class Product extends Document {
   @Prop({ required: true })
   name: string;
 
@@ -32,7 +10,7 @@ export class Product {
   slug: string;
 
   @Prop()
-  description?: string;
+  description: string;
 
   @Prop({ type: Types.ObjectId, ref: 'Category', required: true })
   categoryId: Types.ObjectId;
@@ -40,22 +18,40 @@ export class Product {
   @Prop({ type: Types.ObjectId, ref: 'Brand', required: true })
   brandId: Types.ObjectId;
 
-  @Prop({ type: [ProductVariantSchema], default: [] })
-  variants: ProductVariant[];
+  @Prop({
+    type: [
+      {
+        url: String,
+        publicId: String,
+      },
+    ],
+    default: [],
+  })
+  images: {
+    url: string;
+    publicId: string;
+  }[];
 
-  @Prop({ type: Map, of: String })
-  specifications?: Record<string, string>;
+  @Prop({
+    type: [
+      {
+        sku: { type: String, required: true },
+        color: String,
+        storage: String,
+        ram: String,
+        price: { type: Number, required: true },
+        stock: { type: Number, default: 0 },
+        status: { type: String, default: 'active' },
+      },
+    ],
+    default: [],
+  })
+  variants: any[];
 
-  @Prop({ type: [String], default: [] })
-  images: string[];
+  @Prop({ default: 0 })
+  totalStock: number;
 
-  @Prop()
-  warranty?: string;
-
-  @Prop()
-  brandCountry?: string;
-
-  @Prop({ default: 'active', enum: ['active', 'hidden'] })
+  @Prop({ default: 'active' })
   status: string;
 }
 
