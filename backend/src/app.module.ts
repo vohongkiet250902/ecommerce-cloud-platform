@@ -11,6 +11,7 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { LoggerMiddleware } from './common/middleware/logger.middleware';
 import { CategoriesModule } from './modules/categories/categories.module';
 import { BrandsModule } from './modules/brands/brands.module';
+import { PaymentsModule } from './modules/payments/payments.module';
 
 @Module({
   imports: [
@@ -29,6 +30,7 @@ import { BrandsModule } from './modules/brands/brands.module';
     }),
     CategoriesModule,
     BrandsModule,
+    PaymentsModule,
   ],
   controllers: [AppController],
   providers: [AppService],
