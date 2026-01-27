@@ -1,40 +1,14 @@
-import {
-  Controller,
-  Get,
-  Param,
-  Patch,
-  Delete,
-  UseGuards,
-  Body,
-} from '@nestjs/common';
-import { UsersService } from './users.service';
+import { Controller, Get, UseGuards, Req } from '@nestjs/common';
 import { JwtGuard } from '../../common/guards/jwt.guard';
-import { RolesGuard } from '../../common/guards/roles.guard';
-import { Roles } from '../../common/decorators/roles.decorator';
+import { UsersService } from './users.service';
 
-@Controller('admin/users')
-@UseGuards(JwtGuard, RolesGuard)
-@Roles('admin')
+@Controller('users')
+@UseGuards(JwtGuard)
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
-  @Get()
-  findAll() {
-    return this.usersService.findAll();
-  }
-
-  @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.usersService.findOne(id);
-  }
-
-  @Patch(':id')
-  update(@Param('id') id: string, @Body() dto: any) {
-    return this.usersService.update(id, dto);
-  }
-
-  @Delete(':id')
-  remove(@Param('id') id: string) {
-    return this.usersService.remove(id);
+  @Get('me')
+  getMe(@Req() req: any) {
+    return this.usersService.findById(req.user.id);
   }
 }
