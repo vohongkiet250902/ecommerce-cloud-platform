@@ -1,8 +1,12 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Types } from 'mongoose';
+import { Types, Document } from 'mongoose';
 
-@Schema({ timestamps: true })
-export class Category {
+@Schema({
+  timestamps: true,
+  toJSON: { virtuals: true },
+  toObject: { virtuals: true },
+})
+export class Category extends Document {
   @Prop({ required: true })
   name: string;
 
@@ -17,3 +21,9 @@ export class Category {
 }
 
 export const CategorySchema = SchemaFactory.createForClass(Category);
+
+CategorySchema.virtual('children', {
+  ref: 'Category',
+  localField: '_id',
+  foreignField: 'parentId',
+});

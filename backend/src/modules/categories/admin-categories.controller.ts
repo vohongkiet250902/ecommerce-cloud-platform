@@ -6,11 +6,14 @@ import {
   Post,
   Put,
   UseGuards,
+  UsePipes,
+  ValidationPipe,
 } from '@nestjs/common';
 import { CategoriesService } from './categories.service';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { JwtGuard } from '../../common/guards/jwt.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
+import { CreateCategoryDto } from './dto/create-category.dto';
 
 @Roles('admin')
 @UseGuards(JwtGuard, RolesGuard)
@@ -19,7 +22,8 @@ export class AdminCategoriesController {
   constructor(private readonly categoriesService: CategoriesService) {}
 
   @Post()
-  create(@Body() dto: any) {
+  @UsePipes(new ValidationPipe({ whitelist: true }))
+  create(@Body() dto: CreateCategoryDto) {
     return this.categoriesService.create(dto);
   }
 
