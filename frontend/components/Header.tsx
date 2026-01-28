@@ -2,11 +2,22 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { Search, ShoppingCart, User, Menu, X, Moon, Sun } from "lucide-react";
+import { Search, ShoppingCart, User, Menu, X, Moon, Sun, LogOut, ChevronDown } from "lucide-react";
+import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { motion, AnimatePresence } from "framer-motion";
+import { useAuth } from "@/hooks/useAuth";
+import { useRouter } from "next/navigation";
 
 interface HeaderProps {
   cartItemCount?: number;
@@ -37,10 +48,16 @@ export default function Header({
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [showSuggestions, setShowSuggestions] = useState(false);
+  const { user, isAuthenticated, signOut } = useAuth();
+  const router = useRouter();
 
   const filteredSuggestions = searchSuggestions.filter((item) =>
     item.toLowerCase().includes(searchQuery.toLowerCase())
   );
+
+  const handleLogout = async () => {
+    await signOut();
+  };
 
   return (
     <header className="sticky top-0 z-50 bg-background/95 backdrop-blur-md border-b border-border">
@@ -128,14 +145,57 @@ export default function Header({
               )}
             </Button>
 
-            {/* Account */}
-            <Button
-              variant="ghost"
-              size="icon"
-              className="rounded-full hidden sm:flex"
-            >
-              <User className="w-5 h-5" />
-            </Button>
+            {/* Account/User Menu */}
+            {isAuthenticated && user ? (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" className="gap-2 pl-2 pr-3 hidden sm:flex">
+                    <Avatar className="h-8 w-8">
+                      <AvatarImage src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${user.email}`} />
+                      <AvatarFallback>{user.fullName?.substring(0, 2).toUpperCase() || 'U'}</AvatarFallback>
+                    </Avatar>
+                    <div className="flex flex-col items-start text-left hidden sm:flex">
+                      <span className="text-sm font-medium">{user.fullName}</span>
+                      <span className="text-xs text-muted-foreground">
+                        {user.email}
+                      </span>
+                    </div>
+                    <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent
+                  align="end"
+                  className="w-56 dropdown-content"
+                >
+                  <DropdownMenuLabel className="flex items-center justify-between">
+                    <span>Tài khoản</span>
+                  </DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={() => router.push("/account")}>
+                    <User className="mr-2 h-4 w-4" />
+                    Hồ sơ cá nhân
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => router.push("/orders")}>
+                    <ShoppingCart className="mr-2 h-4 w-4" />
+                    Đơn hàng của tôi
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={handleLogout} className="text-destructive">
+                    <LogOut className="mr-2 h-4 w-4" />
+                    Đăng xuất
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            ) : (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="rounded-full hidden sm:flex"
+                onClick={() => router.push("/auth")}
+              >
+                <User className="w-5 h-5" />
+              </Button>
+            )}
 
             {/* Cart */}
             <Button
@@ -203,14 +263,47 @@ export default function Header({
                 </Link>
               ))}
 
-              <Link
-                href="/account"
-                className="nav-link py-3 px-4 rounded-lg hover:bg-accent flex items-center gap-2"
-                onClick={() => setIsMenuOpen(false)}
-              >
-                <User className="w-4 h-4" />
-                Tài khoản
-              </Link>
+              {isAuthenticated && user ? (
+                <>
+                  <Link
+                    href="/account"
+                    className="nav-link py-3 px-4 rounded-lg hover:bg-accent flex items-center gap-2"
+                    onClick={() => setIsMenuOpen(false)}
+                  >
+                    <User className="w-4 h-4" />
+                    Tài khoản ({user.role})
+                  </Link>
+                  {user.role === 'admin' && (
+                    <Link
+                      href="/admin"
+                      className="nav-link py-3 px-4 rounded-lg hover:bg-accent flex items-center gap-2"
+                      onClick={() => setIsMenuOpen(false)}
+                    >
+                      <User className="w-4 h-4" />
+                      Bảng điều khiển Admin
+                    </Link>
+                  )}
+                  <button
+                    className="nav-link py-3 px-4 rounded-lg hover:bg-accent flex items-center gap-2 w-full text-left text-destructive"
+                    onClick={() => {
+                      handleLogout();
+                      setIsMenuOpen(false);
+                    }}
+                  >
+                    <LogOut className="w-4 h-4" />
+                    Đăng xuất
+                  </button>
+                </>
+              ) : (
+                <Link
+                  href="/auth"
+                  className="nav-link py-3 px-4 rounded-lg hover:bg-accent flex items-center gap-2"
+                  onClick={() => setIsMenuOpen(false)}
+                >
+                  <User className="w-4 h-4" />
+                  Đăng nhập
+                </Link>
+              )}
             </nav>
           </motion.div>
         )}

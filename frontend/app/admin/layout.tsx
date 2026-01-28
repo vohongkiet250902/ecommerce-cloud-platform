@@ -1,8 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useRouter } from "next/navigation";
+import { useAuth } from "@/hooks/useAuth";
+import { Loader2, Sun, Moon } from "lucide-react";
 import {
   LayoutDashboard,
   Package,
@@ -115,7 +118,65 @@ export default function AdminLayout({
 }: {
   children: React.ReactNode;
 }) {
+  const router = useRouter();
+  const { user, isAuthenticated, loading, signOut } = useAuth();
   const [collapsed, setCollapsed] = useState(false);
+  const [isDarkMode, setIsDarkMode] = useState(() => {
+    // Initialize state from localStorage or system preference
+    const savedTheme = typeof window !== "undefined" ? localStorage.getItem("theme") : null;
+    const prefersDark = typeof window !== "undefined" ? window.matchMedia("(prefers-color-scheme: dark)").matches : false;
+    return savedTheme === "dark" || (!savedTheme && prefersDark);
+  });
+
+  useEffect(() => {
+    // Apply theme to DOM
+    if (isDarkMode) {
+      document.documentElement.classList.add("dark");
+      localStorage.setItem("theme", "dark");
+    } else {
+      document.documentElement.classList.remove("dark");
+      localStorage.setItem("theme", "light");
+    }
+  }, [isDarkMode]);
+
+  const toggleDarkMode = () => {
+    setIsDarkMode((prev) => !prev);
+  };
+
+  // Kiểm tra auth và redirect nếu cần
+  useEffect(() => {
+    if (loading) return; // Đang load, chờ
+
+    if (!isAuthenticated || !user) {
+      // Chưa login, redirect về auth
+      router.push('/auth');
+      return;
+    }
+
+    if (user.role !== 'admin') {
+      // Không phải admin, redirect về home
+      router.push('/');
+      return;
+    }
+  }, [loading, isAuthenticated, user, router]);
+
+  // Nếu đang load, hiển thị spinner
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    );
+  }
+
+  // Nếu chưa login hoặc không phải admin, đừng render gì
+  if (!isAuthenticated || !user || user.role !== 'admin') {
+    return null;
+  }
+
+  const handleLogout = async () => {
+    await signOut();
+  };
 
   return (
     <TooltipProvider delayDuration={0}>
@@ -203,6 +264,19 @@ export default function AdminLayout({
 
             {/* Right Actions */}
             <div className="flex items-center gap-2">
+              {/* Dark Mode Toggle */}
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={toggleDarkMode}
+              className="rounded-full"
+            >
+              {isDarkMode ? (
+                <Sun className="w-5 h-5" />
+              ) : (
+                <Moon className="w-5 h-5" />
+              )}
+            </Button>
               {/* Notifications */}
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
@@ -252,13 +326,13 @@ export default function AdminLayout({
                 <DropdownMenuTrigger asChild>
                   <Button variant="ghost" className="gap-2 pl-2 pr-3">
                     <Avatar className="h-8 w-8">
-                      <AvatarImage src="https://api.dicebear.com/7.x/avataaars/svg?seed=admin" />
-                      <AvatarFallback>AD</AvatarFallback>
+                      <AvatarImage src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${user.email}`} />
+                      <AvatarFallback>{user.fullName?.substring(0, 2).toUpperCase() || 'AD'}</AvatarFallback>
                     </Avatar>
                     <div className="flex flex-col items-start text-left hidden sm:flex">
-                      <span className="text-sm font-medium">Admin User</span>
+                      <span className="text-sm font-medium">{user.fullName}</span>
                       <span className="text-xs text-muted-foreground">
-                        admin@gmail.com
+                        {user.email}
                       </span>
                     </div>
                     <ChevronDown className="h-4 w-4 text-muted-foreground" />
@@ -272,14 +346,14 @@ export default function AdminLayout({
                   <DropdownMenuSeparator />
                   <DropdownMenuItem>
                     <User className="mr-2 h-4 w-4" />
-                    Hồ sơ
+                    Hồ sơ cá nhân
                   </DropdownMenuItem>
                   <DropdownMenuItem>
                     <Settings className="mr-2 h-4 w-4" />
                     Cài đặt
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
-                  <DropdownMenuItem className="text-destructive">
+                  <DropdownMenuItem onClick={handleLogout} className="text-destructive">
                     <LogOut className="mr-2 h-4 w-4" />
                     Đăng xuất
                   </DropdownMenuItem>

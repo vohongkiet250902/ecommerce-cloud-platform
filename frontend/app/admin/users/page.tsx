@@ -1,13 +1,14 @@
 "use client";
 
+import { useState, useEffect } from "react";
 import {
-  Plus,
   MoreHorizontal,
   Shield,
   ShieldOff,
   Eye,
   Ban,
   CheckCircle,
+  Loader2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -21,90 +22,22 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
+import { usersApi } from "@/services/api";
+import { useToast } from "@/hooks/use-toast";
 
 /* ===================== TYPES ===================== */
 interface User {
-  id: string;
+  _id: string;
   name: string;
   email: string;
-  phone: string;
+  phone?: string;
   avatar?: string;
   role: "user" | "staff" | "admin";
   status: "active" | "blocked";
-  orders: number;
-  totalSpent: number;
+  orders?: number;
+  totalSpent?: number;
   createdAt: string;
 }
-
-/* ===================== MOCK DATA ===================== */
-const users: User[] = [
-  {
-    id: "USR001",
-    name: "Nguyễn Văn A",
-    email: "nguyenvana@email.com",
-    phone: "0901234567",
-    role: "user",
-    status: "active",
-    orders: 15,
-    totalSpent: 125990000,
-    createdAt: "2023-06-15",
-  },
-  {
-    id: "USR002",
-    name: "Trần Thị B",
-    email: "tranthib@email.com",
-    phone: "0912345678",
-    role: "staff",
-    status: "active",
-    orders: 0,
-    totalSpent: 0,
-    createdAt: "2023-08-20",
-  },
-  {
-    id: "USR003",
-    name: "Lê Văn C",
-    email: "levanc@email.com",
-    phone: "0923456789",
-    role: "user",
-    status: "blocked",
-    orders: 3,
-    totalSpent: 15990000,
-    createdAt: "2023-09-10",
-  },
-  {
-    id: "USR004",
-    name: "Phạm Thị D",
-    email: "phamthid@email.com",
-    phone: "0934567890",
-    role: "admin",
-    status: "active",
-    orders: 0,
-    totalSpent: 0,
-    createdAt: "2023-01-05",
-  },
-  {
-    id: "USR005",
-    name: "Hoàng Văn E",
-    email: "hoangvane@email.com",
-    phone: "0945678901",
-    role: "user",
-    status: "active",
-    orders: 8,
-    totalSpent: 67990000,
-    createdAt: "2023-11-22",
-  },
-  {
-    id: "USR006",
-    name: "Vũ Thị F",
-    email: "vuthif@email.com",
-    phone: "0956789012",
-    role: "user",
-    status: "blocked",
-    orders: 22,
-    totalSpent: 234990000,
-    createdAt: "2022-12-10",
-  },
-];
 
 /* ===================== CONFIG ===================== */
 const roleConfig = {
@@ -132,6 +65,32 @@ const formatPrice = (price: number) =>
 
 /* ===================== PAGE ===================== */
 export default function UsersPage() {
+  const { toast } = useToast();
+  const [users, setUsers] = useState<User[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [updating, setUpdating] = useState<string | null>(null);
+
+  // Fetch users on mount
+  useEffect(() => {
+    const fetchUsers = async () => {
+      try {
+        setLoading(true);
+        const response = await usersApi.getUsers();
+        const data = response.data.data || response.data;
+        setUsers(Array.isArray(data) ? data : []);
+      } catch (error) {
+        toast({
+          title: "❌ Lỗi",
+          description: "Không thể tải danh sách người dùng",
+          variant: "destructive",
+        });
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchUsers();
+  }, [toast]);
   const columns = [
     {
       key: "name",
@@ -140,7 +99,7 @@ export default function UsersPage() {
         <div className="flex items-center gap-3">
           <Avatar className="h-10 w-10">
             <AvatarImage
-              src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${user.id}`}
+              src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${user._id}`}
             />
             <AvatarFallback>{user.name.charAt(0)}</AvatarFallback>
           </Avatar>
@@ -154,7 +113,7 @@ export default function UsersPage() {
     {
       key: "phone",
       header: "Điện thoại",
-      render: (user: User) => <span>{user.phone}</span>,
+      render: (user: User) => <span>{user.phone || "-"}</span>,
     },
     {
       key: "role",
@@ -174,14 +133,14 @@ export default function UsersPage() {
     {
       key: "orders",
       header: "Đơn hàng",
-      render: (user: User) => <span>{user.orders}</span>,
+      render: (user: User) => <span>{user.orders ?? 0}</span>,
     },
     {
       key: "totalSpent",
       header: "Tổng chi tiêu",
       render: (user: User) => (
         <span className="font-medium">
-          {user.totalSpent > 0 ? formatPrice(user.totalSpent) : "-"}
+          {user.totalSpent && user.totalSpent > 0 ? formatPrice(user.totalSpent) : "-"}
         </span>
       ),
     },
@@ -261,10 +220,6 @@ export default function UsersPage() {
           <h1 className="text-2xl font-bold text-foreground">Người dùng</h1>
           <p className="text-muted-foreground">Quản lý tài khoản người dùng</p>
         </div>
-        <Button>
-          <Plus className="h-4 w-4 mr-2" />
-          Thêm người dùng
-        </Button>
       </div>
 
       {/* Stats */}
@@ -294,12 +249,18 @@ export default function UsersPage() {
       </div>
 
       {/* Table */}
-      <DataTable<User>
-        data={users}
-        columns={columns}
-        searchPlaceholder="Tìm kiếm người dùng..."
-        searchKey="name"
-      />
+      {loading ? (
+        <div className="flex items-center justify-center py-10">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        </div>
+      ) : (
+        <DataTable<User>
+          data={users}
+          columns={columns}
+          searchPlaceholder="Tìm kiếm người dùng..."
+          searchKey="name"
+        />
+      )}
     </div>
   );
 }
