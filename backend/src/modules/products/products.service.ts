@@ -5,7 +5,7 @@ import {
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
-import { Product } from './schemas/product.schema';
+import { Product, ProductVariant } from './schemas/product.schema';
 import { UploadService } from '../upload/upload.service';
 
 @Injectable()
@@ -18,7 +18,7 @@ export class ProductsService {
 
   /* ================== PRIVATE HELPERS ================== */
 
-  private validateUniqueSku(variants: any[]) {
+  private validateUniqueSku(variants: ProductVariant[]) {
     const skus = variants.map((v) => v.sku);
     const unique = new Set(skus);
 
@@ -27,10 +27,9 @@ export class ProductsService {
     }
   }
 
-  private calculateTotalStock(variants: any[] = []) {
+  private calculateTotalStock(variants: ProductVariant[] = []) {
     return variants.reduce((sum, v) => sum + (v.stock || 0), 0);
   }
-
   /* ================== CRUD ================== */
 
   async create(dto: any) {
@@ -41,14 +40,26 @@ export class ProductsService {
 
     const exists = await this.productModel.findOne({ slug: dto.slug });
     if (exists) throw new BadRequestException('Slug already exists');
-
     return this.productModel.create(dto);
   }
 
   async findAll(query: any) {
-    const { page = 1, limit = 10, categoryId, brandId, keyword } = query;
+    // 1. Tách các tham số đặc biệt (System params)
+    const {
+      page = 1,
+      limit = 10,
+      categoryId,
+      brandId,
+      keyword,
+      minPrice,
+      maxPrice,
+      sort, // Thêm sort nếu cần
+      ...filterParams // Tất cả những cái còn lại sẽ được coi là Attributes (RAM, CPU, Color...)
+    } = query;
 
     const filter: any = {};
+
+    // 2. Các bộ lọc cơ bản (Giữ nguyên)
     if (categoryId) filter.categoryId = categoryId;
     if (brandId) filter.brandId = brandId;
 
@@ -56,11 +67,46 @@ export class ProductsService {
       filter.$text = { $search: keyword };
     }
 
+    if (minPrice || maxPrice) {
+      filter['variants.price'] = {};
+      if (minPrice) filter['variants.price'].$gte = +minPrice;
+      if (maxPrice) filter['variants.price'].$lte = +maxPrice;
+    }
+
+    // === 3. LOGIC MỚI: Xử lý Dynamic Attributes ===
+    // Mục tiêu: Biến ?RAM=16GB thành query tìm trong variants.attributes
+
+    const attributeQueries: any[] = [];
+
+    Object.keys(filterParams).forEach((key) => {
+      // Bỏ qua nếu lỡ còn sót các key hệ thống
+      if (['sort', 'page', 'limit'].includes(key)) return;
+
+      const value = filterParams[key];
+
+      if (value) {
+        attributeQueries.push({
+          'variants.attributes': {
+            $elemMatch: {
+              key: key,
+              value: value,
+            },
+          },
+        });
+      }
+    });
+
+    // Nếu có attribute queries, dùng $and
+    if (attributeQueries.length > 0) {
+      filter.$and = attributeQueries;
+    }
+
+    // 4. Thực thi
     return this.productModel
       .find(filter)
       .skip((+page - 1) * +limit)
       .limit(+limit)
-      .sort({ createdAt: -1 });
+      .sort({ createdAt: -1 }); // Hoặc xử lý biến sort động
   }
 
   async findOne(id: string) {
@@ -98,12 +144,7 @@ export class ProductsService {
       dto.totalStock = this.calculateTotalStock(dto.variants);
     }
 
-    // ===== 3. UPDATE DB =====
-    const updatedProduct = await this.productModel.findByIdAndUpdate(id, dto, {
-      new: true,
-    });
-
-    return updatedProduct;
+    return this.productModel.findByIdAndUpdate(id, dto, { new: true });
   }
 
   async remove(id: string) {

@@ -1,14 +1,19 @@
-import { IsNotEmpty, IsString, Matches } from 'class-validator';
+import { IsNotEmpty, IsString, IsOptional, IsArray } from 'class-validator';
 export class CreateCategoryDto {
-  @IsNotEmpty({ message: 'Tên danh mục không được để trống' })
+  @IsNotEmpty()
   @IsString()
   name: string;
 
-  @IsNotEmpty({ message: 'Slug không được để trống' })
+  @IsNotEmpty()
   @IsString()
-  // Regex khớp với logic validate ở FE: chỉ chữ thường, số và gạch ngang
-  @Matches(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, {
-    message: 'Slug chỉ chứa ký tự thường, số và dấu gạch ngang',
-  })
   slug: string;
+
+  @IsOptional()
+  parentId?: string;
+
+  // Thêm trường này
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true }) // Kiểm tra từng phần tử trong mảng là string
+  filterableAttributes?: string[];
 }

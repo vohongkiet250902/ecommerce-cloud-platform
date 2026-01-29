@@ -16,6 +16,12 @@ export class Category extends Document {
   @Prop({ type: Types.ObjectId, ref: 'Category', default: null })
   parentId: Types.ObjectId | null;
 
+  // Định nghĩa những thuộc tính nào sẽ hiển thị trên bộ lọc tìm kiếm
+  // Ví dụ với Laptop: ['RAM', 'CPU', 'Ổ cứng', 'Màn hình']
+  // Ví dụ với Áo: ['Size', 'Màu sắc', 'Chất liệu']
+  @Prop({ type: [String], default: [] })
+  filterableAttributes: string[];
+
   @Prop({ default: true })
   isActive: boolean;
 }

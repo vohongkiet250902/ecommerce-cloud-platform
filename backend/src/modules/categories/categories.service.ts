@@ -22,7 +22,8 @@ export class CategoriesService {
     return this.categoryModel.create({
       name: dto.name,
       slug: dto.slug,
-      parentId: null,
+      parentId: dto.parentId || null,
+      filterableAttributes: dto.filterableAttributes || [], // Lưu vào DB
     });
   }
 
@@ -31,6 +32,7 @@ export class CategoriesService {
       name: dto.name,
       slug: dto.slug,
       isActive: dto.isActive,
+      filterableAttributes: dto.filterableAttributes,
     };
 
     const category = await this.categoryModel.findByIdAndUpdate(
