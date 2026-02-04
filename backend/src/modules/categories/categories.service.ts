@@ -143,15 +143,18 @@ export class CategoriesService {
       throw new BadRequestException('id không hợp lệ');
     }
 
-    const hasChildren = await this.categoryModel.findOne({ parentId: id });
+    const oid = new Types.ObjectId(id);
+
+    const hasChildren = await this.categoryModel.exists({ parentId: oid });
     if (hasChildren) {
       throw new BadRequestException(
         'Không thể xóa danh mục đang chứa danh mục con',
       );
     }
 
-    const deleted = await this.categoryModel.findByIdAndDelete(id);
+    const deleted = await this.categoryModel.findByIdAndDelete(oid);
     if (!deleted) throw new NotFoundException('Không tìm thấy danh mục');
+
     return deleted;
   }
 
