@@ -14,6 +14,7 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { JwtGuard } from '../../common/guards/jwt.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { CreateCategoryDto } from './dto/create-category.dto';
+import { UpdateCategoryDto } from './dto/update-category.dto';
 
 @Roles('admin')
 @UseGuards(JwtGuard, RolesGuard)
@@ -28,7 +29,8 @@ export class AdminCategoriesController {
   }
 
   @Put(':id')
-  update(@Param('id') id: string, @Body() dto: any) {
+  @UsePipes(new ValidationPipe({ whitelist: true }))
+  update(@Param('id') id: string, @Body() dto: UpdateCategoryDto) {
     return this.categoriesService.update(id, dto);
   }
 
