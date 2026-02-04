@@ -19,20 +19,23 @@ export class CategoriesService {
     const exists = await this.categoryModel.findOne({ slug: dto.slug });
     if (exists) throw new BadRequestException('Slug đã tồn tại');
 
-    // Nếu có parentId thì validate parent tồn tại
+    let parentId: Types.ObjectId | null = null;
+
     if (dto.parentId) {
-      if (!Types.ObjectId.isValid(dto.parentId as any)) {
+      if (!Types.ObjectId.isValid(dto.parentId)) {
         throw new BadRequestException('parentId không hợp lệ');
       }
 
       const parent = await this.categoryModel.findById(dto.parentId);
       if (!parent) throw new BadRequestException('parentId không tồn tại');
+
+      parentId = new Types.ObjectId(dto.parentId); // ✅ ép kiểu
     }
 
     return this.categoryModel.create({
       name: dto.name,
       slug: dto.slug,
-      parentId: dto.parentId || null,
+      parentId, // ✅ ObjectId hoặc null
       filterableAttributes: dto.filterableAttributes || [],
     });
   }

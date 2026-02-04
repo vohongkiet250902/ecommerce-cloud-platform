@@ -1,12 +1,10 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Types, Document } from 'mongoose';
+import { HydratedDocument, Types } from 'mongoose';
 
-@Schema({
-  timestamps: true,
-  toJSON: { virtuals: true },
-  toObject: { virtuals: true },
-})
-export class Category extends Document {
+export type CategoryDocument = HydratedDocument<Category>;
+
+@Schema({ timestamps: true })
+export class Category {
   @Prop({ required: true })
   name: string;
 
@@ -16,9 +14,6 @@ export class Category extends Document {
   @Prop({ type: Types.ObjectId, ref: 'Category', default: null })
   parentId: Types.ObjectId | null;
 
-  // Định nghĩa những thuộc tính nào sẽ hiển thị trên bộ lọc tìm kiếm
-  // Ví dụ với Laptop: ['RAM', 'CPU', 'Ổ cứng', 'Màn hình']
-  // Ví dụ với Áo: ['Size', 'Màu sắc', 'Chất liệu']
   @Prop({ type: [String], default: [] })
   filterableAttributes: string[];
 
@@ -28,8 +23,13 @@ export class Category extends Document {
 
 export const CategorySchema = SchemaFactory.createForClass(Category);
 
+// ✅ virtual children
 CategorySchema.virtual('children', {
   ref: 'Category',
   localField: '_id',
   foreignField: 'parentId',
 });
+
+// ✅ quan trọng: bật virtuals khi trả JSON
+CategorySchema.set('toJSON', { virtuals: true });
+CategorySchema.set('toObject', { virtuals: true });

@@ -1,4 +1,11 @@
-import { IsNotEmpty, IsString, IsOptional, IsArray } from 'class-validator';
+import {
+  IsArray,
+  IsMongoId,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+} from 'class-validator';
+
 export class CreateCategoryDto {
   @IsNotEmpty()
   @IsString()
@@ -9,11 +16,11 @@ export class CreateCategoryDto {
   slug: string;
 
   @IsOptional()
+  @IsMongoId()
   parentId?: string;
 
-  // Thêm trường này
   @IsOptional()
   @IsArray()
-  @IsString({ each: true }) // Kiểm tra từng phần tử trong mảng là string
+  @IsString({ each: true })
   filterableAttributes?: string[];
 }
