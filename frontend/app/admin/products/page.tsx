@@ -160,7 +160,6 @@ export default function ProductsPage() {
           categoryApi.getCategories(),
           brandApi.getBrands(),
         ]);
-
         setProducts(productsRes.data.data || productsRes.data);
         setCategories(categoriesRes.data.data || categoriesRes.data);
         setBrands(brandsRes.data.data || brandsRes.data);
@@ -405,8 +404,8 @@ export default function ProductsPage() {
           searchKey="name"
           searchPlaceholder="Tìm kiếm sản phẩm..."
         />
-      )}
-
+      )} 
+      
       {/* Add Product Modal */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">

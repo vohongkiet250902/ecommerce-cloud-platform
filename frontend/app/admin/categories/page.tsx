@@ -1,6 +1,6 @@
-'use client';
+"use client";
 
-import { useState, useEffect } from 'react';
+import { useEffect, useState, useRef } from "react";
 import {
   Plus,
   Edit,
@@ -10,193 +10,127 @@ import {
   ChevronRight,
   Loader2,
   X,
-} from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
+} from "lucide-react";
+import { useDispatch, useSelector } from "react-redux";
+
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { cn } from '@/lib/utils';
-import { categoryApi } from '@/services/api';
-import { useToast } from '@/hooks/use-toast';
+} from "@/components/ui/dropdown-menu";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { cn } from "@/lib/utils";
+import { useToast } from "@/hooks/use-toast";
 
+import { RootState, AppDispatch } from "@/store";
+import { fetchCategoriesThunk } from "@/store/categories/categories.slice";
+import { categoryApi } from "@/services/api";
+
+/* ===================== TYPES ===================== */
 interface Category {
-  id: string;
+  _id: string;
   name: string;
   slug: string;
-  productCount?: number;
   parentId?: string | null;
+  productCount?: number;
   children?: Category[];
 }
 
-interface FormData {
-  name: string;
-  slug: string;
-}
-
-// Generate slug from name
-function generateSlug(name: string): string {
-  const vietnameseMap: Record<string, string> = {
-    à: 'a',
-    á: 'a',
-    ạ: 'a',
-    ả: 'a',
-    ã: 'a',
-    â: 'a',
-    ầ: 'a',
-    ấ: 'a',
-    ậ: 'a',
-    ẩ: 'a',
-    ẫ: 'a',
-    ă: 'a',
-    ằ: 'a',
-    ắ: 'a',
-    ặ: 'a',
-    ẳ: 'a',
-    ẵ: 'a',
-    è: 'e',
-    é: 'e',
-    ẹ: 'e',
-    ẻ: 'e',
-    ẽ: 'e',
-    ê: 'e',
-    ề: 'e',
-    ế: 'e',
-    ệ: 'e',
-    ể: 'e',
-    ễ: 'e',
-    ì: 'i',
-    í: 'i',
-    ị: 'i',
-    ỉ: 'i',
-    ĩ: 'i',
-    ò: 'o',
-    ó: 'o',
-    ọ: 'o',
-    ỏ: 'o',
-    õ: 'o',
-    ô: 'o',
-    ồ: 'o',
-    ố: 'o',
-    ộ: 'o',
-    ổ: 'o',
-    ỗ: 'o',
-    ơ: 'o',
-    ờ: 'o',
-    ớ: 'o',
-    ợ: 'o',
-    ở: 'o',
-    ỡ: 'o',
-    ù: 'u',
-    ú: 'u',
-    cụ: 'u',
-    ủ: 'u',
-    ũ: 'u',
-    ư: 'u',
-    ừ: 'u',
-    ứ: 'u',
-    ự: 'u',
-    ử: 'u',
-    ữ: 'u',
-    ỳ: 'y',
-    ý: 'y',
-    ỵ: 'y',
-    ỷ: 'y',
-    ỹ: 'y',
-    đ: 'd',
-    // ... (giữ nguyên map bảng chữ cái)
-  };
-
-  return name
+/* ===================== SLUG ===================== */
+const generateSlug = (value: string) =>
+  value
     .toLowerCase()
-    .split('')
-    .map((char) => vietnameseMap[char] || char)
-    .join('')
-    .replace(/[^\w\s-]/g, '')
-    .replace(/[\s_]+/g, '-')
-    .replace(/^-+|-+$/g, '');
-}
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/đ/g, "d")
+    .replace(/[^a-z0-9\s-]/g, "")
+    .trim()
+    .replace(/\s+/g, "-");
 
-interface CategoryItemProps {
+/* ===================== CATEGORY ITEM ===================== */
+interface ItemProps {
   category: Category;
   level?: number;
+  onEdit: (c: Category) => void;
+  onAddChild: (c: Category) => void;
   onDelete: (id: string) => void;
-  isDeleting: boolean;
+  deletingId: string | null;
 }
 
 const CategoryItem = ({
   category,
   level = 0,
+  onEdit,
+  onAddChild,
   onDelete,
-  isDeleting,
-}: CategoryItemProps) => {
-  const [deleteConfirm, setDeleteConfirm] = useState(false);
-
+  deletingId,
+}: ItemProps) => {
   return (
     <>
       <div
         className={cn(
-          'flex items-center justify-between p-4 hover:bg-secondary/30 transition-colors border-b border-border last:border-0',
-          level > 0 && 'bg-secondary/20',
+          "flex items-center justify-between p-4 hover:bg-secondary/30 transition-colors border-b border-border last:border-0",
+          level > 0 && "bg-secondary/20",
         )}
         style={{ paddingLeft: `${16 + level * 24}px` }}
       >
-        <div className='flex items-center gap-3'>
-          {category.children && category.children.length > 0 ? (
-            <ChevronRight className='h-4 w-4 text-muted-foreground' />
+        {/* LEFT */}
+        <div className="flex items-center gap-3">
+          {category.children?.length ? (
+            <ChevronRight className="h-4 w-4 text-muted-foreground" />
           ) : (
-            <div className='w-4' />
+            <div className="w-4" />
           )}
 
-          <FolderTree className='h-5 w-5 text-primary' />
+          <FolderTree className="h-5 w-5 text-primary" />
+
           <div>
-            <p className='font-medium text-foreground'>{category.name}</p>
-            <p className='text-sm text-muted-foreground'>/{category.slug}</p>
+            <p className="font-medium text-foreground">{category.name}</p>
+            <p className="text-sm text-muted-foreground">/{category.slug}</p>
           </div>
         </div>
 
-        <div className='flex items-center gap-4'>
-          <Badge variant='secondary' className='font-medium'>
-            {calculateProductCount(category)} sản phẩm
+        {/* RIGHT */}
+        <div className="flex items-center gap-4">
+          <Badge variant="secondary">
+            {category.productCount ?? 0} sản phẩm
           </Badge>
 
-          <DropdownMenu open={deleteConfirm} onOpenChange={setDeleteConfirm}>
+          <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant='ghost' size='icon-sm'>
-                <MoreHorizontal className='h-4 w-4' />
+              <Button variant="ghost" size="icon-sm">
+                <MoreHorizontal className="h-4 w-4" />
               </Button>
             </DropdownMenuTrigger>
 
-            <DropdownMenuContent align='end' className='dropdown-content'>
-              <DropdownMenuItem disabled>
-                <Edit className='mr-2 h-4 w-4' />
+            <DropdownMenuContent align="end" className="dropdown-content">
+              <DropdownMenuItem onSelect={() => onEdit(category)}>
+                <Edit className="mr-2 h-4 w-4" />
                 Chỉnh sửa
               </DropdownMenuItem>
-              <DropdownMenuItem disabled>
-                <Plus className='mr-2 h-4 w-4' />
-                Thêm danh mục con
-              </DropdownMenuItem>
+
+              {!category.parentId && (
+                <DropdownMenuItem onSelect={() => onAddChild(category)}>
+                  <Plus className="mr-2 h-4 w-4" />
+                  Thêm danh mục con
+                </DropdownMenuItem>
+              )}
+
               <DropdownMenuItem
-                className='text-destructive'
-                onClick={() => {
-                  if (deleteConfirm) {
-                    onDelete(category.id);
-                    setDeleteConfirm(false);
-                  }
-                }}
-                disabled={isDeleting}
+                className="text-destructive"
+                disabled={deletingId === category._id}
+                onClick={() => onDelete(category._id)}
               >
-                {isDeleting ? (
-                  <Loader2 className='mr-2 h-4 w-4 animate-spin' />
+                {deletingId === category._id ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                 ) : (
-                  <Trash2 className='mr-2 h-4 w-4' />
+                  <Trash2 className="mr-2 h-4 w-4" />
                 )}
-                {isDeleting ? 'Đang xóa...' : 'Xóa'}
+                Xóa
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -205,203 +139,416 @@ const CategoryItem = ({
 
       {category.children?.map((child) => (
         <CategoryItem
-          key={child.id}
+          key={child._id}
           category={child}
           level={level + 1}
-          onDelete={onDelete}
-          isDeleting={isDeleting}
+          {...{ onEdit, onAddChild, onDelete, deletingId }}
         />
       ))}
     </>
   );
 };
 
-function calculateProductCount(category: Category): number {
-  if (!category.children || category.children.length === 0) {
-    return category.productCount ?? 0;
-  }
-  return category.children.reduce(
-    (sum, child) => sum + calculateProductCount(child),
-    0,
-  );
-}
-
+/* ===================== PAGE ===================== */
 export default function CategoriesPage() {
+  const dispatch = useDispatch<AppDispatch>();
   const { toast } = useToast();
-  const [categories, setCategories] = useState<Category[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [submitting, setSubmitting] = useState(false);
+
+  const { data: categories, loading } = useSelector(
+    (state: RootState) => state.categories,
+  );
+
+  const [editing, setEditing] = useState<Category | null>(null);
+  const [parentForChild, setParentForChild] = useState<Category | null>(null);
+  const [showParentModal, setShowParentModal] = useState(false);
+  const [showChildModal, setShowChildModal] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [formData, setFormData] = useState<FormData>({
-    name: '',
-    slug: '',
-  });
-  const [validationError, setValidationError] = useState<string>('');
+  const [submitting, setSubmitting] = useState(false);
+  const [form, setForm] = useState({ name: "", slug: "" });
+  const [nameError, setNameError] = useState("");
+  const [initialized, setInitialized] = useState(false);
+  const parentInputRef = useRef<HTMLInputElement>(null);
+  const childInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    fetchCategories();
-  }, []);
+    dispatch(fetchCategoriesThunk()).finally(() => {
+      setInitialized(true);
+    });
+  }, [dispatch]);
 
-  const fetchCategories = async () => {
-    try {
-      setLoading(true);
-      const response = await categoryApi.getCategories();
-      const data = response.data;
-      setCategories(Array.isArray(data) ? data : []);
-    } catch (error) {
+  useEffect(() => {
+    if (showParentModal) {
+      setTimeout(() => {
+        parentInputRef.current?.focus();
+      }, 1);
+    }
+  }, [showParentModal]);
+
+  useEffect(() => {
+    if (showChildModal && parentForChild) {
+      setTimeout(() => {
+        childInputRef.current?.focus();
+      }, 1);
+    }
+  }, [showChildModal, parentForChild]);
+
+  if (!initialized && loading) {
+    return (
+      <div className="h-screen flex items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    );
+  }
+
+  /* ===================== STATS ===================== */
+  const countCategories = (list: Category[]): number => {
+    return list.reduce((total, cat) => {
+      return total + 1 + (cat.children ? countCategories(cat.children) : 0);
+    }, 0);
+  };
+
+  const totalCategories = countCategories(categories);
+
+  const countProducts = (list: Category[]): number => {
+    return list.reduce((total, cat) => {
+      return (
+        total +
+        (cat.productCount || 0) +
+        (cat.children ? countProducts(cat.children) : 0)
+      );
+    }, 0);
+  };
+
+  const totalProducts = countProducts(categories);
+
+  /* ===================== HANDLERS ===================== */
+  const openAddParent = () => {
+    setEditing(null);
+    setForm({ name: "", slug: "" });
+    setNameError("");
+    setShowParentModal(true);
+  };
+
+  const openEditParent = (cat: Category) => {
+    setEditing(cat);
+    setForm({ name: cat.name, slug: cat.slug });
+    setNameError("");
+    setShowParentModal(true);
+  };
+
+  const openAddChild = (cat: Category) => {
+    if (cat.parentId) {
       toast({
-        title: 'Lỗi',
-        description: 'Không thể tải danh mục.',
-        variant: 'destructive',
+        title: "Không thể tạo danh mục con",
+        description: "Danh mục con không thể có thêm cấp con",
+        variant: "destructive",
       });
-    } finally {
-      setLoading(false);
+      return;
     }
+
+    setParentForChild(cat);
+    setForm({ name: "", slug: "" });
+    setNameError("");
+    setShowChildModal(true);
   };
 
-  const validateForm = (): boolean => {
-    setValidationError('');
-    if (!formData.name.trim()) {
-      setValidationError('Tên danh mục không được để trống');
-      return false;
+  const handleSaveParent = async () => {
+    if (!form.name.trim()) {
+      setNameError("Vui lòng nhập tên danh mục");
+      return;
     }
-    if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(formData.slug)) {
-      setValidationError('Slug không hợp lệ');
-      return false;
-    }
-    return true;
-  };
-
-  const handleAddCategory = async () => {
-    if (!validateForm()) return;
 
     try {
       setSubmitting(true);
-      await categoryApi.createCategory(formData as any);
-      toast({ title: 'Thành công', description: 'Đã thêm danh mục mới' });
-      setFormData({ name: '', slug: '' });
-      setIsModalOpen(false);
-      await fetchCategories();
-    } catch (error) {
+
+      if (editing) {
+        await categoryApi.updateCategory(editing._id, form);
+      } else {
+        await categoryApi.createCategory({ ...form, parentId: null });
+      }
+
       toast({
-        title: 'Lỗi',
-        description: 'Không thể thêm danh mục.',
-        variant: 'destructive',
+        title: "Thành công",
+        description: "Lưu danh mục thành công",
+        variant: "success",
       });
+      setShowParentModal(false);
+      setEditing(null);
+      setForm({ name: "", slug: "" });
+      dispatch(fetchCategoriesThunk());
+    } catch (err: any) {
+      handleCategoryError(err);
     } finally {
       setSubmitting(false);
     }
   };
 
-  const handleDeleteCategory = async (id: string) => {
+  const handleSaveChild = async () => {
+    if (!form.name.trim()) {
+      setNameError("Vui lòng nhập tên danh mục");
+      return;
+    }
+    if (!parentForChild) return;
+
+    try {
+      setSubmitting(true);
+
+      await categoryApi.createCategory({
+        ...form,
+        parentId: parentForChild._id,
+      });
+
+      toast({
+        title: "Thành công",
+        description: "Thêm danh mục con thành công",
+        variant: "success",
+      });
+      setShowChildModal(false);
+      setParentForChild(null);
+      setForm({ name: "", slug: "" });
+      dispatch(fetchCategoriesThunk());
+    } catch (err: any) {
+      handleCategoryError(err);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const deleteCategory = async (id: string) => {
+    const findCategory = (list: Category[]): Category | null => {
+      for (const c of list) {
+        if (c._id === id) return c;
+        if (c.children?.length) {
+          const found = findCategory(c.children);
+          if (found) return found;
+        }
+      }
+      return null;
+    };
+
+    const category = findCategory(categories);
+
+    if (category?.children && category.children.length > 0) {
+      toast({
+        title: "Không thể xóa danh mục",
+        description: "Danh mục đang chứa danh mục con",
+        variant: "destructive",
+      });
+      return;
+    }
+
     try {
       setDeletingId(id);
       await categoryApi.deleteCategory(id);
-      toast({ title: 'Thành công', description: 'Đã xóa danh mục' });
-      await fetchCategories();
-    } catch (error) {
+
       toast({
-        title: 'Lỗi',
-        description: 'Không thể xóa danh mục.',
-        variant: 'destructive',
+        title: "Thành công",
+        description: "Đã xóa danh mục thành công",
+        variant: "success",
+      });
+
+      dispatch(fetchCategoriesThunk());
+    } catch (err: any) {
+      const rawMessage = err?.response?.data?.message;
+      const message = Array.isArray(rawMessage)
+        ? rawMessage.join(", ")
+        : rawMessage;
+
+      toast({
+        title: "Không thể xóa danh mục",
+        description: message || "Danh mục này không thể xóa",
+        variant: "destructive",
       });
     } finally {
       setDeletingId(null);
     }
   };
 
-  if (loading)
-    return (
-      <div className='flex items-center justify-center h-screen'>
-        <Loader2 className='h-8 w-8 animate-spin text-primary' />
-      </div>
-    );
+  const handleCategoryError = (err: any) => {
+    const data = err?.response?.data;
 
+    if (typeof data?.message === "string") {
+      if (
+        data.message.toLowerCase().includes("slug") ||
+        data.message.toLowerCase().includes("exist")
+      ) {
+        setNameError("Tên danh mục đã tồn tại");
+      } else {
+        setNameError(data.message);
+      }
+      return;
+    }
+
+    if (Array.isArray(data?.message)) {
+      setNameError(data.message.join(", "));
+      return;
+    }
+
+    setNameError("Tên danh mục đã tồn tại");
+  };
+
+  /* ===================== RENDER ===================== */
   return (
-    <div className='space-y-6'>
-      <div className='flex items-center justify-between'>
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex items-center justify-between">
         <div>
-          <h1 className='text-2xl font-bold'>Danh mục</h1>
-          <p className='text-muted-foreground'>Quản lý cây danh mục</p>
+          <h1 className="text-2xl font-bold">Danh mục</h1>
+          <p className="text-muted-foreground">Quản lý danh mục sản phẩm</p>
         </div>
-        <Button onClick={() => setIsModalOpen(true)}>
-          <Plus className='h-4 w-4 mr-2' /> Thêm danh mục
+        <Button onClick={openAddParent}>
+          <Plus className="mr-2 h-4 w-4" />
+          Thêm danh mục
         </Button>
       </div>
 
-      <div className='bg-card rounded-xl card-shadow overflow-hidden'>
+      {/* Stats */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="bg-card rounded-xl p-4 card-shadow">
+          <p className="text-sm text-muted-foreground">Tổng danh mục</p>
+          <p className="text-2xl font-bold">{totalCategories}</p>
+        </div>
+        <div className="bg-card rounded-xl p-4 card-shadow">
+          <p className="text-sm text-muted-foreground">Danh mục gốc</p>
+          <p className="text-2xl font-bold text-primary">{categories.length}</p>
+        </div>
+        <div className="bg-card rounded-xl p-4 card-shadow">
+          <p className="text-sm text-muted-foreground">Tổng sản phẩm</p>
+          <p className="text-2xl font-bold text-success">{totalProducts}</p>
+        </div>
+      </div>
+
+      {/* Tree */}
+      <div className="bg-card rounded-xl card-shadow overflow-hidden">
+        <div className="p-4 border-b border-border">
+          <h3 className="font-semibold">Cây danh mục</h3>
+        </div>
+
         {categories.length === 0 ? (
-          <div className='p-8 text-center text-muted-foreground'>
-            Chưa có danh mục nào.
+          <div className="p-8 text-center text-muted-foreground">
+            <FolderTree className="mx-auto mb-2 h-8 w-8 opacity-50" />
+            <p className="text-sm">Chưa có danh mục nào</p>
+            <p className="text-sm">Hãy tạo danh mục đầu tiên để bắt đầu</p>
           </div>
         ) : (
           categories.map((cat) => (
             <CategoryItem
-              key={cat.id}
+              key={cat._id}
               category={cat}
-              onDelete={handleDeleteCategory}
-              isDeleting={deletingId === cat.id}
+              onEdit={openEditParent}
+              onAddChild={openAddChild}
+              onDelete={deleteCategory}
+              deletingId={deletingId}
             />
           ))
         )}
       </div>
 
-      {isModalOpen && (
-        <div className='fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4'>
-          <div className='bg-card rounded-xl shadow-lg max-w-md w-full p-6 space-y-4'>
-            <div className='flex justify-between items-center'>
-              <h2 className='text-xl font-bold'>Thêm danh mục mới</h2>
+      {/* ===================== MODAL CHA ===================== */}
+      {showParentModal && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center modal-overlay">
+          <form
+            className="bg-card w-full max-w-md rounded-xl p-6 space-y-4 modal-content"
+            onSubmit={(e) => {
+              e.preventDefault();
+              handleSaveParent();
+            }}
+          >
+            <div className="flex justify-between items-center">
+              <h2 className="font-bold">
+                {editing ? "Chỉnh sửa danh mục" : "Thêm danh mục"}
+              </h2>
               <X
-                className='cursor-pointer'
-                onClick={() => setIsModalOpen(false)}
-              />
-            </div>
-
-            {validationError && (
-              <div className='p-3 bg-destructive/10 text-destructive rounded-md text-sm'>
-                {validationError}
-              </div>
-            )}
-
-            <div className='space-y-2'>
-              <Label>Tên danh mục</Label>
-              <Input
-                value={formData.name}
-                onChange={(e) => {
-                  const val = e.target.value;
-                  setFormData({ name: val, slug: generateSlug(val) });
+                className="cursor-pointer"
+                onClick={() => {
+                  setShowParentModal(false);
+                  setEditing(null);
+                  setNameError("");
+                  setForm({ name: "", slug: "" });
                 }}
               />
             </div>
 
-            <div className='space-y-2'>
-              <Label>Slug</Label>
-              <Input
-                value={formData.slug}
-                onChange={(e) =>
-                  setFormData({ ...formData, slug: e.target.value })
-                }
+            <Label>Tên danh mục</Label>
+            <Input
+              ref={parentInputRef}
+              value={form.name}
+              onChange={(e) => {
+                setForm({
+                  name: e.target.value,
+                  slug: generateSlug(e.target.value),
+                });
+                if (nameError) setNameError("");
+              }}
+              className={nameError ? "border-red-500" : ""}
+            />
+            {nameError && <p className="text-sm text-red-500">{nameError}</p>}
+
+            <Label>Đường dẫn (tự động)</Label>
+            <Input
+              value={form.slug}
+              disabled
+              className="bg-muted cursor-not-allowed"
+            />
+
+            <Button className="w-full" type="submit" disabled={submitting}>
+              {submitting ? "Đang lưu..." : "Lưu"}
+            </Button>
+          </form>
+        </div>
+      )}
+
+      {/* ===================== MODAL CON ===================== */}
+      {showChildModal && parentForChild && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center modal-overlay">
+          <form
+            className="bg-card w-full max-w-md rounded-xl p-6 space-y-4 modal-content"
+            onSubmit={(e) => {
+              e.preventDefault();
+              handleSaveChild();
+            }}
+          >
+            <div className="flex justify-between items-center">
+              <h2 className="font-bold">
+                Thêm danh mục con của "{parentForChild.name}"
+              </h2>
+              <X
+                className="cursor-pointer"
+                onClick={() => {
+                  setShowChildModal(false);
+                  setEditing(null);
+                  setNameError("");
+                  setForm({ name: "", slug: "" });
+                }}
               />
             </div>
 
-            <div className='flex gap-2 pt-4'>
-              <Button
-                variant='outline'
-                className='flex-1'
-                onClick={() => setIsModalOpen(false)}
-              >
-                Hủy
-              </Button>
-              <Button
-                className='flex-1'
-                onClick={handleAddCategory}
-                disabled={submitting}
-              >
-                {submitting ? 'Đang lưu...' : 'Lưu'}
-              </Button>
-            </div>
-          </div>
+            <Label>Tên danh mục con</Label>
+            <Input
+              ref={childInputRef}
+              value={form.name}
+              onChange={(e) => {
+                setForm({
+                  name: e.target.value,
+                  slug: generateSlug(e.target.value),
+                });
+                if (nameError) setNameError("");
+              }}
+              className={nameError ? "border-red-500" : ""}
+            />
+            {nameError && <p className="text-sm text-red-500">{nameError}</p>}
+
+            <Label>Đường dẫn (tự động)</Label>
+            <Input
+              value={form.slug}
+              disabled
+              className="bg-muted cursor-not-allowed"
+            />
+
+            <Button className="w-full" type="submit" disabled={submitting}>
+              {submitting ? "Đang lưu..." : "Lưu"}
+            </Button>
+          </form>
         </div>
       )}
     </div>

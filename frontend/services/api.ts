@@ -122,27 +122,34 @@ export const productApi = {
 };
 
 export const categoryApi = {
-  // Lấy danh sách danh mục
+  // Lấy danh sách danh mục (public)
   getCategories: () => apiClient.get('/categories'),
 
-  // Lấy chi tiết danh mục
-  getCategory: (id: string) => apiClient.get(`/admin/categories/${id}`),
-
-  // Tạo danh mục mới
+  // Tạo danh mục
   createCategory: (data: Record<string, unknown>) =>
     apiClient.post('/admin/categories', data),
 
   // Cập nhật danh mục
   updateCategory: (id: string, data: Record<string, unknown>) =>
     apiClient.put(`/admin/categories/${id}`, data),
-
   // Xóa danh mục
-  deleteCategory: (id: string) => apiClient.delete(`/admin/categories/${id}`),
+  deleteCategory: (id: string) =>
+    apiClient.delete(`/admin/categories/${id}`),
 };
 
 export const brandApi = {
   // Lấy danh sách thương hiệu
   getBrands: () => apiClient.get('/brands'),
+  // Lấy chi tiết thương hiệu
+  getBrand: (id: string) => apiClient.get(`/admin/brands/${id}`),
+  // Tạo thương hiệu mới
+  createBrand: (data: Record<string, unknown>) =>
+    apiClient.post('/admin/brands', data),
+  // Cập nhật thương hiệu
+  updateBrand: (id: string, data: Record<string, unknown>) =>
+    apiClient.put(`/admin/brands/${id}`, data),
+  // Xóa thương hiệu
+  deleteBrand: (id: string) => apiClient.delete(`/admin/brands/${id}`),
 };
 
 export const usersApi = {

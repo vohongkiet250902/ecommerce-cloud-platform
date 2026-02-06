@@ -30,6 +30,7 @@ import {
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Toaster } from "@/components/ui/toaster";
 import {
   Tooltip,
   TooltipTrigger,
@@ -365,6 +366,7 @@ export default function AdminLayout({
           <main className="p-6">{children}</main>
         </div>
       </div>
+      <Toaster />
     </TooltipProvider>
   );
 }
