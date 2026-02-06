@@ -1,20 +1,23 @@
-import {
-  IsArray,
-  ArrayMinSize,
-  ValidateNested,
-  IsNotEmpty,
-  IsNumber,
-} from 'class-validator';
 import { Type } from 'class-transformer';
+import {
+  ArrayMinSize,
+  IsArray,
+  IsInt,
+  IsMongoId,
+  IsString,
+  Min,
+  ValidateNested,
+} from 'class-validator';
 
-class CreateOrderItemDto {
-  @IsNotEmpty()
+export class CreateOrderItemDto {
+  @IsMongoId()
   productId: string;
 
-  @IsNotEmpty()
+  @IsString()
   sku: string;
 
-  @IsNumber()
+  @IsInt()
+  @Min(1)
   quantity: number;
 }
 
