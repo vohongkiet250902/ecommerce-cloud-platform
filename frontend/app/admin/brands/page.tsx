@@ -1,29 +1,26 @@
 "use client";
 
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import { Plus, Edit, Trash2, MoreHorizontal, Loader2, X } from "lucide-react";
-import { useForm } from "react-hook-form";
+import Image from "next/image";
+import { useDispatch, useSelector } from "react-redux";
+
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { DataTable } from "@/components/shared/DataTable";
 import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
+import { Label } from "@/components/ui/label";
+import { DataTable } from "@/components/shared/DataTable";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+
 import { useToast } from "@/hooks/use-toast";
-import { brandApi } from "@/services/api"; 
-import { cn } from "@/lib/utils";
-import {
-  Form,
-  FormControl,
-  FormField,
-  FormItem,
-  FormLabel,
-  FormMessage,
-} from "@/components/ui/form";
+import { brandApi } from "@/services/api";
+import type { RootState, AppDispatch } from "@/store";
+import { fetchBrandsThunk } from "@/store/brands/brands.slice";
 
 /* ================= TYPES ================= */
 
@@ -32,143 +29,164 @@ interface Brand {
   name: string;
   slug: string;
   logo?: string;
+  productCount?: number;
   isActive: boolean;
 }
-
-/* ================= CONFIG ================= */
-
-const statusConfig = {
-  active: {
-    label: "Đang hoạt động",
-    className: "bg-success/10 text-success border-success/20",
-  },
-  inactive: {
-    label: "Ngừng hoạt động",
-    className: "bg-destructive/10 text-destructive border-destructive/20",
-  },
-};
-
-const validateFormData = (data: { name: string; slug: string; status: string }) => {
-  const errors: Record<string, string> = {};
-
-  if (!data.name || data.name.length < 3) {
-    errors.name = "Tên thương hiệu phải có ít nhất 3 ký tự";
-  }
-
-  if (!data.slug || data.slug.length < 3) {
-    errors.slug = "Slug phải có ít nhất 3 ký tự";
-  }
-
-  return {
-    valid: Object.keys(errors).length === 0,
-    errors,
-  };
-};
 
 /* ================= PAGE ================= */
 
 export default function BrandsPage() {
   const { toast } = useToast();
-  const [brands, setBrands] = useState<Brand[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [formErrors, setFormErrors] = useState<Record<string, string>>({});
+  const dispatch = useDispatch<AppDispatch>();
+  const nameInputRef = useRef<HTMLInputElement>(null);
 
-  const form = useForm({
-    defaultValues: {
-      name: "",
-      slug: "",
-      status: "active",
-    },
+  /* ===== Redux ===== */
+  const { data: brands, loading } = useSelector(
+    (state: RootState) => state.brands,
+  );
+
+  /* ===== Modal state ===== */
+  const [showBrandModal, setShowBrandModal] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+
+  const [editingBrand, setEditingBrand] = useState<Brand | null>(null);
+  const [deletingBrand, setDeletingBrand] = useState<Brand | null>(null);
+
+  const [submitting, setSubmitting] = useState(false);
+  const [nameError, setNameError] = useState("");
+  const [slugError, setSlugError] = useState("");
+  const [initialized, setInitialized] = useState(false);
+
+  const [form, setForm] = useState({
+    name: "",
+    slug: "",
+    logo: "",
   });
 
-  // Fetch initial data
+  /* ===== Fetch ===== */
   useEffect(() => {
-    const fetchData = async () => {
-      try {
-        setLoading(true);
-        const res = await brandApi.getBrands();
-        setBrands(res.data.data || res.data);
-      } catch {
-        toast({
-          variant: "destructive",
-          title: "❌ Lỗi",
-          description: "Không thể tải dữ liệu thương hiệu",
-        });
-      } finally {
-        setLoading(false);
-      }
-    };
+    dispatch(fetchBrandsThunk()).finally(() => {
+      setInitialized(true);
+    });
+  }, [dispatch]);
 
-    fetchData();
-  }, [toast]);
+  useEffect(() => {
+    if (showBrandModal) {
+      setTimeout(() => nameInputRef.current?.focus(), 50);
+    }
+  }, [showBrandModal]);
 
-  // Handle add brand
-  const onSubmit = async (data: { name: string; slug: string; status: string }) => {
-    const validation = validateFormData(data);
-    if (!validation.valid) {
-      setFormErrors(validation.errors);
-      return;
+  /* ===== Stats ===== */
+  const totalBrands = brands.length;
+  const totalProducts = useMemo(
+    () => brands.reduce((s, b) => s + (b.productCount ?? 0), 0),
+    [brands],
+  );
+
+  /* ================= SAVE ================= */
+
+  const handleSaveBrand = async () => {
+    let hasError = false;
+
+    if (!form.name.trim()) {
+      setNameError("Tên thương hiệu không được để trống");
+      hasError = true;
     }
 
-    setFormErrors({});
-    setIsSubmitting(true);
+    if (!form.slug.trim()) {
+      setSlugError("Đường dẫn Website không được để trống");
+      hasError = true;
+    }
+
+    if (hasError) return;
+
+    setSubmitting(true);
 
     try {
-      const submitData = {
-        name: data.name,
-        slug: data.slug,
-        status: data.status,
-      };
+      if (editingBrand) {
+        await brandApi.updateBrand(editingBrand._id, form);
+        toast({
+          variant: "success",
+          title: "✅ Thành công",
+          description: "Cập nhật thương hiệu thành công",
+        });
+      } else {
+        await brandApi.createBrand(form);
+        toast({
+          variant: "success",
+          title: "✅ Thành công",
+          description: "Thêm thương hiệu thành công",
+        });
+      }
 
-      await brandApi.createBrand(submitData);
-
-      toast({
-        title: "✅ Thành công",
-        description: "Thêm thương hiệu thành công",
-      });
-
-      setIsModalOpen(false);
-      form.reset();
-
-      // Reload brand list
-      const res = await brandApi.getBrands();
-      setBrands(res.data.data || res.data);
+      dispatch(fetchBrandsThunk());
+      closeBrandModal();
     } catch {
       toast({
         variant: "destructive",
         title: "❌ Lỗi",
-        description: "Không thể thêm thương hiệu",
+        description: "Không thể lưu thương hiệu",
       });
     } finally {
-      setIsSubmitting(false);
+      setSubmitting(false);
     }
   };
 
-  // Handle delete brand
-  const handleDelete = useCallback(
-    async (id: string) => {
-      if (!confirm("Bạn có chắc muốn xóa thương hiệu này?")) return;
+  /* ================= DELETE ================= */
 
-      try {
-        await brandApi.deleteBrand(id);
-        toast({
-          title: "✅ Thành công",
-          description: "Xóa thương hiệu thành công",
-        });
+  const confirmDeleteBrand = async () => {
+    if (!deletingBrand) return;
 
-        setBrands((prev) => prev.filter((b) => b._id !== id));
-      } catch {
-        toast({
-          variant: "destructive",
-          title: "❌ Lỗi",
-          description: "Không thể xóa thương hiệu",
-        });
-      }
-    },
-    [toast]
-  );
+    try {
+      await brandApi.deleteBrand(deletingBrand._id);
+      dispatch(fetchBrandsThunk());
+
+      toast({
+        variant: "success",
+        title: "✅ Thành công",
+        description: "Xóa thương hiệu thành công",
+      });
+    } catch {
+      toast({
+        variant: "destructive",
+        title: "❌ Lỗi",
+        description: "Không thể xóa thương hiệu",
+      });
+    } finally {
+      setShowDeleteModal(false);
+      setDeletingBrand(null);
+    }
+  };
+
+  /* ================= MODAL HANDLERS ================= */
+
+  const openAddModal = () => {
+    setEditingBrand(null);
+    setForm({ name: "", slug: "", logo: "" });
+    setNameError("");
+    setShowBrandModal(true);
+  };
+
+  const openEditModal = (brand: Brand) => {
+    setEditingBrand(brand);
+    setForm({
+      name: brand.name,
+      slug: brand.slug,
+      logo: brand.logo ?? "",
+    });
+    setNameError("");
+    setShowBrandModal(true);
+  };
+
+  const closeBrandModal = () => {
+    setShowBrandModal(false);
+    setEditingBrand(null);
+    setNameError("");
+    setSlugError("");
+    setForm({ name: "", slug: "", logo: "" });
+  };
+
+  /* ================= TABLE ================= */
 
   const columns = useMemo(
     () => [
@@ -176,31 +194,40 @@ export default function BrandsPage() {
         key: "name",
         header: "Thương hiệu",
         render: (brand: Brand) => (
-          <div>
-            <p className="font-medium">{brand.name}</p>
-            <p className="text-sm text-muted-foreground">{brand._id}</p>
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-lg bg-secondary flex items-center justify-center p-2 overflow-hidden">
+              {brand.logo ? (
+                <Image
+                  src={brand.logo}
+                  alt={brand.name}
+                  width={32}
+                  height={32}
+                  className="object-contain"
+                  unoptimized
+                />
+              ) : (
+                <span className="font-bold text-xs">
+                  {brand.name.charAt(0).toUpperCase()}
+                </span>
+              )}
+            </div>
+            <span className="font-medium">{brand.name}</span>
           </div>
         ),
       },
       {
         key: "slug",
-        header: "Website",
-        render: (brand: Brand) => <span>{brand.slug}</span>,
+        header: "Đường dẫn Website",
+        render: (b: Brand) => (
+          <span className="text-muted-foreground">{b.slug}</span>
+        ),
       },
       {
-        key: "status",
-        header: "Trạng thái",
-        render: (brand: Brand) => {
-          const config = statusConfig[brand.isActive ? "active" : "inactive"];
-          return (
-            <Badge
-              variant="outline"
-              className={cn("font-medium", config.className)}
-            >
-              {config.label}
-            </Badge>
-          );
-        },
+        key: "productCount",
+        header: "Sản phẩm",
+        render: (b: Brand) => (
+          <Badge variant="secondary">{b.productCount ?? 0} sản phẩm</Badge>
+        ),
       },
       {
         key: "actions",
@@ -208,171 +235,175 @@ export default function BrandsPage() {
         render: (brand: Brand) => (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon">
+              <Button variant="ghost" size="icon-sm">
                 <MoreHorizontal className="h-4 w-4" />
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="dropdown-content">
-              <DropdownMenuItem>
-                <Edit className="mr-2 h-4 w-4" /> Chỉnh sửa
+              <DropdownMenuItem onClick={() => openEditModal(brand)}>
+                <Edit className="mr-2 h-4 w-4" />
+                Chỉnh sửa
               </DropdownMenuItem>
               <DropdownMenuItem
                 className="text-destructive"
-                onClick={() => handleDelete(brand._id)}
+                onClick={() => {
+                  setDeletingBrand(brand);
+                  setShowDeleteModal(true);
+                }}
               >
-                <Trash2 className="mr-2 h-4 w-4" /> Xóa
+                <Trash2 className="mr-2 h-4 w-4" />
+                Xóa
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         ),
       },
     ],
-    [handleDelete]
+    [],
   );
+
+  /* ================= LOADING STATE ================= */
+
+  if (!initialized && loading) {
+    return (
+      <div className="h-screen flex items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    );
+  }
+
+  /* ================= RENDER ================= */
 
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex justify-between items-center">
         <div>
           <h1 className="text-2xl font-bold">Thương hiệu</h1>
-          <p className="text-muted-foreground">Quản lý danh sách thương hiệu</p>
+          <p className="text-muted-foreground">Quản lý thương hiệu sản phẩm</p>
         </div>
-        <Button onClick={() => setIsModalOpen(true)}>
-          <Plus className="mr-2 h-4 w-4" />
+        <Button onClick={openAddModal}>
+          <Plus className="h-4 w-4 mr-2" />
           Thêm thương hiệu
         </Button>
       </div>
 
-      {/* Data Table */}
-      {loading ? (
-        <div className="flex items-center justify-center py-10">
-          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      {/* Stats */}
+      <div className="grid grid-cols-2 gap-4">
+        <div className="bg-card p-4 rounded-xl">
+          <p className="text-sm text-muted-foreground">Tổng thương hiệu</p>
+          <p className="text-2xl font-bold">{totalBrands}</p>
         </div>
-      ) : (
-        <DataTable
-          data={brands}
-          columns={columns}
-          searchKey="name"
-          searchPlaceholder="Tìm kiếm thương hiệu..."
-        />
-      )}
+        <div className="bg-card p-4 rounded-xl">
+          <p className="text-sm text-muted-foreground">Tổng sản phẩm</p>
+          <p className="text-2xl font-bold text-primary">{totalProducts}</p>
+        </div>
+      </div>
 
-      {/* Add Brand Modal */}
-      {isModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
-          <div className="bg-card rounded-xl shadow-lg max-w-md w-full max-h-[90vh] overflow-y-auto">
-            {/* Modal Header */}
-            <div className="flex items-center justify-between p-6 border-b border-border">
-              <h2 className="text-xl font-bold">Thêm thương hiệu mới</h2>
-              <button
-                onClick={() => {
-                  setIsModalOpen(false);
-                  form.reset();
-                  setFormErrors({});
-                }}
-                className="text-muted-foreground hover:text-foreground"
-              >
-                <X className="h-5 w-5" />
-              </button>
+      {/* Table */}
+      <DataTable
+        data={brands}
+        columns={columns}
+        searchKey="name"
+        searchPlaceholder="Tìm kiếm thương hiệu..."
+      />
+
+      {/* ================= ADD / EDIT MODAL ================= */}
+      {showBrandModal && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center modal-overlay">
+          <form
+            className="bg-card w-full max-w-md rounded-xl p-6 space-y-4 modal-content"
+            onSubmit={(e) => {
+              e.preventDefault();
+              handleSaveBrand();
+            }}
+          >
+            <div className="flex justify-between items-center">
+              <h2 className="font-bold">
+                {editingBrand ? "Chỉnh sửa thương hiệu" : "Thêm thương hiệu"}
+              </h2>
+              <X className="cursor-pointer" onClick={closeBrandModal} />
             </div>
 
-            {/* Modal Body */}
-            <div className="p-6">
-              <Form {...form}>
-                <form
-                  onSubmit={form.handleSubmit(onSubmit)}
-                  className="space-y-4"
-                >
-                  {/* Name */}
-                  <FormField
-                    control={form.control}
-                    name="name"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Tên thương hiệu</FormLabel>
-                        <FormControl>
-                          <Input placeholder="Nhập tên thương hiệu" {...field} />
-                        </FormControl>
-                        {formErrors.name && (
-                          <p className="text-sm text-destructive">
-                            {formErrors.name}
-                          </p>
-                        )}
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
+            <Label>Logo (URL ảnh)</Label>
+            <Input
+              placeholder="https://..."
+              value={form.logo}
+              onChange={(e) => setForm({ ...form, logo: e.target.value })}
+            />
 
-                  {/* Slug */}
-                  <FormField
-                    control={form.control}
-                    name="slug"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Slug</FormLabel>
-                        <FormControl>
-                          <Input placeholder="Nhập slug" {...field} />
-                        </FormControl>
-                        {formErrors.slug && (
-                          <p className="text-sm text-destructive">
-                            {formErrors.slug}
-                          </p>
-                        )}
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
+            <Label>Tên thương hiệu</Label>
+            <Input
+              ref={nameInputRef}
+              value={form.name}
+              onChange={(e) => {
+                setForm({ ...form, name: e.target.value });
+                if (nameError) setNameError("");
+              }}
+              className={nameError ? "border-red-500" : ""}
+            />
+            {nameError && <p className="text-sm text-red-500">{nameError}</p>}
 
-                  {/* Status */}
-                  <FormField
-                    control={form.control}
-                    name="status"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Trạng thái</FormLabel>
-                        <FormControl>
-                          <select
-                            {...field}
-                            className="w-full px-3 py-2 border border-input rounded-md bg-background text-foreground"
-                          >
-                            <option value="active">Đang hoạt động</option>
-                            <option value="inactive">Ngừng hoạt động</option>
-                          </select>
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
+            <Label>Đường dẫn Website</Label>
+            <Input
+              value={form.slug}
+              onChange={(e) => {
+                setForm({ ...form, slug: e.target.value });
+                if (slugError) setSlugError("");
+              }}
+              className={slugError ? "border-red-500" : ""}
+            />
+            {slugError && <p className="text-sm text-red-500">{slugError}</p>}
 
-                  {/* Buttons */}
-                  <div className="flex gap-2 pt-4">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="flex-1"
-                      onClick={() => {
-                        setIsModalOpen(false);
-                        form.reset();
-                        setFormErrors({});
-                      }}
-                      disabled={isSubmitting}
-                    >
-                      Hủy
-                    </Button>
-                    <Button
-                      type="submit"
-                      className="flex-1"
-                      disabled={isSubmitting}
-                    >
-                      {isSubmitting && (
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      )}
-                      Thêm
-                    </Button>
-                  </div>
-                </form>
-              </Form>
+            <div className="flex gap-3 pt-2">
+              <Button
+                type="button"
+                variant="outline"
+                className="w-1/2"
+                onClick={closeBrandModal}
+              >
+                Hủy
+              </Button>
+              <Button type="submit" className="w-1/2" disabled={submitting}>
+                {submitting ? "Đang lưu..." : "Lưu"}
+              </Button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* ================= DELETE CONFIRM MODAL ================= */}
+      {showDeleteModal && deletingBrand && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center modal-overlay">
+          <div className="bg-card w-full max-w-sm rounded-xl p-6 space-y-4 modal-content">
+            <h2 className="font-bold text-lg text-center">Xác nhận xóa</h2>
+
+            <p className="text-sm text-center text-muted-foreground">
+              Bạn có chắc chắn muốn xóa thương hiệu{" "}
+              <span className="font-semibold text-foreground">
+                {deletingBrand.name}
+              </span>
+              ?
+            </p>
+
+            <div className="flex gap-3 pt-4">
+              <Button
+                variant="outline"
+                className="w-1/2"
+                onClick={() => {
+                  setShowDeleteModal(false);
+                  setDeletingBrand(null);
+                }}
+              >
+                Hủy
+              </Button>
+              <Button
+                variant="destructive"
+                className="w-1/2"
+                onClick={confirmDeleteBrand}
+              >
+                Xóa
+              </Button>
             </div>
           </div>
         </div>

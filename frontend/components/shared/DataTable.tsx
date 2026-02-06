@@ -28,6 +28,7 @@ export interface DataTableProps<T> {
   searchPlaceholder?: string;
   searchKey?: keyof T;
   pageSize?: number;
+  showFilter?: boolean;
 }
 
 /* =======================
@@ -39,6 +40,7 @@ export function DataTable<T extends object>({
   searchPlaceholder = "Tìm kiếm...",
   searchKey,
   pageSize = 10,
+  showFilter = false,
 }: DataTableProps<T>) {
   const [search, setSearch] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
@@ -74,19 +76,24 @@ export function DataTable<T extends object>({
           />
         </div>
 
-        <Button variant="outline">
-          <Filter className="mr-2 h-4 w-4" />
-          Bộ lọc
-        </Button>
+        {showFilter && (
+          <Button variant="outline">
+            <Filter className="mr-2 h-4 w-4" />
+            Bộ lọc
+          </Button>
+        )}
       </div>
 
       {/* Table */}
-      <div className="rounded-xl border bg-card overflow-hidden">
+      <div className="rounded-xl border border-border/50 bg-card overflow-hidden">
         <Table>
           <TableHeader>
-            <TableRow className="bg-secondary/50">
+            <TableRow className="bg-secondary/30 border-b border-border/40">
               {columns.map((col, index) => (
-                <TableHead key={index} className="font-semibold">
+                <TableHead
+                  key={index}
+                  className="font-semibold text-foreground"
+                >
                   {col.header}
                 </TableHead>
               ))}
@@ -105,7 +112,10 @@ export function DataTable<T extends object>({
               </TableRow>
             ) : (
               paginatedData.map((item, rowIndex) => (
-                <TableRow key={rowIndex} className="hover:bg-secondary/30">
+                <TableRow
+                  key={rowIndex}
+                  className="border-b border-border/40 hover:bg-secondary/20"
+                >
                   {columns.map((col, colIndex) => {
                     const value =
                       typeof col.key === "string"

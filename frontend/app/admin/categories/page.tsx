@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useMemo } from "react";
 import {
   Plus,
   Edit,
@@ -108,13 +108,13 @@ const CategoryItem = ({
             </DropdownMenuTrigger>
 
             <DropdownMenuContent align="end" className="dropdown-content">
-              <DropdownMenuItem onSelect={() => onEdit(category)}>
+              <DropdownMenuItem onClick={() => onEdit(category)}>
                 <Edit className="mr-2 h-4 w-4" />
                 Chỉnh sửa
               </DropdownMenuItem>
 
               {!category.parentId && (
-                <DropdownMenuItem onSelect={() => onAddChild(category)}>
+                <DropdownMenuItem onClick={() => onAddChild(category)}>
                   <Plus className="mr-2 h-4 w-4" />
                   Thêm danh mục con
                 </DropdownMenuItem>
@@ -163,6 +163,7 @@ export default function CategoriesPage() {
   const [showParentModal, setShowParentModal] = useState(false);
   const [showChildModal, setShowChildModal] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [form, setForm] = useState({ name: "", slug: "" });
   const [nameError, setNameError] = useState("");
@@ -192,34 +193,30 @@ export default function CategoriesPage() {
     }
   }, [showChildModal, parentForChild]);
 
-  if (!initialized && loading) {
-    return (
-      <div className="h-screen flex items-center justify-center">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
-      </div>
-    );
-  }
-
   /* ===================== STATS ===================== */
-  const countCategories = (list: Category[]): number => {
-    return list.reduce((total, cat) => {
-      return total + 1 + (cat.children ? countCategories(cat.children) : 0);
-    }, 0);
-  };
+  const countCategories = (list: Category[]): number =>
+    list.reduce(
+      (total, cat) =>
+        total + 1 + (cat.children ? countCategories(cat.children) : 0),
+      0,
+    );
 
-  const totalCategories = countCategories(categories);
-
-  const countProducts = (list: Category[]): number => {
-    return list.reduce((total, cat) => {
-      return (
+  const countProducts = (list: Category[]): number =>
+    list.reduce(
+      (total, cat) =>
         total +
         (cat.productCount || 0) +
-        (cat.children ? countProducts(cat.children) : 0)
-      );
-    }, 0);
-  };
+        (cat.children ? countProducts(cat.children) : 0),
+      0,
+    );
 
-  const totalProducts = countProducts(categories);
+  const totalCategories = useMemo(() => {
+    return countCategories(categories);
+  }, [categories]);
+
+  const totalProducts = useMemo(() => {
+    return countProducts(categories);
+  }, [categories]);
 
   /* ===================== HANDLERS ===================== */
   const openAddParent = () => {
@@ -239,7 +236,7 @@ export default function CategoriesPage() {
   const openAddChild = (cat: Category) => {
     if (cat.parentId) {
       toast({
-        title: "Không thể tạo danh mục con",
+        title: "❌ Không thể tạo danh mục con",
         description: "Danh mục con không thể có thêm cấp con",
         variant: "destructive",
       });
@@ -268,7 +265,7 @@ export default function CategoriesPage() {
       }
 
       toast({
-        title: "Thành công",
+        title: "✅ Thành công",
         description: "Lưu danh mục thành công",
         variant: "success",
       });
@@ -299,7 +296,7 @@ export default function CategoriesPage() {
       });
 
       toast({
-        title: "Thành công",
+        title: "✅ Thành công",
         description: "Thêm danh mục con thành công",
         variant: "success",
       });
@@ -314,10 +311,16 @@ export default function CategoriesPage() {
     }
   };
 
-  const deleteCategory = async (id: string) => {
+  const deleteCategory = (id: string) => {
+    setConfirmDeleteId(id);
+  };
+
+  const confirmDeleteCategory = async () => {
+    if (!confirmDeleteId) return;
+
     const findCategory = (list: Category[]): Category | null => {
       for (const c of list) {
-        if (c._id === id) return c;
+        if (c._id === confirmDeleteId) return c;
         if (c.children?.length) {
           const found = findCategory(c.children);
           if (found) return found;
@@ -330,19 +333,20 @@ export default function CategoriesPage() {
 
     if (category?.children && category.children.length > 0) {
       toast({
-        title: "Không thể xóa danh mục",
+        title: "❌ Không thể xóa danh mục",
         description: "Danh mục đang chứa danh mục con",
         variant: "destructive",
       });
+      setConfirmDeleteId(null);
       return;
     }
 
     try {
-      setDeletingId(id);
-      await categoryApi.deleteCategory(id);
+      setDeletingId(confirmDeleteId);
+      await categoryApi.deleteCategory(confirmDeleteId);
 
       toast({
-        title: "Thành công",
+        title: "✅ Thành công",
         description: "Đã xóa danh mục thành công",
         variant: "success",
       });
@@ -355,12 +359,13 @@ export default function CategoriesPage() {
         : rawMessage;
 
       toast({
-        title: "Không thể xóa danh mục",
+        title: "❌ Không thể xóa danh mục",
         description: message || "Danh mục này không thể xóa",
         variant: "destructive",
       });
     } finally {
       setDeletingId(null);
+      setConfirmDeleteId(null);
     }
   };
 
@@ -386,6 +391,16 @@ export default function CategoriesPage() {
 
     setNameError("Tên danh mục đã tồn tại");
   };
+
+  /* ===================== LOADING STATE ===================== */
+
+  if (!initialized && loading) {
+    return (
+      <div className="h-screen flex items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    );
+  }
 
   /* ===================== RENDER ===================== */
   return (
@@ -491,9 +506,25 @@ export default function CategoriesPage() {
               className="bg-muted cursor-not-allowed"
             />
 
-            <Button className="w-full" type="submit" disabled={submitting}>
-              {submitting ? "Đang lưu..." : "Lưu"}
-            </Button>
+            <div className="flex gap-3">
+              <Button
+                type="button"
+                variant="outline"
+                className="w-1/2"
+                onClick={() => {
+                  setShowParentModal(false);
+                  setEditing(null);
+                  setNameError("");
+                  setForm({ name: "", slug: "" });
+                }}
+              >
+                Hủy
+              </Button>
+
+              <Button type="submit" className="w-1/2" disabled={submitting}>
+                {submitting ? "Đang lưu..." : "Lưu"}
+              </Button>
+            </div>
           </form>
         </div>
       )}
@@ -545,10 +576,65 @@ export default function CategoriesPage() {
               className="bg-muted cursor-not-allowed"
             />
 
-            <Button className="w-full" type="submit" disabled={submitting}>
-              {submitting ? "Đang lưu..." : "Lưu"}
-            </Button>
+            <div className="flex gap-3">
+              <Button
+                type="button"
+                variant="outline"
+                className="w-1/2"
+                onClick={() => {
+                  setShowChildModal(false);
+                  setParentForChild(null);
+                  setNameError("");
+                  setForm({ name: "", slug: "" });
+                }}
+              >
+                Hủy
+              </Button>
+
+              <Button type="submit" className="w-1/2" disabled={submitting}>
+                {submitting ? "Đang lưu..." : "Lưu"}
+              </Button>
+            </div>
           </form>
+        </div>
+      )}
+      {/* ===================== DELETE CONFIRMATION ===================== */}
+      {confirmDeleteId && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center modal-overlay">
+          <div className="bg-card w-full max-w-sm rounded-xl p-6 space-y-4 modal-content">
+            <h2 className="font-bold text-lg">Xác nhận xóa</h2>
+
+            <p className="text-sm text-muted-foreground">
+              Bạn có chắc chắn muốn xóa thương hiệu{" "}
+              <span className="font-semibold text-foreground">
+                {categories
+                  .flatMap((cat) =>
+                    cat.children ? [cat, ...cat.children] : [cat],
+                  )
+                  .find((c) => c._id === confirmDeleteId)?.name || ""}
+              </span>
+              ?
+            </p>
+
+            <div className="flex gap-3">
+              <Button
+                variant="outline"
+                className="w-1/2"
+                onClick={() => setConfirmDeleteId(null)}
+              >
+                Hủy
+              </Button>
+
+              <Button
+                variant="destructive"
+                className="w-1/2"
+                onClick={confirmDeleteCategory}
+                disabled={deletingId === confirmDeleteId}
+              >
+                {deletingId === confirmDeleteId ? "Đang xóa..." : "Xóa"}
+              </Button>
+            </div>
+          </div>
         </div>
       )}
     </div>
