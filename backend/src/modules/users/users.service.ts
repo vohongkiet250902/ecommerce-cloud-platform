@@ -1,38 +1,38 @@
+// /mnt/data/users.service.ts
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { User, UserDocument } from './schemas/user.schema';
+import * as crypto from 'crypto';
 
 @Injectable()
 export class UsersService {
   constructor(@InjectModel(User.name) private userModel: Model<UserDocument>) {}
 
-  // --- PUBLIC METHODS (Dùng cho Controller trả về Client - Ẩn dữ liệu nhạy cảm) ---
+  // ✅ HMAC-SHA256 với secret riêng (pepper)
+  private hashRefreshToken(token: string) {
+    const secret =
+      process.env.REFRESH_TOKEN_HASH_SECRET || 'dev_refresh_hash_secret';
+    return crypto.createHmac('sha256', secret).update(token).digest('hex');
+  }
 
+  // --- PUBLIC METHODS ---
   async create(userData: Partial<User>): Promise<UserDocument> {
     const newUser = new this.userModel(userData);
     return newUser.save();
   }
 
   async findById(id: string): Promise<UserDocument> {
-    const user = await this.userModel
-      .findById(id)
-      .select('-password -refreshToken')
-      .exec();
-
+    const user = await this.userModel.findById(id).exec(); // schema đã select:false
     if (!user) throw new NotFoundException('User not found');
     return user;
   }
 
   async findByEmail(email: string): Promise<UserDocument | null> {
-    return this.userModel
-      .findOne({ email })
-      .select('-password -refreshToken')
-      .exec();
+    return this.userModel.findOne({ email }).exec(); // schema đã select:false
   }
 
-  // --- INTERNAL METHODS (Dùng cho AuthService) ---
-
+  // --- INTERNAL METHODS (Auth) ---
   async findByEmailInternal(email: string): Promise<UserDocument | null> {
     return this.userModel
       .findOne({ email })
@@ -41,11 +41,34 @@ export class UsersService {
   }
 
   async findByIdInternal(id: string): Promise<UserDocument | null> {
-    if (!Types.ObjectId.isValid(id)) {
-      return null;
-    }
-
+    if (!Types.ObjectId.isValid(id)) return null;
     return this.userModel.findById(id).select('+refreshToken').exec();
+  }
+
+  // ✅ set refreshTokenHash
+  async setRefreshToken(userId: string, refreshToken: string) {
+    const refreshTokenHash = this.hashRefreshToken(refreshToken);
+    await this.userModel.updateOne(
+      { _id: userId },
+      { $set: { refreshToken: refreshTokenHash } },
+    );
+  }
+
+  // ✅ verify refresh token
+  async isRefreshTokenValid(userId: string, refreshToken: string) {
+    const user = await this.findByIdInternal(userId);
+    if (!user?.refreshToken) return false;
+
+    const refreshTokenHash = this.hashRefreshToken(refreshToken);
+    return user.refreshToken === refreshTokenHash;
+  }
+
+  // ✅ clear refresh token (logout)
+  async clearRefreshToken(userId: string) {
+    await this.userModel.updateOne(
+      { _id: userId },
+      { $unset: { refreshToken: '' } },
+    );
   }
 
   async updateInternal(
@@ -57,47 +80,31 @@ export class UsersService {
       .exec();
   }
 
-  // ======================================================
-  // =============== ADMIN METHODS (BẮT BUỘC) =============
-  // ======================================================
-
-  // Lấy danh sách user cho admin (Ẩn dữ liệu nhạy cảm)
+  // --- ADMIN METHODS giữ nguyên (schema đã tự ẩn nhạy cảm) ---
   async findAllForAdmin(): Promise<UserDocument[]> {
-    return this.userModel.find().select('-password -refreshToken').exec();
+    return this.userModel.find().exec();
   }
 
-  // Lấy chi tiết 1 user cho admin
   async findOneForAdmin(id: string): Promise<UserDocument> {
-    if (!Types.ObjectId.isValid(id)) {
+    if (!Types.ObjectId.isValid(id))
       throw new NotFoundException('User not found');
-    }
-
-    const user = await this.userModel
-      .findById(id)
-      .select('-password -refreshToken')
-      .exec();
-
+    const user = await this.userModel.findById(id).exec();
     if (!user) throw new NotFoundException('User not found');
     return user;
   }
 
-  // Block / Unblock user (dùng isActive)
   async updateStatus(
     id: string,
     isActive: boolean,
   ): Promise<{ message: string }> {
-    if (!Types.ObjectId.isValid(id)) {
+    if (!Types.ObjectId.isValid(id))
       throw new NotFoundException('User not found');
-    }
-
     const user = await this.userModel.findByIdAndUpdate(
       id,
       { isActive },
       { new: true },
     );
-
     if (!user) throw new NotFoundException('User not found');
-
     return { message: 'Cập nhật trạng thái user thành công' };
   }
 }

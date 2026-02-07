@@ -1,3 +1,4 @@
+// /mnt/data/user.schema.ts
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document } from 'mongoose';
 
@@ -8,7 +9,7 @@ export class User {
   @Prop({ required: true })
   fullName: string;
 
-  @Prop({ required: true, unique: true })
+  @Prop({ required: true, unique: true, lowercase: true, trim: true })
   email: string;
 
   @Prop()
@@ -23,11 +24,12 @@ export class User {
   @Prop({ default: true })
   isActive: boolean;
 
-  @Prop({ required: true })
+  @Prop({ required: true, select: false })
   password: string;
 
-  @Prop()
-  refreshToken?: string;
+  // lưu HASH refresh token
+  @Prop({ type: String, select: false, default: null })
+  refreshToken: string | null;
 }
 
 export const UserSchema = SchemaFactory.createForClass(User);

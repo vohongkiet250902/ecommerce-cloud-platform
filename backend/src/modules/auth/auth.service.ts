@@ -1,14 +1,13 @@
 import {
   Injectable,
   UnauthorizedException,
-  ConflictException,
   ForbiddenException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
-import * as crypto from 'crypto';
 import { UsersService } from '../users/users.service';
 import type { Request, Response } from 'express';
+
 @Injectable()
 export class AuthService {
   constructor(
@@ -18,25 +17,14 @@ export class AuthService {
 
   private async validateUser(email: string, password: string) {
     const user = await this.usersService.findByEmailInternal(email);
-    if (!user) {
-      throw new UnauthorizedException('Email không tồn tại');
-    }
+    if (!user) throw new UnauthorizedException('Email không tồn tại');
 
     const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch) {
-      throw new UnauthorizedException('Sai mật khẩu');
-    }
+    if (!isMatch) throw new UnauthorizedException('Sai mật khẩu');
 
-    // ✅ MATCH SCHEMA
-    if (!user.isActive) {
-      throw new ForbiddenException('Tài khoản đã bị khoá');
-    }
+    if (!user.isActive) throw new ForbiddenException('Tài khoản đã bị khoá');
 
     return user;
-  }
-
-  private hashToken(token: string) {
-    return crypto.createHash('sha256').update(token).digest('hex');
   }
 
   async login(email: string, password: string, res: Response) {
@@ -45,6 +33,8 @@ export class AuthService {
     const payload = {
       sub: user._id.toString(),
       role: user.role,
+      // (optional) nếu muốn JwtStrategy có email thì add:
+      // email: user.email,
     };
 
     const accessToken = this.jwtService.sign(payload, {
@@ -57,20 +47,23 @@ export class AuthService {
       expiresIn: '7d',
     });
 
-    const hashedRefreshToken = this.hashToken(refreshToken);
+    // ✅ lưu HASH refresh token vào DB
+    await this.usersService.setRefreshToken(user._id.toString(), refreshToken);
 
-    await this.usersService.updateInternal(user._id.toString(), {
-      refreshToken: hashedRefreshToken,
-    });
+    const isProd = process.env.NODE_ENV === 'production';
 
     res.cookie('accessToken', accessToken, {
       httpOnly: true,
       sameSite: 'strict',
+      secure: isProd,
+      // maxAge: 15 * 60 * 1000,
     });
 
     res.cookie('refreshToken', refreshToken, {
       httpOnly: true,
       sameSite: 'strict',
+      secure: isProd,
+      // maxAge: 7 * 24 * 60 * 60 * 1000,
     });
 
     return {
@@ -85,41 +78,44 @@ export class AuthService {
 
   async refresh(req: Request, res: Response) {
     const refreshToken = req.cookies?.refreshToken;
-    if (!refreshToken) {
-      throw new UnauthorizedException();
-    }
+    if (!refreshToken) throw new UnauthorizedException();
 
+    // verify chữ ký & hạn
     const payload = this.jwtService.verify(refreshToken, {
       secret: process.env.JWT_REFRESH_SECRET,
     });
 
-    const user = await this.usersService.findByIdInternal(payload.sub);
+    const userId = payload.sub as string;
 
-    const hashed = this.hashToken(refreshToken);
-    if (!user || user.refreshToken !== hashed) {
-      throw new UnauthorizedException();
-    }
+    // ✅ check refresh token hash trong DB
+    const ok = await this.usersService.isRefreshTokenValid(
+      userId,
+      refreshToken,
+    );
+    if (!ok) throw new UnauthorizedException();
+
+    const user = await this.usersService.findById(userId);
+    if (!user) throw new UnauthorizedException();
 
     const newAccessToken = this.jwtService.sign(
-      { sub: user._id.toString(), role: user.role },
-      {
-        secret: process.env.JWT_ACCESS_SECRET,
-        expiresIn: '15m',
-      },
+      { sub: userId, role: user.role /*, email: user.email */ },
+      { secret: process.env.JWT_ACCESS_SECRET, expiresIn: '15m' },
     );
+
+    const isProd = process.env.NODE_ENV === 'production';
 
     res.cookie('accessToken', newAccessToken, {
       httpOnly: true,
       sameSite: 'strict',
+      secure: isProd,
     });
 
     return { message: 'Refresh thành công' };
   }
 
   async logout(userId: string, res: Response) {
-    await this.usersService.updateInternal(userId, {
-      refreshToken: undefined,
-    });
+    // ✅ clear hash trong DB
+    await this.usersService.clearRefreshToken(userId);
 
     res.clearCookie('accessToken');
     res.clearCookie('refreshToken');
