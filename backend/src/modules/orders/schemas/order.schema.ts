@@ -4,7 +4,7 @@ import { Types } from 'mongoose';
 export type OrderStatus = 'pending' | 'paid' | 'cancelled';
 export type PaymentMethod = 'cod' | 'mock' | 'vnpay';
 
-@Schema() // embedded subdocument: không cần timestamps
+@Schema({ _id: false })
 export class OrderItem {
   @Prop({ type: Types.ObjectId, ref: 'Product', required: true })
   productId: Types.ObjectId;
