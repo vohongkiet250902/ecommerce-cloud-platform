@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useMemo, useEffect, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import {
   Plus,
   Edit,
@@ -9,8 +10,10 @@ import {
   MoreHorizontal,
   Loader2,
   X,
+  AlertTriangle,
 } from "lucide-react";
 import { useForm } from "react-hook-form";
+import Image from "next/image";
 
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -22,6 +25,20 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { productApi, categoryApi, brandApi } from "@/services/api";
 import { cn } from "@/lib/utils";
@@ -161,12 +178,17 @@ const flattenCategories = (categories: Category[]): Category[] => {
 };
 
 export default function ProductsPage() {
+  const router = useRouter();
   const { toast } = useToast();
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [brands, setBrands] = useState<Brand[]>([]);
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [productToDelete, setProductToDelete] = useState<Product | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
 
@@ -174,6 +196,20 @@ export default function ProductsPage() {
     () => flattenCategories(categories),
     [categories],
   );
+
+  const [statusFilter, setStatusFilter] = useState<"all" | "active" | "inactive" | "draft">("all");
+  const [categoryFilter, setCategoryFilter] = useState<string>("all");
+
+  const filteredProducts = useMemo(() => {
+    return products.filter((product) => {
+      const matchesStatus =
+        statusFilter === "all" ? true : product.status === statusFilter;
+      const matchesCategory =
+        categoryFilter === "all" ? true : product.categoryId === categoryFilter;
+
+      return matchesStatus && matchesCategory;
+    });
+  }, [products, statusFilter, categoryFilter]);
 
 
   const form = useForm<ProductFormData>({
@@ -261,29 +297,39 @@ export default function ProductsPage() {
     }
   };
 
-  // Handle delete product
-  const handleDelete = useCallback(
-    async (id: string) => {
-      if (!confirm("Bạn có chắc muốn xóa sản phẩm này?")) return;
+  // Handle delete product (open modal)
+  const handleDelete = useCallback((product: Product) => {
+    setProductToDelete(product);
+    setDeleteConfirmOpen(true);
+  }, []);
 
-      try {
-        await productApi.deleteProduct(id);
-        toast({
-          title: "✅ Thành công",
-          description: "Xóa sản phẩm thành công",
-        });
+  // Confirm delete
+  const handleConfirmDelete = async () => {
+    if (!productToDelete) return;
 
-        setProducts((prev) => prev.filter((p) => p._id !== id));
-      } catch {
-        toast({
-          variant: "destructive",
-          title: "❌ Lỗi",
-          description: "Không thể xóa sản phẩm",
-        });
-      }
-    },
-    [toast],
-  );
+    try {
+      setIsDeleting(true);
+      await productApi.deleteProduct(productToDelete._id);
+      
+      toast({
+        title: "✅ Thành công",
+        description: "Xóa sản phẩm thành công",
+        variant: "success",
+      });
+
+      setProducts((prev) => prev.filter((p) => p._id !== productToDelete._id));
+      setDeleteConfirmOpen(false);
+    } catch {
+      toast({
+        variant: "destructive",
+        title: "❌ Lỗi",
+        description: "Không thể xóa sản phẩm",
+      });
+    } finally {
+      setIsDeleting(false);
+      setProductToDelete(null);
+    }
+  };
 
   const columns = useMemo(
     () => [
@@ -291,9 +337,22 @@ export default function ProductsPage() {
         key: "name",
         header: "Sản phẩm",
         render: (product: Product) => (
-          <div>
-            <p className="font-medium">{product.name}</p>
-            <p className="text-sm text-muted-foreground">{product._id}</p>
+          <div className="flex items-center gap-3">
+             <div className="h-10 w-10 relative rounded-md overflow-hidden bg-muted border border-border shrink-0">
+               {product.images?.[0]?.url ? (
+                   <Image 
+                      src={product.images[0].url} 
+                      alt={product.name} 
+                      fill 
+                      className="object-cover" 
+                   />
+               ) : (
+                   <div className="flex items-center justify-center h-full text-xs text-muted-foreground">Img</div>
+               )}
+            </div>
+            <div>
+              <p className="font-medium line-clamp-1 text-foreground">{product.name}</p>
+            </div>
           </div>
         ),
       },
@@ -368,15 +427,18 @@ export default function ProductsPage() {
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="dropdown-content">
-              <DropdownMenuItem>
+              <DropdownMenuItem onClick={() => router.push(`/admin/products/${product._id}`)}>
                 <Eye className="mr-2 h-4 w-4" /> Xem chi tiết
               </DropdownMenuItem>
-              <DropdownMenuItem>
+              <DropdownMenuItem onClick={() => {
+                setSelectedProduct(product);
+                setIsModalOpen(true);
+              }}>
                 <Edit className="mr-2 h-4 w-4" /> Chỉnh sửa
               </DropdownMenuItem>
               <DropdownMenuItem
-                className="text-destructive"
-                onClick={() => handleDelete(product._id)}
+                className="text-destructive focus:text-destructive"
+                onClick={() => handleDelete(product)}
               >
                 <Trash2 className="mr-2 h-4 w-4" /> Xóa
               </DropdownMenuItem>
@@ -385,7 +447,7 @@ export default function ProductsPage() {
         ),
       },
     ],
-    [handleDelete, flatCategories, brands],
+    [handleDelete, flatCategories, brands, router],
 
   );
 
@@ -397,7 +459,10 @@ export default function ProductsPage() {
           <h1 className="text-2xl font-bold">Sản phẩm</h1>
           <p className="text-muted-foreground">Quản lý danh sách sản phẩm</p>
         </div>
-        <Button onClick={() => setIsModalOpen(true)}>
+        <Button onClick={() => {
+          setSelectedProduct(null);
+          setIsModalOpen(true);
+        }}>
           <Plus className="mr-2 h-4 w-4" />
           Thêm sản phẩm
         </Button>
@@ -405,30 +470,73 @@ export default function ProductsPage() {
 
       {/* Stats */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <div className="bg-card rounded-xl p-4 card-shadow">
-          <p className="text-sm text-muted-foreground">Tổng sản phẩm</p>
-          <p className="text-2xl font-bold text-foreground">
-            {products.length}
-          </p>
+        <div className="bg-card rounded-xl p-4 border border-border shadow-sm">
+          <p className="text-sm text-muted-foreground font-medium">Tổng sản phẩm</p>
+          <div className="flex items-baseline gap-2 mt-2">
+            <span className="text-2xl font-bold text-foreground">{products.length}</span>
+          </div>
         </div>
-        <div className="bg-card rounded-xl p-4 card-shadow">
-          <p className="text-sm text-muted-foreground">Đang bán</p>
-          <p className="text-2xl font-bold text-success">
-            {products.filter((p) => p.status === "active").length}
-          </p>
+        <div className="bg-card rounded-xl p-4 border border-border shadow-sm">
+          <p className="text-sm text-muted-foreground font-medium">Đang bán</p>
+          <div className="flex items-baseline gap-2 mt-2">
+            <span className="text-2xl font-bold text-success">
+              {products.filter((p) => p.status === "active").length}
+            </span>
+          </div>
         </div>
-        <div className="bg-card rounded-xl p-4 card-shadow">
-          <p className="text-sm text-muted-foreground">Hết hàng</p>
-          <p className="text-2xl font-bold text-destructive">
-            {products.filter((p) => p.totalStock === 0).length}
-          </p>
+        <div className="bg-card rounded-xl p-4 border border-border shadow-sm">
+          <p className="text-sm text-muted-foreground font-medium">Hết hàng</p>
+          <div className="flex items-baseline gap-2 mt-2">
+            <span className="text-2xl font-bold text-destructive">
+              {products.filter((p) => p.totalStock === 0).length}
+            </span>
+          </div>
         </div>
-        <div className="bg-card rounded-xl p-4 card-shadow">
-          <p className="text-sm text-muted-foreground">Tồn kho thấp</p>
-          <p className="text-2xl font-bold text-warning">
-            {products.filter((p) => p.totalStock > 0 && p.totalStock < 10).length}
-          </p>
+        <div className="bg-card rounded-xl p-4 border border-border shadow-sm">
+          <p className="text-sm text-muted-foreground font-medium">Tồn kho thấp</p>
+          <div className="flex items-baseline gap-2 mt-2">
+            <span className="text-2xl font-bold text-warning">
+              {products.filter((p) => p.totalStock > 0 && p.totalStock < 10).length}
+            </span>
+          </div>
         </div>
+      </div>
+
+      {/* Filters */}
+       <div className="flex items-center gap-4">
+        <Select
+          value={statusFilter}
+          onValueChange={(value) => setStatusFilter(value as "all" | "active" | "inactive" | "draft")}
+        >
+          <SelectTrigger className="w-[180px]">
+            <SelectValue placeholder="Trạng thái" />
+          </SelectTrigger>
+          <SelectContent className="dropdown-content">
+            <SelectItem value="all">Tất cả trạng thái</SelectItem>
+            <SelectItem value="active">Đang bán</SelectItem>
+            <SelectItem value="inactive">Ngừng bán</SelectItem>
+            <SelectItem value="draft">Nháp</SelectItem>
+          </SelectContent>
+        </Select>
+
+        <Select
+          value={categoryFilter}
+          onValueChange={setCategoryFilter}
+        >
+          <SelectTrigger className="w-[180px]">
+            <SelectValue placeholder="Danh mục" />
+          </SelectTrigger>
+          <SelectContent className="dropdown-content">
+            <SelectItem value="all">Tất cả danh mục</SelectItem>
+            {flatCategories.map((c) => (
+                <SelectItem key={c._id} value={c._id}>
+                    <span style={{ paddingLeft: `${(c as any).level * 10}px` }}>
+                        {c.name}
+                    </span>
+                </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
 
       {/* Data Table */}
@@ -438,7 +546,7 @@ export default function ProductsPage() {
         </div>
       ) : (
         <DataTable
-          data={products}
+          data={filteredProducts}
           columns={columns}
           searchKey="name"
           searchPlaceholder="Tìm kiếm sản phẩm..."
@@ -448,13 +556,59 @@ export default function ProductsPage() {
       <AddProductModal
         open={isModalOpen}
         onOpenChange={setIsModalOpen}
-        categories={categories}
-        brands={brands}
-        onSuccess={async () => {
+        initialData={selectedProduct} // Pass selected product
+        onSuccess={async (newProduct) => {
           const res = await productApi.getProducts();
           setProducts(res.data.data || res.data);
+          setSelectedProduct(null);
         }}
       />
+
+      {/* Delete Confirm Dialog */}
+      <Dialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-destructive">
+              <AlertTriangle className="h-5 w-5" />
+              Xác nhận xóa
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="py-4">
+            <p className="text-muted-foreground">
+              Bạn có chắc chắn muốn xóa sản phẩm{" "}
+              <span className="font-bold text-foreground">
+                {productToDelete?.name}
+              </span>
+              ?
+            </p>
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setDeleteConfirmOpen(false)}
+              disabled={isDeleting}
+            >
+              Hủy
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleConfirmDelete}
+              disabled={isDeleting}
+            >
+              {isDeleting ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Đang xóa...
+                </>
+              ) : (
+                "Xóa sản phẩm"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -22,6 +22,7 @@ interface AuthContextType {
   signIn: (email: string, password: string) => Promise<{ error?: AuthError | null }>;
   signUp: (email: string, password: string, fullName: string) => Promise<{ error?: AuthError | null }>;
   signOut: () => Promise<void>;
+  refreshUser: () => Promise<void>;
 }
 
 export function useAuth(): AuthContextType {
@@ -30,69 +31,52 @@ export function useAuth(): AuthContextType {
   const [loading, setLoading] = useState(true);
   const router = useRouter();
 
-  // Kiểm tra xem user đã đăng nhập chưa khi mount
-  useEffect(() => {
-    const checkAuth = async () => {
-      try {
-        // Lấy thông tin user từ API (token ở cookies)
-        const response = await authApi.getCurrentUser();
-        const userData = response.data;
-        setUser(userData);
-        setIsAuthenticated(true);
-      } catch (error) {
-        // Nếu lỗi 401 hoặc không có token, user chưa login
-        const axiosError = error as AxiosError;
-        if (axiosError.response?.status === 401) {
-          // Silently fail - user chưa login
-          setUser(null);
-          setIsAuthenticated(false);
-        } else {
-          // Lỗi khác (network, server error), vẫn set loading = false
-          setUser(null);
-          setIsAuthenticated(false);
-        }
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    checkAuth();
+  const fetchUser = useCallback(async () => {
+    try {
+      const response = await authApi.getCurrentUser();
+      setUser(response.data);
+      setIsAuthenticated(true);
+    } catch (error) {
+      setUser(null);
+      setIsAuthenticated(false);
+    } finally {
+      setLoading(false);
+    }
   }, []);
+
+  // Check auth on mount
+  useEffect(() => {
+    fetchUser();
+  }, [fetchUser]);
 
   const signIn = useCallback(
     async (email: string, password: string): Promise<{ error?: AuthError | null }> => {
       try {
-        const response = await authApi.login(email, password);
-        const userData = response.data;
-
-        setUser(userData);
-        setIsAuthenticated(true);
-
+        await authApi.login(email, password);
+        // After login, fetch the user details to update state
+        await fetchUser();
         return { error: null };
       } catch (error) {
         const axiosError = error as AxiosError;
         let errorMessage = 'Đăng nhập thất bại';
 
-        // Lấy error message từ response data trước tiên
         if (axiosError.response?.data) {
-          const responseData = axiosError.response.data as Record<string, unknown>;
-          if (responseData.message && typeof responseData.message === 'string') {
-            errorMessage = responseData.message;
+          const responseData = axiosError.response.data as Record<string, unknown>; // More explicit typing
+          if (typeof responseData.message === 'string') {
+             errorMessage = responseData.message;
           } else if (axiosError.response?.status === 401) {
             errorMessage = 'Invalid login credentials';
           } else if (axiosError.response?.status === 403) {
             errorMessage = 'Email not confirmed';
           }
         } else if (axiosError.message) {
-          errorMessage = axiosError.message;
-        } else {
-          errorMessage = 'Có lỗi xảy ra. Vui lòng thử lại.';
+           errorMessage = axiosError.message;
         }
 
         return { error: { message: errorMessage } };
       }
     },
-    []
+    [fetchUser]
   );
 
   const signUp = useCallback(
@@ -104,20 +88,15 @@ export function useAuth(): AuthContextType {
         const axiosError = error as AxiosError;
         let errorMessage = 'Đăng ký thất bại';
 
-        // Lấy error message từ response data
         if (axiosError.response?.data) {
-          const responseData = axiosError.response.data as Record<string, unknown>;
-          if (responseData.message && typeof responseData.message === 'string') {
-            errorMessage = responseData.message;
-          } else if (axiosError.response?.status === 409) {
-            errorMessage = 'User already registered';
-          } else if (axiosError.response?.status === 400) {
-            errorMessage = 'Dữ liệu không hợp lệ. Vui lòng kiểm tra lại thông tin.';
-          }
+           const responseData = axiosError.response.data as Record<string, unknown>;
+           if (typeof responseData.message === 'string') {
+              errorMessage = responseData.message;
+           } else if (axiosError.response?.status === 409) {
+             errorMessage = 'User already registered';
+           }
         } else if (axiosError.message) {
-          errorMessage = axiosError.message;
-        } else {
-          errorMessage = 'Có lỗi xảy ra. Vui lòng thử lại.';
+            errorMessage = axiosError.message;
         }
 
         return { error: { message: errorMessage } };
@@ -143,5 +122,6 @@ export function useAuth(): AuthContextType {
     signIn,
     signUp,
     signOut,
+    refreshUser: fetchUser
   };
 }

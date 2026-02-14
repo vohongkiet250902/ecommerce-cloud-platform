@@ -146,7 +146,7 @@ export default function OrdersPage() {
     },
     {
       key: "items",
-      header: "SP",
+      header: "Sản phẩm",
       render: (order: Order) => <span>{order.items?.length || 0}</span>,
     },
     {
@@ -259,10 +259,6 @@ export default function OrdersPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline">
-            <Download className="h-4 w-4 mr-2" />
-            Xuất Excel
-          </Button>
           <Button variant="outline" onClick={fetchOrders}>
             <RefreshCw className="h-4 w-4 mr-2" />
             Làm mới
@@ -318,7 +314,7 @@ export default function OrdersPage() {
           <SelectTrigger className="w-[180px]">
             <SelectValue placeholder="Trạng thái" />
           </SelectTrigger>
-          <SelectContent>
+          <SelectContent className="dropdown-content">
             <SelectItem value="all">Tất cả trạng thái</SelectItem>
             <SelectItem value="pending">Chờ xử lý</SelectItem>
             <SelectItem value="paid">Đã thanh toán (Chờ giao)</SelectItem>
@@ -332,7 +328,7 @@ export default function OrdersPage() {
           <SelectTrigger className="w-[180px]">
             <SelectValue placeholder="Thanh toán" />
           </SelectTrigger>
-          <SelectContent>
+          <SelectContent className="dropdown-content">
             <SelectItem value="all">Tất cả</SelectItem>
             <SelectItem value="pending">Chưa thanh toán</SelectItem>
             <SelectItem value="paid">Đã thanh toán</SelectItem>

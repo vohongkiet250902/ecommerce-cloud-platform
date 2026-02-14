@@ -61,7 +61,7 @@ export interface Category {
 
 const formSchema = z.object({
   name: z.string().min(1, "Vui lòng nhập tên danh mục"),
-  slug: z.string().min(1, "Slug không hợp lệ"),
+  slug: z.string(),
 });
 
 type FormValues = z.infer<typeof formSchema>;
@@ -145,7 +145,7 @@ const CategoryItem = ({
               </Button>
             </DropdownMenuTrigger>
 
-            <DropdownMenuContent align="end" className="w-48">
+            <DropdownMenuContent align="end" className="w-48 dropdown-content">
               <DropdownMenuItem onClick={() => onEdit(category)}>
                 <Edit className="mr-2 h-4 w-4" />
                 Chỉnh sửa
@@ -236,14 +236,14 @@ export default function CategoriesPage() {
   // Generate slug automatically when name changes
   const watchedName = form.watch("name");
   useEffect(() => {
-    if (watchedName) {
-      const slug = slugify(watchedName, {
-        lower: true,
-        strict: true,
-        locale: "vi",
-      });
-      form.setValue("slug", slug, { shouldValidate: true });
-    }
+    const slug = watchedName
+      ? slugify(watchedName, {
+          lower: true,
+          strict: true,
+          locale: "vi",
+        })
+      : "";
+    form.setValue("slug", slug, { shouldValidate: true });
   }, [watchedName, form]);
 
   /* ===================== STATS ===================== */
@@ -505,7 +505,6 @@ export default function CategoriesPage() {
                     <FormControl>
                       <Input {...field} disabled className="bg-muted/50" />
                     </FormControl>
-                    <FormMessage />
                   </FormItem>
                 )}
               />
@@ -545,10 +544,6 @@ export default function CategoriesPage() {
                 {categoryToDelete?.name}
               </span>
               ?
-            </p>
-            <p className="text-sm text-muted-foreground mt-2">
-              Hành động này không thể hoàn tác. Các sản phẩm thuộc danh mục này
-              sẽ bị mất liên kết danh mục.
             </p>
           </div>
 

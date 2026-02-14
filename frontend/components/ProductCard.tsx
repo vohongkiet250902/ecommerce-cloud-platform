@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { motion } from "framer-motion";
 
 interface ProductCardProps {
-  id: number;
+  id: string | number;
   name: string;
   price: number;
   originalPrice?: number;
@@ -44,18 +44,24 @@ export function ProductCard({
       >
         {/* Image Container */}
         <div className="relative aspect-square overflow-hidden bg-secondary/50">
-          {/* <Image
-            src={image}
-            alt={name}
-            fill
-            sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 25vw"
-            className="object-cover group-hover:scale-105 transition-transform duration-500"
-            priority={false}
-          /> */}
+          {/* {image ? (
+            <Image
+              src={image}
+              alt={name}
+              fill
+              sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 25vw"
+              className="object-cover group-hover:scale-105 transition-transform duration-500"
+              priority={false}
+            />
+          ) : (
+             <div className="w-full h-full flex items-center justify-center bg-secondary text-muted-foreground">
+              <span className="text-xs">No Image</span>
+             </div>
+          )} */}
 
           {/* Badges */}
           {badge && (
-            <div className="absolute top-3 left-3">
+            <div className="absolute top-3 left-3 z-10">
               <span
                 className={`${
                   badge === "new"

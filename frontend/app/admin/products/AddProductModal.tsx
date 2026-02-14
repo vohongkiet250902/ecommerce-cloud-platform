@@ -97,11 +97,13 @@ interface Variant {
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  initialData?: any;
+  onSuccess?: (newProduct: any) => void;
 }
 
 /* ================= COMPONENT ================= */
 
-export default function AddProductModal({ open, onOpenChange }: Props) {
+export default function AddProductModal({ open, onOpenChange, initialData, onSuccess }: Props) {
   /* ================= REDUX ================= */
 
   const categories = useSelector(
@@ -162,28 +164,50 @@ export default function AddProductModal({ open, onOpenChange }: Props) {
   /* ================= AUTO SLUG ================= */
 
   useEffect(() => {
-    if (!productName) return;
-    const slug = slugify(productName, {
-      lower: true,
-      strict: true,
-      locale: "vi",
-    });
+    const slug = productName
+      ? slugify(productName, {
+          lower: true,
+          strict: true,
+          locale: "vi",
+        })
+      : "";
 
     setValue("slug", slug);
   }, [productName, setValue]);
 
   /* ================= RESET WHEN CLOSE MODAL ================= */
-
   useEffect(() => {
-    if (!open) {
-      reset();
-      setVariants([{ sku: "", price: 0, stock: 0, attributes: [{ key: "", value: "" }] }]);
-      setSpecs([]);
-      setImages([]);
-      setIsActive(true);
+    if (open) {
+      if (initialData) {
+        // Editing mode: Populate form
+        reset({
+          name: initialData.name,
+          slug: initialData.slug,
+          categoryId: initialData.categoryId,
+          brandId: initialData.brandId,
+          description: initialData.description,
+        });
+        setVariants(initialData.variants || []);
+        setSpecs(initialData.specs || []);
+        setImages(initialData.images || []);
+        setIsActive(initialData.status === "active");
+      } else {
+        // Create mode: Reset form
+        reset({
+          name: "",
+          slug: "",
+          categoryId: "",
+          brandId: "",
+          description: "",
+        });
+        setVariants([{ sku: "", price: 0, stock: 0, attributes: [{ key: "", value: "" }] }]);
+        setSpecs([]);
+        setImages([]);
+        setIsActive(true);
+      }
       setImageUrlInput("");
     }
-  }, [open, reset]);
+  }, [open, initialData, reset]);
 
   /* ================= UPLOAD IMAGE ================= */
 
@@ -357,10 +381,14 @@ export default function AddProductModal({ open, onOpenChange }: Props) {
     };
 
     try {
-      const res = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL}/admin/products`,
-        {
-          method: "POST",
+      const url = initialData
+        ? `${process.env.NEXT_PUBLIC_API_URL}/admin/products/${initialData._id}`
+        : `${process.env.NEXT_PUBLIC_API_URL}/admin/products`;
+      
+      const method = initialData ? "PUT" : "POST";
+
+      const res = await fetch(url, {
+          method,
           headers: { "Content-Type": "application/json" },
           credentials: "include",
           body: JSON.stringify(payload),
@@ -369,16 +397,24 @@ export default function AddProductModal({ open, onOpenChange }: Props) {
 
       if (!res.ok) {
         const errorData = await res.json();
-        throw new Error(errorData.message || "Tạo sản phẩm thất bại");
+        throw new Error(errorData.message || (initialData ? "Cập nhật thất bại" : "Tạo thất bại"));
       }
 
-      toast({ title: "Thêm sản phẩm thành công!", variant: "success" });
+      toast({ 
+        title: initialData ? "Cập nhật thành công!" : "Thêm sản phẩm thành công!", 
+        variant: "success" 
+      });
 
-      reset();
-      setVariants([]);
-      setSpecs([]);
-      setImages([]);
-      setIsActive(true);
+      if (!initialData) {
+          reset();
+          setVariants([]);
+          setSpecs([]);
+          setImages([]);
+          setIsActive(true);
+      }
+      if (onSuccess) {
+          onSuccess(null);
+      }
       onOpenChange(false);
     } catch (err: any) {
       toast({ title: err.message || "Tạo sản phẩm thất bại", variant: "destructive" });
@@ -391,7 +427,7 @@ export default function AddProductModal({ open, onOpenChange }: Props) {
         <DialogHeader className="px-6 py-4 border-b border-border/40 bg-muted/20">
           <DialogTitle className="text-xl font-bold flex items-center gap-3 text-primary relative">
             <Package className="h-6 w-6" />
-            Thêm sản phẩm mới
+            {initialData ? "Cập nhật sản phẩm" : "Thêm sản phẩm mới"}
           </DialogTitle>
         </DialogHeader>
 
@@ -470,7 +506,7 @@ export default function AddProductModal({ open, onOpenChange }: Props) {
                                   <SelectTrigger className="h-10 bg-background/50">
                                     <SelectValue placeholder="Chọn danh mục" />
                                   </SelectTrigger>
-                                  <SelectContent className="max-h-60">
+                                  <SelectContent className="max-h-60 dropdown-content">
                                     {flatCategories.map((c) => (
                                       <SelectItem key={c._id} value={c._id}>
                                         <span style={{ paddingLeft: `${c.level * 10}px` }}>
@@ -493,7 +529,7 @@ export default function AddProductModal({ open, onOpenChange }: Props) {
                                   <SelectTrigger className="h-10 bg-background/50">
                                     <SelectValue placeholder="Chọn thương hiệu" />
                                   </SelectTrigger>
-                                  <SelectContent className="max-h-60">
+                                  <SelectContent className="max-h-60 dropdown-content">
                                     {brands.map((b) => (
                                       <SelectItem key={b._id} value={b._id}>
                                         {b.name}
@@ -508,12 +544,13 @@ export default function AddProductModal({ open, onOpenChange }: Props) {
 
                              <div className="space-y-3">
                               <Label className="flex items-center justify-between">
-                                  Đường dẫn tĩnh (Slug)
-                                  <span className="text-xs text-muted-foreground font-normal">Auto-generated</span>
+                                  Đường dẫn tĩnh
+                                  <span className="text-xs text-muted-foreground font-normal">Tự động tạo</span>
                               </Label>
                               <Input 
                                 {...register("slug")} 
                                 readOnly 
+                                disabled
                                 className="bg-muted/50 text-muted-foreground cursor-not-allowed border-dashed h-9 text-xs font-mono" 
                               />
                             </div>

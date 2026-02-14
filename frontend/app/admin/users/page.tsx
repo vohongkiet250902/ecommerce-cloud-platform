@@ -71,6 +71,22 @@ export default function UsersPage() {
   const { toast } = useToast();
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
+  const [statusFilter, setStatusFilter] = useState<"all" | "active" | "blocked">("all");
+  const [roleFilter, setRoleFilter] = useState<"all" | "user" | "admin">("all");
+
+  const filteredUsers = users.filter((user) => {
+    const matchesStatus =
+      statusFilter === "all"
+        ? true
+        : statusFilter === "active"
+        ? user.isActive
+        : !user.isActive;
+
+    const matchesRole =
+      roleFilter === "all" ? true : user.role === roleFilter;
+
+    return matchesStatus && matchesRole;
+  });
 
   const fetchUsers = async () => {
     try {
@@ -232,10 +248,6 @@ export default function UsersPage() {
           <p className="text-muted-foreground">Quản lý tài khoản người dùng và phân quyền</p>
         </div>
          <div className="flex items-center gap-2">
-          <Button variant="outline">
-            <Download className="h-4 w-4 mr-2" />
-            Xuất Excel
-          </Button>
           <Button variant="outline" onClick={fetchUsers}>
             <RefreshCw className="h-4 w-4 mr-2" />
             Làm mới
@@ -279,22 +291,28 @@ export default function UsersPage() {
 
       {/* Filters */}
        <div className="flex items-center gap-4">
-        <Select defaultValue="all">
+        <Select
+          value={statusFilter}
+          onValueChange={(value) => setStatusFilter(value as "all" | "active" | "blocked")}
+        >
           <SelectTrigger className="w-[180px]">
             <SelectValue placeholder="Trạng thái" />
           </SelectTrigger>
-          <SelectContent>
+          <SelectContent className="dropdown-content">
             <SelectItem value="all">Tất cả trạng thái</SelectItem>
             <SelectItem value="active">Hoạt động</SelectItem>
             <SelectItem value="blocked">Bị khóa</SelectItem>
           </SelectContent>
         </Select>
 
-        <Select defaultValue="all">
+        <Select
+          value={roleFilter}
+          onValueChange={(value) => setRoleFilter(value as "all" | "user" | "admin")}
+        >
           <SelectTrigger className="w-[180px]">
             <SelectValue placeholder="Vai trò" />
           </SelectTrigger>
-          <SelectContent>
+          <SelectContent className="dropdown-content">
             <SelectItem value="all">Tất cả vai trò</SelectItem>
             <SelectItem value="user">User</SelectItem>
             <SelectItem value="admin">Admin</SelectItem>
@@ -304,7 +322,7 @@ export default function UsersPage() {
 
       {/* Table */}
       <DataTable
-        data={users}
+        data={filteredUsers}
         columns={columns}
         searchPlaceholder="Tìm kiếm người dùng..."
         searchKey="fullName"

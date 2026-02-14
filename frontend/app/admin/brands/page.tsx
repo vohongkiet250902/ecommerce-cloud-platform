@@ -231,7 +231,7 @@ export default function BrandsPage() {
                   <MoreHorizontal className="h-4 w-4" />
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
+              <DropdownMenuContent align="end" className="dropdown-content">
                 <DropdownMenuItem onClick={() => handleOpenEdit(brand)}>
                   <Edit className="mr-2 h-4 w-4" />
                   Chỉnh sửa
@@ -406,9 +406,6 @@ export default function BrandsPage() {
                 {brandToDelete?.name}
               </span>
               ?
-            </p>
-            <p className="text-sm text-muted-foreground mt-2">
-              Hành động này không thể hoàn tác.
             </p>
           </div>
           <DialogFooter>

@@ -1,17 +1,17 @@
-import axios, { AxiosInstance, AxiosResponse, AxiosError } from 'axios';
+import axios, { AxiosInstance, AxiosResponse, AxiosError, InternalAxiosRequestConfig } from 'axios';
 
 const BASE_URL =
   process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080/api/v1';
 
 const apiClient: AxiosInstance = axios.create({
   baseURL: BASE_URL,
-  withCredentials: true, // Để gửi cookies cùng với request
+  withCredentials: true, // Send cookies with requests
   headers: {
     'Content-Type': 'application/json',
   },
 });
 
-// Interceptor: Xử lý token hết hạn tự động
+// Interceptor: Handle token refresh automatically
 let isRefreshing = false;
 let failedQueue: Array<{
   resolve: (token: string) => void;
@@ -36,13 +36,12 @@ const processQueue = (
 
 apiClient.interceptors.response.use(
   (response: AxiosResponse) => response,
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  async (error: AxiosError): Promise<any> => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const originalRequest = (error.config || {}) as Record<string, any>;
+  async (error: AxiosError) => {
+    const originalRequest = error.config as InternalAxiosRequestConfig & { _retry?: boolean };
 
-    // Không retry /users/me endpoint
-    if (originalRequest.url?.includes('/users/me')) {
+    // Do not retry for specific endpoints to avoid infinite loops
+    // Also skip if no config/url
+    if (!originalRequest || !originalRequest.url || originalRequest.url.includes('/users/me') || originalRequest.url.includes('/auth/login')) {
       return Promise.reject(error);
     }
 
@@ -52,7 +51,6 @@ apiClient.interceptors.response.use(
           failedQueue.push({ resolve, reject });
         })
           .then((token) => {
-            originalRequest.headers = originalRequest.headers || {};
             originalRequest.headers.Authorization = `Bearer ${token}`;
             return apiClient(originalRequest);
           })
@@ -66,13 +64,18 @@ apiClient.interceptors.response.use(
 
       try {
         const res = await apiClient.post('/auth/refresh');
+        const { accessToken } = res.data;
+        
         isRefreshing = false;
-        processQueue(null, res.data.accessToken);
+        processQueue(null, accessToken);
+        
+        // Update the header for the original request
+        originalRequest.headers.Authorization = `Bearer ${accessToken}`;
         return apiClient(originalRequest);
       } catch (err) {
         processQueue(err as AxiosError, null);
-        // Redirect đến trang login khi refresh token hết hạn
-        if (typeof window !== 'undefined') {
+        // Redirect to login only if we are in the browser and not already on auth page
+        if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/auth')) {
           window.location.href = '/auth';
         }
         return Promise.reject(err);
@@ -85,86 +88,55 @@ apiClient.interceptors.response.use(
 
 // API Endpoints
 export const authApi = {
-  // Đăng nhập
   login: (email: string, password: string) =>
     apiClient.post('/auth/login', { email, password }),
 
-  // Đăng ký
   register: (fullName: string, email: string, password: string) =>
     apiClient.post('/auth/register', { fullName, email, password }),
 
-  // Refresh token
   refresh: () => apiClient.post('/auth/refresh'),
-
-  // Đăng xuất
   logout: () => apiClient.post('/auth/logout'),
-
-  // Lấy thông tin user hiện tại
   getCurrentUser: () => apiClient.get('/users/me'),
 };
 
 export const productApi = {
-  // Lấy danh sách sản phẩm
   getProducts: (params?: Record<string, unknown>) =>
     apiClient.get('/products', { params }),
-
-  // Lấy chi tiết sản phẩm
   getProduct: (id: string) => apiClient.get(`/admin/products/${id}`),
-  // Tạo sản phẩm mới
+  getProductDetail: (slug: string) => apiClient.get(`/products/${slug}`),
   createProduct: (data: Record<string, unknown>) =>
     apiClient.post('/admin/products', data),
-
-  // Cập nhật sản phẩm
   updateProduct: (id: string, data: Record<string, unknown>) =>
     apiClient.put(`/admin/products/${id}`, data),
-  // Xóa sản phẩm
   deleteProduct: (id: string) => apiClient.delete(`/admin/products/${id}`),
 };
 
 export const categoryApi = {
-  // Lấy danh sách danh mục (public)
   getCategories: () => apiClient.get('/categories'),
-
-  // Tạo danh mục
   createCategory: (data: Record<string, unknown>) =>
     apiClient.post('/admin/categories', data),
-
-  // Cập nhật danh mục
   updateCategory: (id: string, data: Record<string, unknown>) =>
     apiClient.put(`/admin/categories/${id}`, data),
-  // Xóa danh mục
   deleteCategory: (id: string) =>
     apiClient.delete(`/admin/categories/${id}`),
 };
 
 export const brandApi = {
-  // Lấy danh sách thương hiệu
   getBrands: () => apiClient.get('/brands'),
-  // Lấy chi tiết thương hiệu
   getBrand: (id: string) => apiClient.get(`/admin/brands/${id}`),
-  // Tạo thương hiệu mới
   createBrand: (data: Record<string, unknown>) =>
     apiClient.post('/admin/brands', data),
-  // Cập nhật thương hiệu
   updateBrand: (id: string, data: Record<string, unknown>) =>
     apiClient.put(`/admin/brands/${id}`, data),
-  // Xóa thương hiệu
   deleteBrand: (id: string) => apiClient.delete(`/admin/brands/${id}`),
 };
 
 export const usersApi = {
-  // Lấy danh sách người dùng
   getUsers: (params?: Record<string, unknown>) =>
     apiClient.get('admin/users', { params }),
-
-  // Lấy chi tiết người dùng
   getUser: (id: string) => apiClient.get(`/users/${id}`),
-
-  // Cập nhật người dùng
   updateUser: (id: string, data: Record<string, unknown>) =>
     apiClient.put(`/users/${id}`, data),
-
-  // Khóa/mở khóa người dùng
   toggleUserStatus: (id: string, isActive: boolean) =>
     apiClient.patch(`/admin/users/${id}/status`, { isActive }),
 };
