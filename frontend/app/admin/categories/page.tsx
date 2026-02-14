@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useRef, useMemo } from "react";
+import { useEffect, useState, useMemo } from "react";
 import {
   Plus,
   Edit,
@@ -9,9 +9,13 @@ import {
   FolderTree,
   ChevronRight,
   Loader2,
-  X,
+  AlertTriangle,
 } from "lucide-react";
 import { useDispatch, useSelector } from "react-redux";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import * as z from "zod";
+import slugify from "slugify";
 
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -22,7 +26,22 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+  DialogClose,
+} from "@/components/ui/dialog";
+import {
+  Form,
+  FormControl,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from "@/components/ui/form";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 
@@ -31,7 +50,7 @@ import { fetchCategoriesThunk } from "@/store/categories/categories.slice";
 import { categoryApi } from "@/services/api";
 
 /* ===================== TYPES ===================== */
-interface Category {
+export interface Category {
   _id: string;
   name: string;
   slug: string;
@@ -40,24 +59,21 @@ interface Category {
   children?: Category[];
 }
 
-/* ===================== SLUG ===================== */
-const generateSlug = (value: string) =>
-  value
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/đ/g, "d")
-    .replace(/[^a-z0-9\s-]/g, "")
-    .trim()
-    .replace(/\s+/g, "-");
+const formSchema = z.object({
+  name: z.string().min(1, "Vui lòng nhập tên danh mục"),
+  slug: z.string().min(1, "Slug không hợp lệ"),
+});
 
-/* ===================== CATEGORY ITEM ===================== */
+type FormValues = z.infer<typeof formSchema>;
+
+/* ===================== COMPONENTS ===================== */
+
 interface ItemProps {
   category: Category;
   level?: number;
   onEdit: (c: Category) => void;
   onAddChild: (c: Category) => void;
-  onDelete: (id: string) => void;
+  onDelete: (c: Category) => void;
   deletingId: string | null;
 }
 
@@ -69,45 +85,67 @@ const CategoryItem = ({
   onDelete,
   deletingId,
 }: ItemProps) => {
+  const [isExpanded, setIsExpanded] = useState(true);
+  const hasChildren = category.children && category.children.length > 0;
+
   return (
     <>
       <div
         className={cn(
-          "flex items-center justify-between p-4 hover:bg-secondary/30 transition-colors border-b border-border last:border-0",
-          level > 0 && "bg-secondary/20",
+          "flex items-center justify-between p-3 sm:p-4 hover:bg-secondary/30 transition-colors border-b border-border/40 last:border-0 group",
+          level > 0 && "bg-secondary/10",
         )}
         style={{ paddingLeft: `${16 + level * 24}px` }}
       >
         {/* LEFT */}
-        <div className="flex items-center gap-3">
-          {category.children?.length ? (
-            <ChevronRight className="h-4 w-4 text-muted-foreground" />
-          ) : (
-            <div className="w-4" />
-          )}
+        <div className="flex items-center gap-3 overflow-hidden">
+          <div
+            className={cn(
+              "w-5 h-5 flex items-center justify-center rounded-sm transition-colors",
+              hasChildren
+                ? "cursor-pointer hover:bg-muted"
+                : "opacity-0 pointer-events-none",
+            )}
+            onClick={() => setIsExpanded(!isExpanded)}
+          >
+            <ChevronRight
+              className={cn(
+                "h-4 w-4 text-muted-foreground transition-transform",
+                isExpanded && "rotate-90",
+              )}
+            />
+          </div>
 
-          <FolderTree className="h-5 w-5 text-primary" />
+          <FolderTree className="h-5 w-5 text-primary shrink-0" />
 
-          <div>
-            <p className="font-medium text-foreground">{category.name}</p>
-            <p className="text-sm text-muted-foreground">/{category.slug}</p>
+          <div className="flex flex-col min-w-0">
+            <span className="font-medium text-foreground truncate">
+              {category.name}
+            </span>
+            <span className="text-xs text-muted-foreground truncate">
+              /{category.slug}
+            </span>
           </div>
         </div>
 
         {/* RIGHT */}
-        <div className="flex items-center gap-4">
-          <Badge variant="secondary">
+        <div className="flex items-center gap-2 sm:gap-4 shrink-0">
+          <Badge variant="secondary" className="hidden sm:inline-flex">
             {category.productCount ?? 0} sản phẩm
           </Badge>
 
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon-sm">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity"
+              >
                 <MoreHorizontal className="h-4 w-4" />
               </Button>
             </DropdownMenuTrigger>
 
-            <DropdownMenuContent align="end" className="dropdown-content">
+            <DropdownMenuContent align="end" className="w-48">
               <DropdownMenuItem onClick={() => onEdit(category)}>
                 <Edit className="mr-2 h-4 w-4" />
                 Chỉnh sửa
@@ -121,30 +159,35 @@ const CategoryItem = ({
               )}
 
               <DropdownMenuItem
-                className="text-destructive"
+                className="text-destructive focus:text-destructive"
                 disabled={deletingId === category._id}
-                onClick={() => onDelete(category._id)}
+                onClick={() => onDelete(category)}
               >
                 {deletingId === category._id ? (
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                 ) : (
                   <Trash2 className="mr-2 h-4 w-4" />
                 )}
-                Xóa
+                Xóa danh mục
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
       </div>
 
-      {category.children?.map((child) => (
-        <CategoryItem
-          key={child._id}
-          category={child}
-          level={level + 1}
-          {...{ onEdit, onAddChild, onDelete, deletingId }}
-        />
-      ))}
+      {hasChildren &&
+        isExpanded &&
+        category.children?.map((child) => (
+          <CategoryItem
+            key={child._id}
+            category={child}
+            level={level + 1}
+            onEdit={onEdit}
+            onAddChild={onAddChild}
+            onDelete={onDelete}
+            deletingId={deletingId}
+          />
+        ))}
     </>
   );
 };
@@ -158,18 +201,31 @@ export default function CategoriesPage() {
     (state: RootState) => state.categories,
   );
 
-  const [editing, setEditing] = useState<Category | null>(null);
-  const [parentForChild, setParentForChild] = useState<Category | null>(null);
-  const [showParentModal, setShowParentModal] = useState(false);
-  const [showChildModal, setShowChildModal] = useState(false);
-  const [deletingId, setDeletingId] = useState<string | null>(null);
-  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
-  const [submitting, setSubmitting] = useState(false);
-  const [form, setForm] = useState({ name: "", slug: "" });
-  const [nameError, setNameError] = useState("");
   const [initialized, setInitialized] = useState(false);
-  const parentInputRef = useRef<HTMLInputElement>(null);
-  const childInputRef = useRef<HTMLInputElement>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  // Modal states
+  const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [dialogMode, setDialogMode] = useState<
+    "create" | "edit" | "create_child"
+  >("create");
+  const [selectedCategory, setSelectedCategory] = useState<Category | null>(
+    null,
+  );
+
+  // Delete confirm state
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [categoryToDelete, setCategoryToDelete] = useState<Category | null>(
+    null,
+  );
+
+  const form = useForm<FormValues>({
+    resolver: zodResolver(formSchema),
+    defaultValues: {
+      name: "",
+      slug: "",
+    },
+  });
 
   useEffect(() => {
     dispatch(fetchCategoriesThunk()).finally(() => {
@@ -177,466 +233,350 @@ export default function CategoriesPage() {
     });
   }, [dispatch]);
 
+  // Generate slug automatically when name changes
+  const watchedName = form.watch("name");
   useEffect(() => {
-    if (showParentModal) {
-      setTimeout(() => {
-        parentInputRef.current?.focus();
-      }, 1);
+    if (watchedName) {
+      const slug = slugify(watchedName, {
+        lower: true,
+        strict: true,
+        locale: "vi",
+      });
+      form.setValue("slug", slug, { shouldValidate: true });
     }
-  }, [showParentModal]);
-
-  useEffect(() => {
-    if (showChildModal && parentForChild) {
-      setTimeout(() => {
-        childInputRef.current?.focus();
-      }, 1);
-    }
-  }, [showChildModal, parentForChild]);
+  }, [watchedName, form]);
 
   /* ===================== STATS ===================== */
-  const countCategories = (list: Category[]): number =>
-    list.reduce(
-      (total, cat) =>
-        total + 1 + (cat.children ? countCategories(cat.children) : 0),
-      0,
-    );
-
-  const countProducts = (list: Category[]): number =>
-    list.reduce(
-      (total, cat) =>
-        total +
-        (cat.productCount || 0) +
-        (cat.children ? countProducts(cat.children) : 0),
-      0,
-    );
-
-  const totalCategories = useMemo(() => {
-    return countCategories(categories);
-  }, [categories]);
-
-  const totalProducts = useMemo(() => {
-    return countProducts(categories);
+  const { totalCategories, totalProducts } = useMemo(() => {
+    const count = (list: Category[]): { cats: number; prods: number } => {
+      return list.reduce(
+        (acc, cat) => {
+          const childrenCount = cat.children
+            ? count(cat.children)
+            : { cats: 0, prods: 0 };
+          return {
+            cats: acc.cats + 1 + childrenCount.cats,
+            prods: acc.prods + (cat.productCount || 0) + childrenCount.prods,
+          };
+        },
+        { cats: 0, prods: 0 },
+      );
+    };
+    const res = count(categories);
+    return { totalCategories: res.cats, totalProducts: res.prods };
   }, [categories]);
 
   /* ===================== HANDLERS ===================== */
-  const openAddParent = () => {
-    setEditing(null);
-    setForm({ name: "", slug: "" });
-    setNameError("");
-    setShowParentModal(true);
+  const handleOpenCreateResponse = () => {
+    setDialogMode("create");
+    setSelectedCategory(null);
+    form.reset({ name: "", slug: "" });
+    setIsDialogOpen(true);
   };
 
-  const openEditParent = (cat: Category) => {
-    setEditing(cat);
-    setForm({ name: cat.name, slug: cat.slug });
-    setNameError("");
-    setShowParentModal(true);
+  const handleOpenEdit = (cat: Category) => {
+    setDialogMode("edit");
+    setSelectedCategory(cat);
+    form.reset({ name: cat.name, slug: cat.slug });
+    setIsDialogOpen(true);
   };
 
-  const openAddChild = (cat: Category) => {
-    if (cat.parentId) {
+  const handleOpenAddChild = (parent: Category) => {
+    if (parent.parentId) {
       toast({
-        title: "❌ Không thể tạo danh mục con",
-        description: "Danh mục con không thể có thêm cấp con",
+        title: "Không thể tạo danh mục con",
+        description: "Hệ thống hiện tại chỉ hỗ trợ tối đa 2 cấp danh mục.",
         variant: "destructive",
       });
       return;
     }
-
-    setParentForChild(cat);
-    setForm({ name: "", slug: "" });
-    setNameError("");
-    setShowChildModal(true);
+    setDialogMode("create_child");
+    setSelectedCategory(parent);
+    form.reset({ name: "", slug: "" });
+    setIsDialogOpen(true);
   };
 
-  const handleSaveParent = async () => {
-    if (!form.name.trim()) {
-      setNameError("Vui lòng nhập tên danh mục");
-      return;
-    }
-
-    try {
-      setSubmitting(true);
-
-      if (editing) {
-        await categoryApi.updateCategory(editing._id, form);
-      } else {
-        await categoryApi.createCategory({ ...form, parentId: null });
-      }
-
+  const handleOpenDelete = (cat: Category) => {
+    if (cat.children && cat.children.length > 0) {
       toast({
-        title: "✅ Thành công",
-        description: "Lưu danh mục thành công",
-        variant: "success",
-      });
-      setShowParentModal(false);
-      setEditing(null);
-      setForm({ name: "", slug: "" });
-      dispatch(fetchCategoriesThunk());
-    } catch (err: any) {
-      handleCategoryError(err);
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const handleSaveChild = async () => {
-    if (!form.name.trim()) {
-      setNameError("Vui lòng nhập tên danh mục");
-      return;
-    }
-    if (!parentForChild) return;
-
-    try {
-      setSubmitting(true);
-
-      await categoryApi.createCategory({
-        ...form,
-        parentId: parentForChild._id,
-      });
-
-      toast({
-        title: "✅ Thành công",
-        description: "Thêm danh mục con thành công",
-        variant: "success",
-      });
-      setShowChildModal(false);
-      setParentForChild(null);
-      setForm({ name: "", slug: "" });
-      dispatch(fetchCategoriesThunk());
-    } catch (err: any) {
-      handleCategoryError(err);
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const deleteCategory = (id: string) => {
-    setConfirmDeleteId(id);
-  };
-
-  const confirmDeleteCategory = async () => {
-    if (!confirmDeleteId) return;
-
-    const findCategory = (list: Category[]): Category | null => {
-      for (const c of list) {
-        if (c._id === confirmDeleteId) return c;
-        if (c.children?.length) {
-          const found = findCategory(c.children);
-          if (found) return found;
-        }
-      }
-      return null;
-    };
-
-    const category = findCategory(categories);
-
-    if (category?.children && category.children.length > 0) {
-      toast({
-        title: "❌ Không thể xóa danh mục",
-        description: "Danh mục đang chứa danh mục con",
+        title: "Không thể xóa",
+        description:
+          "Danh mục này đang chứa danh mục con. Vui lòng xóa danh mục con trước.",
         variant: "destructive",
       });
-      setConfirmDeleteId(null);
       return;
     }
+    setCategoryToDelete(cat);
+    setDeleteConfirmOpen(true);
+  };
 
+  const onSubmit = async (values: FormValues) => {
     try {
-      setDeletingId(confirmDeleteId);
-      await categoryApi.deleteCategory(confirmDeleteId);
-
-      toast({
-        title: "✅ Thành công",
-        description: "Đã xóa danh mục thành công",
-        variant: "success",
-      });
+      if (dialogMode === "edit" && selectedCategory) {
+        await categoryApi.updateCategory(selectedCategory._id, values);
+        toast({ title: "Cập nhật thành công", variant: "success" });
+      } else if (dialogMode === "create") {
+        await categoryApi.createCategory({ ...values, parentId: null });
+        toast({ title: "Tạo danh mục gốc thành công", variant: "success" });
+      } else if (dialogMode === "create_child" && selectedCategory) {
+        await categoryApi.createCategory({
+          ...values,
+          parentId: selectedCategory._id,
+        });
+        toast({ title: "Tạo danh mục con thành công", variant: "success" });
+      }
 
       dispatch(fetchCategoriesThunk());
-    } catch (err: any) {
-      const rawMessage = err?.response?.data?.message;
-      const message = Array.isArray(rawMessage)
-        ? rawMessage.join(", ")
-        : rawMessage;
-
+      setIsDialogOpen(false);
+    } catch (error: any) {
+      const msg = error?.response?.data?.message || "Có lỗi xảy ra";
       toast({
-        title: "❌ Không thể xóa danh mục",
-        description: message || "Danh mục này không thể xóa",
+        title: "Thất bại",
+        description: Array.isArray(msg) ? msg.join(", ") : msg,
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!categoryToDelete) return;
+
+    try {
+      setDeletingId(categoryToDelete._id);
+      await categoryApi.deleteCategory(categoryToDelete._id);
+      toast({ title: "Đã xóa danh mục", variant: "success" });
+      dispatch(fetchCategoriesThunk());
+      setDeleteConfirmOpen(false);
+    } catch (error: any) {
+      const msg = error?.response?.data?.message || "Không thể xóa danh mục";
+      toast({
+        title: "Xóa thất bại",
+        description: typeof msg === "string" ? msg : JSON.stringify(msg),
         variant: "destructive",
       });
     } finally {
       setDeletingId(null);
-      setConfirmDeleteId(null);
+      setCategoryToDelete(null);
     }
   };
-
-  const handleCategoryError = (err: any) => {
-    const data = err?.response?.data;
-
-    if (typeof data?.message === "string") {
-      if (
-        data.message.toLowerCase().includes("slug") ||
-        data.message.toLowerCase().includes("exist")
-      ) {
-        setNameError("Tên danh mục đã tồn tại");
-      } else {
-        setNameError(data.message);
-      }
-      return;
-    }
-
-    if (Array.isArray(data?.message)) {
-      setNameError(data.message.join(", "));
-      return;
-    }
-
-    setNameError("Tên danh mục đã tồn tại");
-  };
-
-  /* ===================== LOADING STATE ===================== */
 
   if (!initialized && loading) {
     return (
-      <div className="h-screen flex items-center justify-center">
+      <div className="h-[calc(100vh-200px)] flex items-center justify-center">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
       </div>
     );
   }
 
-  /* ===================== RENDER ===================== */
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 p-1">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold">Danh mục</h1>
-          <p className="text-muted-foreground">Quản lý danh mục sản phẩm</p>
+          <h1 className="text-2xl font-bold tracking-tight">
+            Danh mục sản phẩm
+          </h1>
+          <p className="text-muted-foreground">
+            Quản lý cấu trúc danh mục cho cửa hàng của bạn
+          </p>
         </div>
-        <Button onClick={openAddParent}>
+        <Button
+          onClick={handleOpenCreateResponse}
+          className="shadow-lg hover:shadow-xl transition-all"
+        >
           <Plus className="mr-2 h-4 w-4" />
-          Thêm danh mục
+          Thêm danh mục gốc
         </Button>
       </div>
 
       {/* Stats */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="bg-card rounded-xl p-4 card-shadow">
-          <p className="text-sm text-muted-foreground">Tổng danh mục</p>
-          <p className="text-2xl font-bold">{totalCategories}</p>
+        <div className="bg-card rounded-xl p-4 border border-border shadow-sm">
+          <p className="text-sm text-muted-foreground font-medium">
+            Tổng danh mục
+          </p>
+          <div className="flex items-baseline gap-2 mt-2">
+            <span className="text-2xl font-bold">{totalCategories}</span>
+          </div>
         </div>
-        <div className="bg-card rounded-xl p-4 card-shadow">
-          <p className="text-sm text-muted-foreground">Danh mục gốc</p>
-          <p className="text-2xl font-bold text-primary">{categories.length}</p>
+        <div className="bg-card rounded-xl p-4 border border-border shadow-sm">
+          <p className="text-sm text-muted-foreground font-medium">
+            Danh mục gốc
+          </p>
+          <div className="flex items-baseline gap-2 mt-2">
+            <span className="text-2xl font-bold text-primary">
+              {categories.length}
+            </span>
+          </div>
         </div>
-        <div className="bg-card rounded-xl p-4 card-shadow">
-          <p className="text-sm text-muted-foreground">Tổng sản phẩm</p>
-          <p className="text-2xl font-bold text-success">{totalProducts}</p>
+        <div className="bg-card rounded-xl p-4 border border-border shadow-sm">
+          <p className="text-sm text-muted-foreground font-medium">
+            Tổng sản phẩm liên kết
+          </p>
+          <div className="flex items-baseline gap-2 mt-2">
+            <span className="text-2xl font-bold text-green-600">
+              {totalProducts}
+            </span>
+          </div>
         </div>
       </div>
 
-      {/* Tree */}
-      <div className="bg-card rounded-xl card-shadow overflow-hidden">
-        <div className="p-4 border-b border-border">
-          <h3 className="font-semibold">Cây danh mục</h3>
+      <div className="bg-card rounded-xl border border-border/40 shadow-sm overflow-hidden">
+        <div className="p-4 border-b border-border/40 bg-muted/40">
+          <h3 className="font-semibold flex items-center gap-2">
+            <FolderTree className="h-4 w-4" />
+            Cấu trúc danh mục
+          </h3>
         </div>
 
         {categories.length === 0 ? (
-          <div className="p-8 text-center text-muted-foreground">
-            <FolderTree className="mx-auto mb-2 h-8 w-8 opacity-50" />
-            <p className="text-sm">Chưa có danh mục nào</p>
-            <p className="text-sm">Hãy tạo danh mục đầu tiên để bắt đầu</p>
+          <div className="p-12 text-center text-muted-foreground">
+            <div className="bg-muted/50 rounded-full w-16 h-16 flex items-center justify-center mx-auto mb-4">
+              <FolderTree className="h-8 w-8 opacity-50" />
+            </div>
+            <p className="font-medium mb-1">Chưa có danh mục nào</p>
+            <p className="text-sm">
+              Hãy tạo danh mục đầu tiên để bắt đầu quản lý sản phẩm
+            </p>
+            <Button
+              variant="outline"
+              className="mt-4"
+              onClick={handleOpenCreateResponse}
+            >
+              Tạo ngay
+            </Button>
           </div>
         ) : (
-          categories.map((cat) => (
-            <CategoryItem
-              key={cat._id}
-              category={cat}
-              onEdit={openEditParent}
-              onAddChild={openAddChild}
-              onDelete={deleteCategory}
-              deletingId={deletingId}
-            />
-          ))
+          <div className="divide-y divide-border/40">
+            {categories.map((cat) => (
+              <CategoryItem
+                key={cat._id}
+                category={cat}
+                onEdit={handleOpenEdit}
+                onAddChild={handleOpenAddChild}
+                onDelete={handleOpenDelete}
+                deletingId={deletingId}
+              />
+            ))}
+          </div>
         )}
       </div>
 
-      {/* ===================== MODAL CHA ===================== */}
-      {showParentModal && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center modal-overlay">
-          <form
-            className="bg-card w-full max-w-md rounded-xl p-6 space-y-4 modal-content"
-            onSubmit={(e) => {
-              e.preventDefault();
-              handleSaveParent();
-            }}
-          >
-            <div className="flex justify-between items-center">
-              <h2 className="font-bold">
-                {editing ? "Chỉnh sửa danh mục" : "Thêm danh mục"}
-              </h2>
-              <X
-                className="cursor-pointer"
-                onClick={() => {
-                  setShowParentModal(false);
-                  setEditing(null);
-                  setNameError("");
-                  setForm({ name: "", slug: "" });
-                }}
+      {/* ===================== FORM DIALOG ===================== */}
+      <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>
+              {dialogMode === "edit"
+                ? "Chỉnh sửa danh mục"
+                : dialogMode === "create_child"
+                  ? `Thêm danh mục con cho "${selectedCategory?.name}"`
+                  : "Thêm danh mục mới"}
+            </DialogTitle>
+          </DialogHeader>
+
+          <Form {...form}>
+            <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+              <FormField
+                control={form.control}
+                name="name"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Tên danh mục</FormLabel>
+                    <FormControl>
+                      <Input placeholder="Nhập tên danh mục..." {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
               />
-            </div>
 
-            <Label>Tên danh mục</Label>
-            <Input
-              ref={parentInputRef}
-              value={form.name}
-              onChange={(e) => {
-                setForm({
-                  name: e.target.value,
-                  slug: generateSlug(e.target.value),
-                });
-                if (nameError) setNameError("");
-              }}
-              className={nameError ? "border-red-500" : ""}
-            />
-            {nameError && <p className="text-sm text-red-500">{nameError}</p>}
-
-            <Label>Đường dẫn (tự động)</Label>
-            <Input
-              value={form.slug}
-              disabled
-              className="bg-muted cursor-not-allowed"
-            />
-
-            <div className="flex gap-3">
-              <Button
-                type="button"
-                variant="outline"
-                className="w-1/2"
-                onClick={() => {
-                  setShowParentModal(false);
-                  setEditing(null);
-                  setNameError("");
-                  setForm({ name: "", slug: "" });
-                }}
-              >
-                Hủy
-              </Button>
-
-              <Button type="submit" className="w-1/2" disabled={submitting}>
-                {submitting ? "Đang lưu..." : "Lưu"}
-              </Button>
-            </div>
-          </form>
-        </div>
-      )}
-
-      {/* ===================== MODAL CON ===================== */}
-      {showChildModal && parentForChild && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center modal-overlay">
-          <form
-            className="bg-card w-full max-w-md rounded-xl p-6 space-y-4 modal-content"
-            onSubmit={(e) => {
-              e.preventDefault();
-              handleSaveChild();
-            }}
-          >
-            <div className="flex justify-between items-center">
-              <h2 className="font-bold">
-                Thêm danh mục con của "{parentForChild.name}"
-              </h2>
-              <X
-                className="cursor-pointer"
-                onClick={() => {
-                  setShowChildModal(false);
-                  setEditing(null);
-                  setNameError("");
-                  setForm({ name: "", slug: "" });
-                }}
+              <FormField
+                control={form.control}
+                name="slug"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>
+                      Đường dẫn
+                      <span className="text-xs text-muted-foreground ml-2 font-normal">
+                        (Tự động tạo)
+                      </span>
+                    </FormLabel>
+                    <FormControl>
+                      <Input {...field} disabled className="bg-muted/50" />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
               />
-            </div>
 
-            <Label>Tên danh mục con</Label>
-            <Input
-              ref={childInputRef}
-              value={form.name}
-              onChange={(e) => {
-                setForm({
-                  name: e.target.value,
-                  slug: generateSlug(e.target.value),
-                });
-                if (nameError) setNameError("");
-              }}
-              className={nameError ? "border-red-500" : ""}
-            />
-            {nameError && <p className="text-sm text-red-500">{nameError}</p>}
+              <DialogFooter className="pt-4">
+                <DialogClose asChild>
+                  <Button type="button" variant="outline">
+                    Hủy
+                  </Button>
+                </DialogClose>
+                <Button type="submit" disabled={form.formState.isSubmitting}>
+                  {form.formState.isSubmitting && (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  )}
+                  {dialogMode === "edit" ? "Cập nhật" : "Tạo mới"}
+                </Button>
+              </DialogFooter>
+            </form>
+          </Form>
+        </DialogContent>
+      </Dialog>
 
-            <Label>Đường dẫn (tự động)</Label>
-            <Input
-              value={form.slug}
-              disabled
-              className="bg-muted cursor-not-allowed"
-            />
+      {/* ===================== DELETE CONFIRM DIALOG ===================== */}
+      <Dialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-destructive">
+              <AlertTriangle className="h-5 w-5" />
+              Xác nhận xóa
+            </DialogTitle>
+          </DialogHeader>
 
-            <div className="flex gap-3">
-              <Button
-                type="button"
-                variant="outline"
-                className="w-1/2"
-                onClick={() => {
-                  setShowChildModal(false);
-                  setParentForChild(null);
-                  setNameError("");
-                  setForm({ name: "", slug: "" });
-                }}
-              >
-                Hủy
-              </Button>
-
-              <Button type="submit" className="w-1/2" disabled={submitting}>
-                {submitting ? "Đang lưu..." : "Lưu"}
-              </Button>
-            </div>
-          </form>
-        </div>
-      )}
-      {/* ===================== DELETE CONFIRMATION ===================== */}
-      {confirmDeleteId && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center modal-overlay">
-          <div className="bg-card w-full max-w-sm rounded-xl p-6 space-y-4 modal-content">
-            <h2 className="font-bold text-lg">Xác nhận xóa</h2>
-
-            <p className="text-sm text-muted-foreground">
-              Bạn có chắc chắn muốn xóa thương hiệu{" "}
-              <span className="font-semibold text-foreground">
-                {categories
-                  .flatMap((cat) =>
-                    cat.children ? [cat, ...cat.children] : [cat],
-                  )
-                  .find((c) => c._id === confirmDeleteId)?.name || ""}
+          <div className="py-4">
+            <p className="text-muted-foreground">
+              Bạn có chắc chắn muốn xóa danh mục{" "}
+              <span className="font-bold text-foreground">
+                {categoryToDelete?.name}
               </span>
               ?
             </p>
-
-            <div className="flex gap-3">
-              <Button
-                variant="outline"
-                className="w-1/2"
-                onClick={() => setConfirmDeleteId(null)}
-              >
-                Hủy
-              </Button>
-
-              <Button
-                variant="destructive"
-                className="w-1/2"
-                onClick={confirmDeleteCategory}
-                disabled={deletingId === confirmDeleteId}
-              >
-                {deletingId === confirmDeleteId ? "Đang xóa..." : "Xóa"}
-              </Button>
-            </div>
+            <p className="text-sm text-muted-foreground mt-2">
+              Hành động này không thể hoàn tác. Các sản phẩm thuộc danh mục này
+              sẽ bị mất liên kết danh mục.
+            </p>
           </div>
-        </div>
-      )}
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setDeleteConfirmOpen(false)}
+              disabled={deletingId !== null}
+            >
+              Hủy
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleConfirmDelete}
+              disabled={deletingId !== null}
+            >
+              {deletingId ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Đang xóa...
+                </>
+              ) : (
+                "Xóa danh mục"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

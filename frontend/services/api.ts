@@ -165,8 +165,15 @@ export const usersApi = {
     apiClient.put(`/users/${id}`, data),
 
   // Khóa/mở khóa người dùng
-  toggleUserStatus: (id: string, status: string) =>
-    apiClient.patch(`/users/${id}/status`, { status }),
+  toggleUserStatus: (id: string, isActive: boolean) =>
+    apiClient.patch(`/admin/users/${id}/status`, { isActive }),
+};
+
+export const orderApi = {
+  getOrders: () => apiClient.get('/admin/orders'),
+  updateStatus: (id: string, data: { status?: string; paymentStatus?: string }) =>
+    apiClient.patch(`/admin/orders/${id}/status`, data),
+  cancelOrder: (id: string) => apiClient.post(`/admin/orders/${id}/cancel`),
 };
 
 export default apiClient;

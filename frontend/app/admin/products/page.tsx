@@ -1,27 +1,27 @@
 "use client";
 
 import { useState, useMemo, useEffect, useCallback } from "react";
-import { Plus, Edit, Trash2, Eye, MoreHorizontal, Loader2, X } from "lucide-react";
+import {
+  Plus,
+  Edit,
+  Trash2,
+  Eye,
+  MoreHorizontal,
+  Loader2,
+  X,
+} from "lucide-react";
 import { useForm } from "react-hook-form";
 
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { DataTable } from "@/components/shared/DataTable";
-import { Input } from "@/components/ui/input";
+import AddProductModal from "./AddProductModal";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import {
-  Form,
-  FormControl,
-  FormField,
-  FormItem,
-  FormLabel,
-  FormMessage,
-} from "@/components/ui/form";
 import { useToast } from "@/hooks/use-toast";
 import { productApi, categoryApi, brandApi } from "@/services/api";
 import { cn } from "@/lib/utils";
@@ -31,24 +31,49 @@ import { cn } from "@/lib/utils";
 interface Product {
   _id: string;
   name: string;
-  category: {
+  slug: string;
+  description: string;
+  categoryId: string;
+  brandId: string;
+  images: {
+    url: string;
+    publicId: string;
     _id: string;
-    name: string;
-  };
-  brand: {
-    _id: string;
-    name: string;
-  };
-  price: number;
-  salePrice?: number;
-  stock: number;
-  status: "active" | "inactive" | "draft";
-  image?: string;
+  }[];
+  variants: {
+    sku: string;
+    price: number;
+    stock: number;
+    attributes: {
+      key: string;
+      value: string;
+    }[];
+    image: string | null;
+    status: string;
+  }[];
+  specs: {
+    key: string;
+    value: string;
+  }[];
+  totalStock: number;
+  status: string;
+  createdAt: string;
+  updatedAt: string;
+  __v: number;
 }
 
 interface Category {
   _id: string;
   name: string;
+  slug: string;
+  parentId: string | null;
+  filterableAttributes: any[];
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+  __v: number;
+  children: Category[];
+  id: string;
 }
 
 interface Brand {
@@ -87,7 +112,7 @@ const formatPrice = (price: number) =>
   new Intl.NumberFormat("vi-VN").format(price) + "đ";
 
 const validateFormData = (
-  data: ProductFormData
+  data: ProductFormData,
 ): { valid: boolean; errors: Record<string, string> } => {
   const errors: Record<string, string> = {};
 
@@ -128,6 +153,13 @@ const validateFormData = (
 
 /* ================= PAGE ================= */
 
+const flattenCategories = (categories: Category[]): Category[] => {
+  return categories.flatMap((category) => [
+    category,
+    ...(category.children ? flattenCategories(category.children) : []),
+  ]);
+};
+
 export default function ProductsPage() {
   const { toast } = useToast();
   const [products, setProducts] = useState<Product[]>([]);
@@ -137,6 +169,12 @@ export default function ProductsPage() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
+
+  const flatCategories = useMemo(
+    () => flattenCategories(categories),
+    [categories],
+  );
+
 
   const form = useForm<ProductFormData>({
     defaultValues: {
@@ -244,7 +282,7 @@ export default function ProductsPage() {
         });
       }
     },
-    [toast]
+    [toast],
   );
 
   const columns = useMemo(
@@ -262,31 +300,29 @@ export default function ProductsPage() {
       {
         key: "category",
         header: "Danh mục",
-        render: (product: Product) => (
-          <div>
-            <p>{product.category?.name || "N/A"}</p>
-            <p className="text-sm text-muted-foreground">
-              {product.brand?.name || "N/A"}
-            </p>
-          </div>
-        ),
+        render: (product: Product) => {
+          const category = flatCategories.find(
+            (c) => c._id === product.categoryId,
+          );
+          const brand = brands.find((b) => b._id === product.brandId);
+
+          return (
+            <div>
+              <p>{category?.name || "N/A"}</p>
+              <p className="text-sm text-muted-foreground">
+                {brand?.name || "N/A"}
+              </p>
+            </div>
+          );
+        },
       },
       {
         key: "price",
         header: "Giá",
-        render: (product: Product) =>
-          product.salePrice ? (
-            <div>
-              <p className="font-semibold text-destructive">
-                {formatPrice(product.salePrice)}
-              </p>
-              <p className="text-sm line-through text-muted-foreground">
-                {formatPrice(product.price)}
-              </p>
-            </div>
-          ) : (
-            <p className="font-semibold">{formatPrice(product.price)}</p>
-          ),
+        render: (product: Product) => {
+          const price = product.variants?.[0]?.price || 0;
+          return <p className="font-semibold">{formatPrice(price)}</p>;
+        },
       },
       {
         key: "stock",
@@ -295,14 +331,14 @@ export default function ProductsPage() {
           <span
             className={cn(
               "font-medium",
-              product.stock === 0
+              product.totalStock === 0
                 ? "text-destructive"
-                : product.stock < 10
+                : product.totalStock < 10
                   ? "text-warning"
-                  : "text-foreground"
+                  : "text-foreground",
             )}
           >
-            {product.stock}
+            {product.totalStock}
           </span>
         ),
       },
@@ -310,7 +346,7 @@ export default function ProductsPage() {
         key: "status",
         header: "Trạng thái",
         render: (product: Product) => {
-          const config = statusConfig[product.status];
+          const config = statusConfig[product.status as keyof typeof statusConfig] || statusConfig.draft;
           return (
             <Badge
               variant="outline"
@@ -349,7 +385,8 @@ export default function ProductsPage() {
         ),
       },
     ],
-    [handleDelete]
+    [handleDelete, flatCategories, brands],
+
   );
 
   return (
@@ -370,7 +407,9 @@ export default function ProductsPage() {
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <div className="bg-card rounded-xl p-4 card-shadow">
           <p className="text-sm text-muted-foreground">Tổng sản phẩm</p>
-          <p className="text-2xl font-bold text-foreground">{products.length}</p>
+          <p className="text-2xl font-bold text-foreground">
+            {products.length}
+          </p>
         </div>
         <div className="bg-card rounded-xl p-4 card-shadow">
           <p className="text-sm text-muted-foreground">Đang bán</p>
@@ -381,13 +420,13 @@ export default function ProductsPage() {
         <div className="bg-card rounded-xl p-4 card-shadow">
           <p className="text-sm text-muted-foreground">Hết hàng</p>
           <p className="text-2xl font-bold text-destructive">
-            {products.filter((p) => p.stock === 0).length}
+            {products.filter((p) => p.totalStock === 0).length}
           </p>
         </div>
         <div className="bg-card rounded-xl p-4 card-shadow">
           <p className="text-sm text-muted-foreground">Tồn kho thấp</p>
           <p className="text-2xl font-bold text-warning">
-            {products.filter((p) => p.stock > 0 && p.stock < 10).length}
+            {products.filter((p) => p.totalStock > 0 && p.totalStock < 10).length}
           </p>
         </div>
       </div>
@@ -404,232 +443,18 @@ export default function ProductsPage() {
           searchKey="name"
           searchPlaceholder="Tìm kiếm sản phẩm..."
         />
-      )} 
-      
-      {/* Add Product Modal */}
-      {isModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
-          <div className="bg-card rounded-xl shadow-lg max-w-md w-full max-h-[90vh] overflow-y-auto">
-            {/* Modal Header */}
-            <div className="flex items-center justify-between p-6 border-b border-border">
-              <h2 className="text-xl font-bold">Thêm sản phẩm mới</h2>
-              <button
-                onClick={() => {
-                  setIsModalOpen(false);
-                  form.reset();
-                  setFormErrors({});
-                }}
-                className="text-muted-foreground hover:text-foreground"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-
-            {/* Modal Body */}
-            <div className="p-6">
-              <Form {...form}>
-                <form
-                  onSubmit={form.handleSubmit(onSubmit)}
-                  className="space-y-4"
-                >
-                  {/* Name */}
-                  <FormField
-                    control={form.control}
-                    name="name"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Tên sản phẩm</FormLabel>
-                        <FormControl>
-                          <Input placeholder="Nhập tên sản phẩm" {...field} />
-                        </FormControl>
-                        {formErrors.name && (
-                          <p className="text-sm text-destructive">
-                            {formErrors.name}
-                          </p>
-                        )}
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-
-                  {/* Category */}
-                  <FormField
-                    control={form.control}
-                    name="categoryId"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Danh mục</FormLabel>
-                        <FormControl>
-                          <select
-                            {...field}
-                            className="w-full px-3 py-2 border border-input rounded-md bg-background text-foreground"
-                          >
-                            <option value="">-- Chọn danh mục --</option>
-                            {categories.map((cat) => (
-                              <option key={cat._id} value={cat._id}>
-                                {cat.name}
-                              </option>
-                            ))}
-                          </select>
-                        </FormControl>
-                        {formErrors.categoryId && (
-                          <p className="text-sm text-destructive">
-                            {formErrors.categoryId}
-                          </p>
-                        )}
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-
-                  {/* Brand */}
-                  <FormField
-                    control={form.control}
-                    name="brandId"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Thương hiệu</FormLabel>
-                        <FormControl>
-                          <select
-                            {...field}
-                            className="w-full px-3 py-2 border border-input rounded-md bg-background text-foreground"
-                          >
-                            <option value="">-- Chọn thương hiệu --</option>
-                            {brands.map((brand) => (
-                              <option key={brand._id} value={brand._id}>
-                                {brand.name}
-                              </option>
-                            ))}
-                          </select>
-                        </FormControl>
-                        {formErrors.brandId && (
-                          <p className="text-sm text-destructive">
-                            {formErrors.brandId}
-                          </p>
-                        )}
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-
-                  {/* Price */}
-                  <FormField
-                    control={form.control}
-                    name="price"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Giá gốc (đ)</FormLabel>
-                        <FormControl>
-                          <Input type="number" placeholder="0" {...field} />
-                        </FormControl>
-                        {formErrors.price && (
-                          <p className="text-sm text-destructive">
-                            {formErrors.price}
-                          </p>
-                        )}
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-
-                  {/* Sale Price */}
-                  <FormField
-                    control={form.control}
-                    name="salePrice"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Giá sale (đ)</FormLabel>
-                        <FormControl>
-                          <Input
-                            type="number"
-                            placeholder="0 (tùy chọn)"
-                            {...field}
-                          />
-                        </FormControl>
-                        {formErrors.salePrice && (
-                          <p className="text-sm text-destructive">
-                            {formErrors.salePrice}
-                          </p>
-                        )}
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-
-                  {/* Stock */}
-                  <FormField
-                    control={form.control}
-                    name="stock"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Tồn kho</FormLabel>
-                        <FormControl>
-                          <Input type="number" placeholder="0" {...field} />
-                        </FormControl>
-                        {formErrors.stock && (
-                          <p className="text-sm text-destructive">
-                            {formErrors.stock}
-                          </p>
-                        )}
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-
-                  {/* Status */}
-                  <FormField
-                    control={form.control}
-                    name="status"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Trạng thái</FormLabel>
-                        <FormControl>
-                          <select
-                            {...field}
-                            className="w-full px-3 py-2 border border-input rounded-md bg-background text-foreground"
-                          >
-                            <option value="draft">Nháp</option>
-                            <option value="active">Đang bán</option>
-                            <option value="inactive">Ngừng bán</option>
-                          </select>
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-
-                  {/* Buttons */}
-                  <div className="flex gap-2 pt-4">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="flex-1"
-                      onClick={() => {
-                        setIsModalOpen(false);
-                        form.reset();
-                        setFormErrors({});
-                      }}
-                      disabled={isSubmitting}
-                    >
-                      Hủy
-                    </Button>
-                    <Button
-                      type="submit"
-                      className="flex-1"
-                      disabled={isSubmitting}
-                    >
-                      {isSubmitting && (
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      )}
-                      Thêm
-                    </Button>
-                  </div>
-                </form>
-              </Form>
-            </div>
-          </div>
-        </div>
       )}
+
+      <AddProductModal
+        open={isModalOpen}
+        onOpenChange={setIsModalOpen}
+        categories={categories}
+        brands={brands}
+        onSuccess={async () => {
+          const res = await productApi.getProducts();
+          setProducts(res.data.data || res.data);
+        }}
+      />
     </div>
   );
 }

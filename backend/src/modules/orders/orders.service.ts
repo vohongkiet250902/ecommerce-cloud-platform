@@ -130,14 +130,48 @@ export class OrdersService {
     return order;
   }
 
-  async findAll() {
-    return this.orderModel.find().sort({ createdAt: -1 });
+  async adminCancelOrder(orderId: string) {
+    const order = await this.orderModel.findById(orderId);
+    if (!order) {
+      throw new BadRequestException('Order not found');
+    }
+
+    if (order.status === 'cancelled') {
+      throw new BadRequestException('Order already cancelled');
+    }
+
+    // Restore stock
+    for (const item of order.items) {
+      await this.productModel.updateOne(
+        {
+          _id: item.productId,
+          'variants.sku': item.sku,
+        },
+        {
+          $inc: {
+            'variants.$.stock': item.quantity,
+            totalStock: item.quantity,
+          },
+        },
+      );
+    }
+
+    order.status = 'cancelled';
+    await order.save();
+    return order;
   }
 
-  async updateStatus(orderId: string, status: string) {
+  async findAll() {
+    return this.orderModel.find().populate('userId', 'name email').sort({ createdAt: -1 });
+  }
+
+  async updateStatus(
+    orderId: string,
+    updateData: { status?: string; paymentStatus?: string },
+  ) {
     return this.orderModel.findByIdAndUpdate(
       orderId,
-      { status },
+      updateData,
       { new: true },
     );
   }
@@ -147,6 +181,7 @@ export class OrdersService {
       .find({
         userId: new Types.ObjectId(userId),
       })
+      .populate('userId', 'name email')
       .sort({ createdAt: -1 });
   }
 

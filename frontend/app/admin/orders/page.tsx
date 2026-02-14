@@ -1,6 +1,7 @@
 "use client";
 
-import { Eye, MoreHorizontal, Download, RefreshCw } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Eye, MoreHorizontal, Download, RefreshCw, Loader2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -20,111 +21,23 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
+import { orderApi } from "@/services/api";
+import { useToast } from "@/hooks/use-toast";
 
 /* ===================== TYPES ===================== */
 interface Order {
-  id: string;
-  customer: string;
-  email: string;
-  phone: string;
-  items: number;
-  total: number;
+  _id: string;
+  userId: {
+    name: string;
+    email: string;
+    phone?: string;
+  };
+  items: any[];
+  totalAmount: number;
   status: "pending" | "paid" | "shipping" | "completed" | "cancelled";
   paymentStatus: "pending" | "paid" | "refunded";
-  date: string;
+  createdAt: string;
 }
-
-/* ===================== MOCK DATA ===================== */
-const orders: Order[] = [
-  {
-    id: "ORD-12345",
-    customer: "Nguyễn Văn A",
-    email: "nguyenvana@email.com",
-    phone: "0901234567",
-    items: 3,
-    total: 45990000,
-    status: "completed",
-    paymentStatus: "paid",
-    date: "2024-01-15 14:30",
-  },
-  {
-    id: "ORD-12344",
-    customer: "Trần Thị B",
-    email: "tranthib@email.com",
-    phone: "0912345678",
-    items: 1,
-    total: 32990000,
-    status: "shipping",
-    paymentStatus: "paid",
-    date: "2024-01-15 12:15",
-  },
-  {
-    id: "ORD-12343",
-    customer: "Lê Văn C",
-    email: "levanc@email.com",
-    phone: "0923456789",
-    items: 2,
-    total: 15990000,
-    status: "paid",
-    paymentStatus: "paid",
-    date: "2024-01-15 10:45",
-  },
-  {
-    id: "ORD-12342",
-    customer: "Phạm Thị D",
-    email: "phamthid@email.com",
-    phone: "0934567890",
-    items: 5,
-    total: 89990000,
-    status: "pending",
-    paymentStatus: "pending",
-    date: "2024-01-14 16:20",
-  },
-  {
-    id: "ORD-12341",
-    customer: "Hoàng Văn E",
-    email: "hoangvane@email.com",
-    phone: "0945678901",
-    items: 1,
-    total: 6990000,
-    status: "cancelled",
-    paymentStatus: "refunded",
-    date: "2024-01-14 09:30",
-  },
-  {
-    id: "ORD-12340",
-    customer: "Vũ Thị F",
-    email: "vuthif@email.com",
-    phone: "0956789012",
-    items: 2,
-    total: 22990000,
-    status: "completed",
-    paymentStatus: "paid",
-    date: "2024-01-13 18:45",
-  },
-  {
-    id: "ORD-12339",
-    customer: "Đặng Văn G",
-    email: "dangvang@email.com",
-    phone: "0967890123",
-    items: 4,
-    total: 67990000,
-    status: "shipping",
-    paymentStatus: "paid",
-    date: "2024-01-13 11:20",
-  },
-  {
-    id: "ORD-12338",
-    customer: "Bùi Thị H",
-    email: "buithih@email.com",
-    phone: "0978901234",
-    items: 1,
-    total: 8990000,
-    status: "paid",
-    paymentStatus: "paid",
-    date: "2024-01-12 15:00",
-  },
-];
 
 /* ===================== CONFIG ===================== */
 const statusConfig = {
@@ -161,41 +74,93 @@ const formatPrice = (price: number) =>
 
 /* ===================== PAGE ===================== */
 export default function OrdersPage() {
+  const { toast } = useToast();
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const fetchOrders = async () => {
+    try {
+      setLoading(true);
+      const res = await orderApi.getOrders();
+      setOrders(res.data);
+    } catch (error) {
+      console.error(error);
+      toast({
+        title: "Lỗi tải đơn hàng",
+        description: "Không thể lấy danh sách đơn hàng",
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchOrders();
+  }, []);
+
+  const handleUpdateStatus = async (id: string, data: { status?: string; paymentStatus?: string }) => {
+    try {
+      await orderApi.updateStatus(id, data);
+      toast({ title: "Cập nhật thành công", variant: "success" });
+      fetchOrders();
+    } catch (error) {
+      toast({ title: "Lỗi cập nhật", variant: "destructive" });
+    }
+  };
+
+  const handleCancelOrder = async (id: string) => {
+    try {
+        if (!confirm("Bạn có chắc chắn muốn hủy đơn hàng này? Hành động này sẽ hoàn lại tồn kho.")) return;
+       await orderApi.cancelOrder(id);
+       toast({ title: "Đã hủy đơn hàng", variant: "success" });
+       fetchOrders();
+    } catch (error: any) {
+        toast({ 
+            title: "Lỗi hủy đơn", 
+            description: error?.response?.data?.message || "Không thể hủy đơn hàng",
+            variant: "destructive" 
+        });
+    }
+  }
+
   const columns = [
     {
-      key: "id",
+      key: "_id",
       header: "Mã đơn",
       render: (order: Order) => (
-        <span className="font-mono font-medium">{order.id}</span>
+        <span className="font-mono font-medium text-xs hidden sm:inline-block">
+            {order._id.slice(-6).toUpperCase()}
+        </span>
       ),
     },
     {
-      key: "customer",
+      key: "userId",
       header: "Khách hàng",
       render: (order: Order) => (
         <div>
-          <p className="font-medium">{order.customer}</p>
-          <p className="text-sm text-muted-foreground">{order.phone}</p>
+          <p className="font-medium text-sm">{order.userId?.name || "Khách vãng lai"}</p>
+          <p className="text-xs text-muted-foreground">{order.userId?.email}</p>
         </div>
       ),
     },
     {
       key: "items",
       header: "SP",
-      render: (order: Order) => <span>{order.items}</span>,
+      render: (order: Order) => <span>{order.items?.length || 0}</span>,
     },
     {
-      key: "total",
+      key: "totalAmount",
       header: "Tổng tiền",
       render: (order: Order) => (
-        <span className="font-semibold">{formatPrice(order.total)}</span>
+        <span className="font-semibold">{formatPrice(order.totalAmount)}</span>
       ),
     },
     {
       key: "paymentStatus",
       header: "Thanh toán",
       render: (order: Order) => {
-        const cfg = paymentStatusConfig[order.paymentStatus];
+        const cfg = paymentStatusConfig[order.paymentStatus] || paymentStatusConfig.pending;
         return (
           <Badge
             variant="secondary"
@@ -210,7 +175,7 @@ export default function OrdersPage() {
       key: "status",
       header: "Trạng thái",
       render: (order: Order) => {
-        const cfg = statusConfig[order.status];
+        const cfg = statusConfig[order.status] || statusConfig.pending;
         return (
           <Badge variant="outline" className={cn("font-medium", cfg.className)}>
             {cfg.label}
@@ -219,10 +184,12 @@ export default function OrdersPage() {
       },
     },
     {
-      key: "date",
+      key: "createdAt",
       header: "Ngày đặt",
       render: (order: Order) => (
-        <span className="text-muted-foreground">{order.date}</span>
+        <span className="text-muted-foreground text-sm">
+            {new Date(order.createdAt).toLocaleDateString("vi-VN")}
+        </span>
       ),
     },
     {
@@ -231,7 +198,7 @@ export default function OrdersPage() {
       render: (order: Order) => (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="icon-sm">
+            <Button variant="ghost" size="icon" className="h-8 w-8">
               <MoreHorizontal className="h-4 w-4" />
             </Button>
           </DropdownMenuTrigger>
@@ -241,19 +208,29 @@ export default function OrdersPage() {
               Xem chi tiết
             </DropdownMenuItem>
             <DropdownMenuSeparator />
-            <DropdownMenuItem disabled={order.status === "cancelled"}>
+            <DropdownMenuItem 
+                disabled={order.status === "cancelled" || order.paymentStatus === "paid"}
+                onClick={() => handleUpdateStatus(order._id, { paymentStatus: 'paid' })}
+            >
               Đánh dấu: Đã thanh toán
             </DropdownMenuItem>
-            <DropdownMenuItem disabled={order.status === "cancelled"}>
+            <DropdownMenuItem 
+                disabled={order.status === "cancelled" || order.status === "shipping"}
+                onClick={() => handleUpdateStatus(order._id, { status: 'shipping' })}
+            >
               Đánh dấu: Đang giao
             </DropdownMenuItem>
-            <DropdownMenuItem disabled={order.status === "cancelled"}>
+             <DropdownMenuItem 
+                disabled={order.status === "cancelled" || order.status === "completed"}
+                onClick={() => handleUpdateStatus(order._id, { status: 'completed', paymentStatus: 'paid' })}
+            >
               Đánh dấu: Hoàn thành
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem
-              className="text-destructive"
-              disabled={order.status === "completed"}
+              className="text-destructive focus:text-destructive"
+              disabled={order.status === "cancelled" || order.status === "completed"}
+              onClick={() => handleCancelOrder(order._id)}
             >
               Hủy đơn hàng
             </DropdownMenuItem>
@@ -263,6 +240,14 @@ export default function OrdersPage() {
     },
   ];
 
+  if (loading) {
+      return (
+          <div className="h-[80vh] flex items-center justify-center">
+              <Loader2 className="h-8 w-8 animate-spin text-primary" />
+          </div>
+      )
+  }
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -270,7 +255,7 @@ export default function OrdersPage() {
         <div>
           <h1 className="text-2xl font-bold">Đơn hàng</h1>
           <p className="text-muted-foreground">
-            Quản lý và xử lý đơn hàng
+            Quản lý và xử lý đơn hàng từ khách hàng
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -278,7 +263,7 @@ export default function OrdersPage() {
             <Download className="h-4 w-4 mr-2" />
             Xuất Excel
           </Button>
-          <Button variant="outline">
+          <Button variant="outline" onClick={fetchOrders}>
             <RefreshCw className="h-4 w-4 mr-2" />
             Làm mới
           </Button>
@@ -287,33 +272,43 @@ export default function OrdersPage() {
 
       {/* Stats */}
       <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
-        <div className="bg-card rounded-xl p-4 card-shadow">
-          <p className="text-sm text-muted-foreground">Tổng đơn</p>
-          <p className="text-2xl font-bold text-foreground">{orders.length}</p>
+        <div className="bg-card rounded-xl p-4 border border-border shadow-sm">
+          <p className="text-sm text-muted-foreground font-medium">Tổng đơn</p>
+          <div className="flex items-baseline gap-2 mt-2">
+            <span className="text-2xl font-bold text-foreground">{orders.length}</span>
+          </div>
         </div>
-        <div className="bg-card rounded-xl p-4 card-shadow">
-          <p className="text-sm text-muted-foreground">Chờ xử lý</p>
-          <p className="text-2xl font-bold text-warning">
-            {orders.filter((o) => o.status === "pending").length}
-          </p>
+        <div className="bg-card rounded-xl p-4 border border-border shadow-sm">
+          <p className="text-sm text-muted-foreground font-medium">Chờ xử lý</p>
+          <div className="flex items-baseline gap-2 mt-2">
+            <span className="text-2xl font-bold text-orange-600">
+                {orders.filter((o) => o.status === "pending").length}
+            </span>
+          </div>
         </div>
-        <div className="bg-card rounded-xl p-4 card-shadow">
-          <p className="text-sm text-muted-foreground">Đang giao</p>
-          <p className="text-2xl font-bold text-primary">
-            {orders.filter((o) => o.status === "shipping").length}
-          </p>
+        <div className="bg-card rounded-xl p-4 border border-border shadow-sm">
+          <p className="text-sm text-muted-foreground font-medium">Đang giao</p>
+          <div className="flex items-baseline gap-2 mt-2">
+            <span className="text-2xl font-bold text-blue-600">
+                 {orders.filter((o) => o.status === "shipping").length}
+            </span>
+          </div>
         </div>
-        <div className="bg-card rounded-xl p-4 card-shadow">
-          <p className="text-sm text-muted-foreground">Hoàn thành</p>
-          <p className="text-2xl font-bold text-success">
-            {orders.filter((o) => o.status === "completed").length}
-          </p>
+        <div className="bg-card rounded-xl p-4 border border-border shadow-sm">
+          <p className="text-sm text-muted-foreground font-medium">Hoàn thành</p>
+          <div className="flex items-baseline gap-2 mt-2">
+            <span className="text-2xl font-bold text-green-600">
+                {orders.filter((o) => o.status === "completed").length}
+            </span>
+          </div>
         </div>
-        <div className="bg-card rounded-xl p-4 card-shadow">
-          <p className="text-sm text-muted-foreground">Đã hủy</p>
-          <p className="text-2xl font-bold text-destructive">
-            {orders.filter((o) => o.status === "cancelled").length}
-          </p>
+        <div className="bg-card rounded-xl p-4 border border-border shadow-sm">
+          <p className="text-sm text-muted-foreground font-medium">Đã hủy</p>
+          <div className="flex items-baseline gap-2 mt-2">
+             <span className="text-2xl font-bold text-destructive">
+                {orders.filter((o) => o.status === "cancelled").length}
+             </span>
+          </div>
         </div>
       </div>
 
@@ -323,10 +318,10 @@ export default function OrdersPage() {
           <SelectTrigger className="w-[180px]">
             <SelectValue placeholder="Trạng thái" />
           </SelectTrigger>
-          <SelectContent className="dropdown-content">
+          <SelectContent>
             <SelectItem value="all">Tất cả trạng thái</SelectItem>
             <SelectItem value="pending">Chờ xử lý</SelectItem>
-            <SelectItem value="paid">Đã thanh toán</SelectItem>
+            <SelectItem value="paid">Đã thanh toán (Chờ giao)</SelectItem>
             <SelectItem value="shipping">Đang giao</SelectItem>
             <SelectItem value="completed">Hoàn thành</SelectItem>
             <SelectItem value="cancelled">Đã hủy</SelectItem>
@@ -337,7 +332,7 @@ export default function OrdersPage() {
           <SelectTrigger className="w-[180px]">
             <SelectValue placeholder="Thanh toán" />
           </SelectTrigger>
-          <SelectContent className="dropdown-content">
+          <SelectContent>
             <SelectItem value="all">Tất cả</SelectItem>
             <SelectItem value="pending">Chưa thanh toán</SelectItem>
             <SelectItem value="paid">Đã thanh toán</SelectItem>
@@ -347,11 +342,11 @@ export default function OrdersPage() {
       </div>
 
       {/* Table */}
-      <DataTable<Order>
+      <DataTable
         data={orders}
         columns={columns}
-        searchPlaceholder="Tìm kiếm đơn hàng..."
-        searchKey="id"
+        searchPlaceholder="Tìm kiếm mã đơn hoặc khách hàng..."
+        searchKey="_id"
       />
     </div>
   );

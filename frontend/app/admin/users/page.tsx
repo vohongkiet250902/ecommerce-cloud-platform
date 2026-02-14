@@ -9,6 +9,8 @@ import {
   Ban,
   CheckCircle,
   Loader2,
+  Download,
+  RefreshCw,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -21,6 +23,13 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { usersApi } from "@/services/api";
 import { useToast } from "@/hooks/use-toast";
@@ -28,21 +37,18 @@ import { useToast } from "@/hooks/use-toast";
 /* ===================== TYPES ===================== */
 interface User {
   _id: string;
-  name: string;
+  fullName: string;
   email: string;
   phone?: string;
   avatar?: string;
-  role: "user" | "staff" | "admin";
-  status: "active" | "blocked";
-  orders?: number;
-  totalSpent?: number;
+  role: "user" | "admin";
+  isActive: boolean;
   createdAt: string;
 }
 
 /* ===================== CONFIG ===================== */
 const roleConfig = {
   user: { label: "User", className: "bg-secondary text-secondary-foreground" },
-  staff: { label: "Staff", className: "bg-info/10 text-info border-info/20" },
   admin: {
     label: "Admin",
     className: "bg-primary/10 text-primary border-primary/20",
@@ -60,52 +66,67 @@ const statusConfig = {
   },
 };
 
-const formatPrice = (price: number) =>
-  new Intl.NumberFormat("vi-VN").format(price) + "đ";
-
 /* ===================== PAGE ===================== */
 export default function UsersPage() {
   const { toast } = useToast();
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
-  const [updating, setUpdating] = useState<string | null>(null);
 
-  // Fetch users on mount
+  const fetchUsers = async () => {
+    try {
+      setLoading(true);
+      const res = await usersApi.getUsers();
+      // Ensure we treat the response correctly (array or object)
+      const data = Array.isArray(res.data) ? res.data : res.data.data || [];
+      setUsers(data);
+    } catch (error) {
+      toast({
+        title: "Lỗi tải người dùng",
+        description: "Không thể lấy danh sách người dùng",
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
-    const fetchUsers = async () => {
-      try {
-        setLoading(true);
-        const response = await usersApi.getUsers();
-        const data = response.data.data || response.data;
-        setUsers(Array.isArray(data) ? data : []);
-      } catch (error) {
-        toast({
-          title: "❌ Lỗi",
-          description: "Không thể tải danh sách người dùng",
-          variant: "destructive",
-        });
-      } finally {
-        setLoading(false);
-      }
-    };
-
     fetchUsers();
-  }, [toast]);
+  }, []);
+
+  const handleToggleStatus = async (id: string, currentStatus: boolean) => {
+    try {
+        const newStatus = !currentStatus;
+        await usersApi.toggleUserStatus(id, newStatus);
+        
+        // Optimistic update
+        setUsers(prev => prev.map(u => u._id === id ? { ...u, isActive: newStatus } : u));
+        
+        toast({ 
+            title: newStatus ? "Đã mở khóa tài khoản" : "Đã khóa tài khoản", 
+            variant: "success" 
+        });
+    } catch (error) {
+        toast({ title: "Lỗi cập nhật", variant: "destructive" });
+        fetchUsers(); // Revert on error
+    }
+  }
+
   const columns = [
     {
-      key: "name",
+      key: "fullName",
       header: "Người dùng",
       render: (user: User) => (
         <div className="flex items-center gap-3">
-          <Avatar className="h-10 w-10">
+          <Avatar className="h-9 w-9 border border-border">
             <AvatarImage
-              src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${user._id}`}
+              src={user.avatar || `https://api.dicebear.com/7.x/initials/svg?seed=${user.fullName}`}
             />
-            <AvatarFallback>{user.name.charAt(0)}</AvatarFallback>
+            <AvatarFallback>{user.fullName?.[0]?.toUpperCase()}</AvatarFallback>
           </Avatar>
           <div>
-            <p className="font-medium text-foreground">{user.name}</p>
-            <p className="text-sm text-muted-foreground">{user.email}</p>
+            <p className="font-medium text-sm text-foreground">{user.fullName}</p>
+            <p className="text-xs text-muted-foreground">{user.email}</p>
           </div>
         </div>
       ),
@@ -113,17 +134,17 @@ export default function UsersPage() {
     {
       key: "phone",
       header: "Điện thoại",
-      render: (user: User) => <span>{user.phone || "-"}</span>,
+      render: (user: User) => <span className="text-sm font-mono text-muted-foreground">{user.phone || "-"}</span>,
     },
     {
       key: "role",
       header: "Vai trò",
       render: (user: User) => {
-        const config = roleConfig[user.role];
+        const config = roleConfig[user.role] || roleConfig.user;
         return (
           <Badge
             variant="outline"
-            className={cn("font-medium border-border", config.className)}
+            className={cn("font-medium border-border text-xs", config.className)}
           >
             {config.label}
           </Badge>
@@ -131,28 +152,15 @@ export default function UsersPage() {
       },
     },
     {
-      key: "orders",
-      header: "Đơn hàng",
-      render: (user: User) => <span>{user.orders ?? 0}</span>,
-    },
-    {
-      key: "totalSpent",
-      header: "Tổng chi tiêu",
-      render: (user: User) => (
-        <span className="font-medium">
-          {user.totalSpent && user.totalSpent > 0 ? formatPrice(user.totalSpent) : "-"}
-        </span>
-      ),
-    },
-    {
-      key: "status",
+      key: "isActive",
       header: "Trạng thái",
       render: (user: User) => {
-        const config = statusConfig[user.status];
+        const status = user.isActive ? "active" : "blocked";
+        const config = statusConfig[status];
         return (
           <Badge
             variant="outline"
-            className={cn("font-medium border-border", config.className)}
+            className={cn("font-medium border-border text-xs", config.className)}
           >
             {config.label}
           </Badge>
@@ -161,9 +169,11 @@ export default function UsersPage() {
     },
     {
       key: "createdAt",
-      header: "Ngày tạo",
+      header: "Ngày tham gia",
       render: (user: User) => (
-        <span className="text-muted-foreground">{user.createdAt}</span>
+        <span className="text-muted-foreground text-xs">
+            {new Date(user.createdAt).toLocaleDateString("vi-VN")}
+        </span>
       ),
     },
     {
@@ -172,7 +182,7 @@ export default function UsersPage() {
       render: (user: User) => (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="icon-sm">
+            <Button variant="ghost" size="icon" className="h-8 w-8">
               <MoreHorizontal className="h-4 w-4" />
             </Button>
           </DropdownMenuTrigger>
@@ -182,26 +192,19 @@ export default function UsersPage() {
               Xem chi tiết
             </DropdownMenuItem>
             <DropdownMenuSeparator />
-            {user.role === "user" && (
-              <DropdownMenuItem>
-                <Shield className="mr-2 h-4 w-4" />
-                Nâng cấp Staff
-              </DropdownMenuItem>
-            )}
-            {user.role === "staff" && (
-              <DropdownMenuItem>
-                <ShieldOff className="mr-2 h-4 w-4" />
-                Hạ xuống User
-              </DropdownMenuItem>
-            )}
-            <DropdownMenuSeparator />
-            {user.status === "active" ? (
-              <DropdownMenuItem className="text-destructive">
+            {user.isActive ? (
+              <DropdownMenuItem 
+                className="text-destructive focus:text-destructive"
+                onClick={() => handleToggleStatus(user._id, user.isActive)}
+              >
                 <Ban className="mr-2 h-4 w-4" />
                 Khóa tài khoản
               </DropdownMenuItem>
             ) : (
-              <DropdownMenuItem className="text-success">
+              <DropdownMenuItem 
+                className="text-success focus:text-success"
+                onClick={() => handleToggleStatus(user._id, user.isActive)}
+              >
                 <CheckCircle className="mr-2 h-4 w-4" />
                 Mở khóa
               </DropdownMenuItem>
@@ -212,55 +215,100 @@ export default function UsersPage() {
     },
   ];
 
+  if (loading) {
+      return (
+          <div className="h-[80vh] flex items-center justify-center">
+              <Loader2 className="h-8 w-8 animate-spin text-primary" />
+          </div>
+      )
+  }
+
   return (
     <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Người dùng</h1>
-          <p className="text-muted-foreground">Quản lý tài khoản người dùng</p>
+          <p className="text-muted-foreground">Quản lý tài khoản người dùng và phân quyền</p>
+        </div>
+         <div className="flex items-center gap-2">
+          <Button variant="outline">
+            <Download className="h-4 w-4 mr-2" />
+            Xuất Excel
+          </Button>
+          <Button variant="outline" onClick={fetchUsers}>
+            <RefreshCw className="h-4 w-4 mr-2" />
+            Làm mới
+          </Button>
         </div>
       </div>
 
       {/* Stats */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <div className="bg-card rounded-xl p-4 card-shadow">
-          <p className="text-sm text-muted-foreground">Tổng người dùng</p>
-          <p className="text-2xl font-bold">{users.length}</p>
+        <div className="bg-card rounded-xl p-4 border border-border shadow-sm">
+          <p className="text-sm text-muted-foreground font-medium">Tổng người dùng</p>
+          <div className="flex items-baseline gap-2 mt-2">
+            <span className="text-2xl font-bold text-foreground">{users.length}</span>
+          </div>
         </div>
-        <div className="bg-card rounded-xl p-4 card-shadow">
-          <p className="text-sm text-muted-foreground">Hoạt động</p>
-          <p className="text-2xl font-bold text-success">
-            {users.filter((u) => u.status === "active").length}
-          </p>
+        <div className="bg-card rounded-xl p-4 border border-border shadow-sm">
+          <p className="text-sm text-muted-foreground font-medium">Hoạt động</p>
+          <div className="flex items-baseline gap-2 mt-2">
+            <span className="text-2xl font-bold text-success">
+                {users.filter((u) => u.isActive).length}
+            </span>
+          </div>
         </div>
-        <div className="bg-card rounded-xl p-4 card-shadow">
-          <p className="text-sm text-muted-foreground">Staff</p>
-          <p className="text-2xl font-bold text-info">
-            {users.filter((u) => u.role === "staff").length}
-          </p>
+         <div className="bg-card rounded-xl p-4 border border-border shadow-sm">
+          <p className="text-sm text-muted-foreground font-medium">Quản trị viên (Admin)</p>
+          <div className="flex items-baseline gap-2 mt-2">
+            <span className="text-2xl font-bold text-primary">
+                {users.filter((u) => u.role === "admin").length}
+            </span>
+          </div>
         </div>
-        <div className="bg-card rounded-xl p-4 card-shadow">
-          <p className="text-sm text-muted-foreground">Bị khóa</p>
-          <p className="text-2xl font-bold text-destructive">
-            {users.filter((u) => u.status === "blocked").length}
-          </p>
+        <div className="bg-card rounded-xl p-4 border border-border shadow-sm">
+          <p className="text-sm text-muted-foreground font-medium">Bị khóa</p>
+          <div className="flex items-baseline gap-2 mt-2">
+             <span className="text-2xl font-bold text-destructive">
+                {users.filter((u) => !u.isActive).length}
+             </span>
+          </div>
         </div>
       </div>
 
+      {/* Filters */}
+       <div className="flex items-center gap-4">
+        <Select defaultValue="all">
+          <SelectTrigger className="w-[180px]">
+            <SelectValue placeholder="Trạng thái" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Tất cả trạng thái</SelectItem>
+            <SelectItem value="active">Hoạt động</SelectItem>
+            <SelectItem value="blocked">Bị khóa</SelectItem>
+          </SelectContent>
+        </Select>
+
+        <Select defaultValue="all">
+          <SelectTrigger className="w-[180px]">
+            <SelectValue placeholder="Vai trò" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Tất cả vai trò</SelectItem>
+            <SelectItem value="user">User</SelectItem>
+            <SelectItem value="admin">Admin</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+
       {/* Table */}
-      {loading ? (
-        <div className="flex items-center justify-center py-10">
-          <Loader2 className="h-8 w-8 animate-spin text-primary" />
-        </div>
-      ) : (
-        <DataTable<User>
-          data={users}
-          columns={columns}
-          searchPlaceholder="Tìm kiếm người dùng..."
-          searchKey="name"
-        />
-      )}
+      <DataTable
+        data={users}
+        columns={columns}
+        searchPlaceholder="Tìm kiếm người dùng..."
+        searchKey="fullName"
+      />
     </div>
   );
 }

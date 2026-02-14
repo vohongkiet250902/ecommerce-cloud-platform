@@ -7,6 +7,7 @@ export interface Brand {
   slug: string;
   logo?: string;
   website?: string;
+  productCount?: number;
   isActive: boolean;
 }
 

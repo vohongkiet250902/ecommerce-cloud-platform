@@ -1,66 +1,92 @@
 "use client";
 
-import { useEffect, useMemo, useState, useRef } from "react";
-import { Plus, Edit, Trash2, MoreHorizontal, Loader2, X } from "lucide-react";
+import { useEffect, useState, useMemo } from "react";
+import {
+  Plus,
+  Edit,
+  Trash2,
+  MoreHorizontal,
+  Loader2,
+  AlertTriangle,
+} from "lucide-react";
 import Image from "next/image";
 import { useDispatch, useSelector } from "react-redux";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import * as z from "zod";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Label } from "@/components/ui/label";
-import { DataTable } from "@/components/shared/DataTable";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+  DialogClose,
+} from "@/components/ui/dialog";
+import {
+  Form,
+  FormControl,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from "@/components/ui/form";
+import { DataTable } from "@/components/shared/DataTable";
 import { useToast } from "@/hooks/use-toast";
 import { brandApi } from "@/services/api";
 import type { RootState, AppDispatch } from "@/store";
-import { fetchBrandsThunk } from "@/store/brands/brands.slice";
+import { fetchBrandsThunk, type Brand } from "@/store/brands/brands.slice";
 
 /* ================= TYPES ================= */
 
-interface Brand {
-  _id: string;
-  name: string;
-  slug: string;
-  logo?: string;
-  productCount?: number;
-  isActive: boolean;
-}
+const formSchema = z.object({
+  name: z.string().min(1, "Tên thương hiệu không được để trống"),
+  slug: z.string().optional(), // Used as Website URL
+  logo: z.string().optional(),
+});
+
+type FormValues = z.infer<typeof formSchema>;
 
 /* ================= PAGE ================= */
 
 export default function BrandsPage() {
   const { toast } = useToast();
   const dispatch = useDispatch<AppDispatch>();
-  const nameInputRef = useRef<HTMLInputElement>(null);
 
   /* ===== Redux ===== */
   const { data: brands, loading } = useSelector(
-    (state: RootState) => state.brands,
+    (state: RootState) => state.brands
   );
 
-  /* ===== Modal state ===== */
-  const [showBrandModal, setShowBrandModal] = useState(false);
-  const [showDeleteModal, setShowDeleteModal] = useState(false);
-
-  const [editingBrand, setEditingBrand] = useState<Brand | null>(null);
-  const [deletingBrand, setDeletingBrand] = useState<Brand | null>(null);
-
-  const [submitting, setSubmitting] = useState(false);
-  const [nameError, setNameError] = useState("");
-  const [slugError, setSlugError] = useState("");
   const [initialized, setInitialized] = useState(false);
 
-  const [form, setForm] = useState({
-    name: "",
-    slug: "",
-    logo: "",
+  // Dialog States
+  const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [dialogMode, setDialogMode] = useState<"create" | "edit">("create");
+  const [selectedBrand, setSelectedBrand] = useState<Brand | null>(null);
+
+  // Delete Confirm States
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [brandToDelete, setBrandToDelete] = useState<Brand | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  // Form
+  const form = useForm<FormValues>({
+    resolver: zodResolver(formSchema),
+    defaultValues: {
+      name: "",
+      slug: "",
+      logo: "",
+    },
   });
 
   /* ===== Fetch ===== */
@@ -70,132 +96,82 @@ export default function BrandsPage() {
     });
   }, [dispatch]);
 
-  useEffect(() => {
-    if (showBrandModal) {
-      setTimeout(() => nameInputRef.current?.focus(), 50);
-    }
-  }, [showBrandModal]);
+  /* ===== Handlers ===== */
+  const handleOpenCreate = () => {
+    setDialogMode("create");
+    setSelectedBrand(null);
+    form.reset({ name: "", slug: "", logo: "" });
+    setIsDialogOpen(true);
+  };
 
-  /* ===== Stats ===== */
-  const totalBrands = brands.length;
-  const totalProducts = useMemo(
-    () => brands.reduce((s, b) => s + (b.productCount ?? 0), 0),
-    [brands],
-  );
+  const handleOpenEdit = (brand: Brand) => {
+    setDialogMode("edit");
+    setSelectedBrand(brand);
+    form.reset({
+      name: brand.name,
+      slug: brand.slug, // Maps to "Website" input
+      logo: brand.logo || "",
+    });
+    setIsDialogOpen(true);
+  };
 
-  /* ================= SAVE ================= */
+  const handleOpenDelete = (brand: Brand) => {
+    setBrandToDelete(brand);
+    setDeleteConfirmOpen(true);
+  };
 
-  const handleSaveBrand = async () => {
-    let hasError = false;
-
-    if (!form.name.trim()) {
-      setNameError("Tên thương hiệu không được để trống");
-      hasError = true;
-    }
-
-    if (!form.slug.trim()) {
-      setSlugError("Đường dẫn Website không được để trống");
-      hasError = true;
-    }
-
-    if (hasError) return;
-
-    setSubmitting(true);
-
+  const onSubmit = async (values: FormValues) => {
     try {
-      if (editingBrand) {
-        await brandApi.updateBrand(editingBrand._id, form);
-        toast({
-          variant: "success",
-          title: "✅ Thành công",
-          description: "Cập nhật thương hiệu thành công",
-        });
+      if (dialogMode === "edit" && selectedBrand) {
+        await brandApi.updateBrand(selectedBrand._id, values);
+        toast({ title: "Cập nhật thành công", variant: "success" });
       } else {
-        await brandApi.createBrand(form);
-        toast({
-          variant: "success",
-          title: "✅ Thành công",
-          description: "Thêm thương hiệu thành công",
-        });
+        await brandApi.createBrand(values);
+        toast({ title: "Tạo thương hiệu thành công", variant: "success" });
       }
 
       dispatch(fetchBrandsThunk());
-      closeBrandModal();
-    } catch {
+      setIsDialogOpen(false);
+    } catch (error: any) {
       toast({
+        title: "Lỗi",
+        description:
+          error?.response?.data?.message || "Không thể lưu thương hiệu",
         variant: "destructive",
-        title: "❌ Lỗi",
-        description: "Không thể lưu thương hiệu",
       });
-    } finally {
-      setSubmitting(false);
     }
   };
 
-  /* ================= DELETE ================= */
-
-  const confirmDeleteBrand = async () => {
-    if (!deletingBrand) return;
-
+  const handleConfirmDelete = async () => {
+    if (!brandToDelete) return;
+    setIsDeleting(true);
     try {
-      await brandApi.deleteBrand(deletingBrand._id);
+      await brandApi.deleteBrand(brandToDelete._id);
+      toast({ title: "Đã xóa thương hiệu", variant: "success" });
       dispatch(fetchBrandsThunk());
-
+      setDeleteConfirmOpen(false);
+    } catch (error: any) {
       toast({
-        variant: "success",
-        title: "✅ Thành công",
-        description: "Xóa thương hiệu thành công",
-      });
-    } catch {
-      toast({
+        title: "Lỗi xóa",
+        description:
+          error?.response?.data?.message || "Không thể xóa thương hiệu",
         variant: "destructive",
-        title: "❌ Lỗi",
-        description: "Không thể xóa thương hiệu",
       });
     } finally {
-      setShowDeleteModal(false);
-      setDeletingBrand(null);
+      setIsDeleting(false);
+      setBrandToDelete(null);
     }
   };
 
-  /* ================= MODAL HANDLERS ================= */
-
-  const openAddModal = () => {
-    setEditingBrand(null);
-    setForm({ name: "", slug: "", logo: "" });
-    setNameError("");
-    setShowBrandModal(true);
-  };
-
-  const openEditModal = (brand: Brand) => {
-    setEditingBrand(brand);
-    setForm({
-      name: brand.name,
-      slug: brand.slug,
-      logo: brand.logo ?? "",
-    });
-    setNameError("");
-    setShowBrandModal(true);
-  };
-
-  const closeBrandModal = () => {
-    setShowBrandModal(false);
-    setEditingBrand(null);
-    setNameError("");
-    setSlugError("");
-    setForm({ name: "", slug: "", logo: "" });
-  };
-
-  /* ================= TABLE ================= */
-
-  const columns = useMemo(
+  /* ===== Table Columns ===== */
+  const tableColumns = useMemo(
     () => [
       {
         key: "name",
         header: "Thương hiệu",
         render: (brand: Brand) => (
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-lg bg-secondary flex items-center justify-center p-2 overflow-hidden">
+            <div className="w-10 h-10 rounded-lg bg-secondary/50 flex items-center justify-center p-2 overflow-hidden border border-border/40">
               {brand.logo ? (
                 <Image
                   src={brand.logo}
@@ -206,7 +182,7 @@ export default function BrandsPage() {
                   unoptimized
                 />
               ) : (
-                <span className="font-bold text-xs">
+                <span className="font-bold text-xs text-muted-foreground">
                   {brand.name.charAt(0).toUpperCase()}
                 </span>
               )}
@@ -216,198 +192,247 @@ export default function BrandsPage() {
         ),
       },
       {
-        key: "slug",
-        header: "Đường dẫn Website",
-        render: (b: Brand) => (
-          <span className="text-muted-foreground">{b.slug}</span>
+        key: "slug", // Key is slug
+        header: "Website", // Header is Website
+        render: (b: Brand) => b.slug ? (
+          <a 
+            href={b.slug} 
+            target="_blank" 
+            rel="noopener noreferrer"
+            className="text-primary hover:underline text-sm truncate max-w-[200px] block"
+          >
+            {b.slug}
+          </a>
+        ) : (
+          <span className="text-muted-foreground text-sm">-</span>
         ),
       },
       {
         key: "productCount",
         header: "Sản phẩm",
         render: (b: Brand) => (
-          <Badge variant="secondary">{b.productCount ?? 0} sản phẩm</Badge>
+          <Badge variant="secondary" className="font-normal">
+            {b.productCount ?? 0} sản phẩm
+          </Badge>
         ),
       },
       {
         key: "actions",
         header: "",
         render: (brand: Brand) => (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon-sm">
-                <MoreHorizontal className="h-4 w-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="dropdown-content">
-              <DropdownMenuItem onClick={() => openEditModal(brand)}>
-                <Edit className="mr-2 h-4 w-4" />
-                Chỉnh sửa
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                className="text-destructive"
-                onClick={() => {
-                  setDeletingBrand(brand);
-                  setShowDeleteModal(true);
-                }}
-              >
-                <Trash2 className="mr-2 h-4 w-4" />
-                Xóa
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <div className="flex justify-end">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 hover:bg-muted"
+                >
+                  <MoreHorizontal className="h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={() => handleOpenEdit(brand)}>
+                  <Edit className="mr-2 h-4 w-4" />
+                  Chỉnh sửa
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  className="text-destructive focus:text-destructive"
+                  onClick={() => handleOpenDelete(brand)}
+                >
+                  <Trash2 className="mr-2 h-4 w-4" />
+                  Xóa
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
         ),
       },
     ],
-    [],
+    []
   );
 
-  /* ================= LOADING STATE ================= */
+  /* ===== Stats ===== */
+  const totalBrands = brands.length;
+  const totalProducts = useMemo(
+    () => brands.reduce((s, b) => s + (b.productCount ?? 0), 0),
+    [brands]
+  );
 
   if (!initialized && loading) {
     return (
-      <div className="h-screen flex items-center justify-center">
+      <div className="h-[calc(100vh-200px)] flex items-center justify-center">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
       </div>
     );
   }
 
-  /* ================= RENDER ================= */
-
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex justify-between items-center">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h1 className="text-2xl font-bold">Thương hiệu</h1>
-          <p className="text-muted-foreground">Quản lý thương hiệu sản phẩm</p>
+          <h1 className="text-2xl font-bold tracking-tight">Thương hiệu</h1>
+          <p className="text-muted-foreground">
+            Quản lý các đối tác và thương hiệu sản phẩm
+          </p>
         </div>
-        <Button onClick={openAddModal}>
+        <Button onClick={handleOpenCreate} className="shadow-sm">
           <Plus className="h-4 w-4 mr-2" />
           Thêm thương hiệu
         </Button>
       </div>
 
-      {/* Stats */}
+      {/* Stats Cards */}
       <div className="grid grid-cols-2 gap-4">
-        <div className="bg-card p-4 rounded-xl">
-          <p className="text-sm text-muted-foreground">Tổng thương hiệu</p>
-          <p className="text-2xl font-bold">{totalBrands}</p>
+        <div className="bg-card p-4 rounded-xl border border-border shadow-sm">
+          <p className="text-sm text-muted-foreground font-medium">
+            Tổng thương hiệu
+          </p>
+          <div className="flex items-baseline gap-2 mt-2">
+            <p className="text-2xl font-bold">{totalBrands}</p>
+          </div>
         </div>
-        <div className="bg-card p-4 rounded-xl">
-          <p className="text-sm text-muted-foreground">Tổng sản phẩm</p>
-          <p className="text-2xl font-bold text-primary">{totalProducts}</p>
+        <div className="bg-card p-4 rounded-xl border border-border shadow-sm">
+          <p className="text-sm text-muted-foreground font-medium">
+            Tổng sản phẩm liên kết
+          </p>
+          <div className="flex items-baseline gap-2 mt-2">
+            <p className="text-2xl font-bold text-primary">{totalProducts}</p>
+          </div>
         </div>
       </div>
 
       {/* Table */}
       <DataTable
         data={brands}
-        columns={columns}
+        columns={tableColumns}
         searchKey="name"
         searchPlaceholder="Tìm kiếm thương hiệu..."
       />
 
-      {/* ================= ADD / EDIT MODAL ================= */}
-      {showBrandModal && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center modal-overlay">
-          <form
-            className="bg-card w-full max-w-md rounded-xl p-6 space-y-4 modal-content"
-            onSubmit={(e) => {
-              e.preventDefault();
-              handleSaveBrand();
-            }}
-          >
-            <div className="flex justify-between items-center">
-              <h2 className="font-bold">
-                {editingBrand ? "Chỉnh sửa thương hiệu" : "Thêm thương hiệu"}
-              </h2>
-              <X className="cursor-pointer" onClick={closeBrandModal} />
-            </div>
+      {/* Form Dialog */}
+      <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>
+              {dialogMode === "edit"
+                ? "Chỉnh sửa thương hiệu"
+                : "Thêm thương hiệu mới"}
+            </DialogTitle>
+          </DialogHeader>
 
-            <Label>Logo (URL ảnh)</Label>
-            <Input
-              placeholder="https://..."
-              value={form.logo}
-              onChange={(e) => setForm({ ...form, logo: e.target.value })}
-            />
+          <Form {...form}>
+            <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+              <FormField
+                control={form.control}
+                name="logo"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Logo URL</FormLabel>
+                    <FormControl>
+                      <Input
+                        placeholder="https://example.com/logo.png"
+                        {...field}
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
 
-            <Label>Tên thương hiệu</Label>
-            <Input
-              ref={nameInputRef}
-              value={form.name}
-              onChange={(e) => {
-                setForm({ ...form, name: e.target.value });
-                if (nameError) setNameError("");
-              }}
-              className={nameError ? "border-red-500" : ""}
-            />
-            {nameError && <p className="text-sm text-red-500">{nameError}</p>}
+              <FormField
+                control={form.control}
+                name="name"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Tên thương hiệu</FormLabel>
+                    <FormControl>
+                      <Input placeholder="Nhập tên thương hiệu..." {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
 
-            <Label>Đường dẫn Website</Label>
-            <Input
-              value={form.slug}
-              onChange={(e) => {
-                setForm({ ...form, slug: e.target.value });
-                if (slugError) setSlugError("");
-              }}
-              className={slugError ? "border-red-500" : ""}
-            />
-            {slugError && <p className="text-sm text-red-500">{slugError}</p>}
+              <FormField
+                control={form.control}
+                name="slug"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Website</FormLabel>
+                    <FormControl>
+                      <Input 
+                        placeholder="https://website.com" 
+                        {...field} 
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
 
-            <div className="flex gap-3 pt-2">
-              <Button
-                type="button"
-                variant="outline"
-                className="w-1/2"
-                onClick={closeBrandModal}
-              >
-                Hủy
-              </Button>
-              <Button type="submit" className="w-1/2" disabled={submitting}>
-                {submitting ? "Đang lưu..." : "Lưu"}
-              </Button>
-            </div>
-          </form>
-        </div>
-      )}
+              <DialogFooter className="pt-4">
+                <DialogClose asChild>
+                  <Button type="button" variant="outline">
+                    Hủy
+                  </Button>
+                </DialogClose>
+                <Button type="submit" disabled={form.formState.isSubmitting}>
+                  {form.formState.isSubmitting && (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  )}
+                  {dialogMode === "edit" ? "Lưu thay đổi" : "Tạo mới"}
+                </Button>
+              </DialogFooter>
+            </form>
+          </Form>
+        </DialogContent>
+      </Dialog>
 
-      {/* ================= DELETE CONFIRM MODAL ================= */}
-      {showDeleteModal && deletingBrand && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center modal-overlay">
-          <div className="bg-card w-full max-w-sm rounded-xl p-6 space-y-4 modal-content">
-            <h2 className="font-bold text-lg text-center">Xác nhận xóa</h2>
-
-            <p className="text-sm text-center text-muted-foreground">
+      {/* Delete Confirm Dialog */}
+      <Dialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-destructive">
+              <AlertTriangle className="h-5 w-5" />
+              Xác nhận xóa
+            </DialogTitle>
+          </DialogHeader>
+          <div className="py-4">
+            <p className="text-muted-foreground">
               Bạn có chắc chắn muốn xóa thương hiệu{" "}
-              <span className="font-semibold text-foreground">
-                {deletingBrand.name}
+              <span className="font-bold text-foreground">
+                {brandToDelete?.name}
               </span>
               ?
             </p>
-
-            <div className="flex gap-3 pt-4">
-              <Button
-                variant="outline"
-                className="w-1/2"
-                onClick={() => {
-                  setShowDeleteModal(false);
-                  setDeletingBrand(null);
-                }}
-              >
-                Hủy
-              </Button>
-              <Button
-                variant="destructive"
-                className="w-1/2"
-                onClick={confirmDeleteBrand}
-              >
-                Xóa
-              </Button>
-            </div>
+            <p className="text-sm text-muted-foreground mt-2">
+              Hành động này không thể hoàn tác.
+            </p>
           </div>
-        </div>
-      )}
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setDeleteConfirmOpen(false)}
+              disabled={isDeleting}
+            >
+              Hủy
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleConfirmDelete}
+              disabled={isDeleting}
+            >
+              {isDeleting ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                "Xóa thương hiệu"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

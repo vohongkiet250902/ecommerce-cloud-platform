@@ -36,10 +36,16 @@ export class Order {
   totalAmount: number;
 
   @Prop({
-    enum: ['pending', 'paid', 'cancelled'],
+    enum: ['pending', 'paid', 'shipping', 'completed', 'cancelled'],
     default: 'pending',
   })
   status: string;
+
+  @Prop({
+    enum: ['pending', 'paid', 'refunded'],
+    default: 'pending',
+  })
+  paymentStatus: string;
 
   @Prop({
     enum: ['cod', 'mock'],
