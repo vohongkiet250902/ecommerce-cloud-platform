@@ -7,12 +7,15 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { Category } from './schemas/category.schema';
 import { CreateCategoryDto } from './dto/create-category.dto';
+import { Product } from '../products/schemas/product.schema';
 
 @Injectable()
 export class CategoriesService {
   constructor(
     @InjectModel(Category.name)
     private readonly categoryModel: Model<Category>,
+    @InjectModel(Product.name)
+    private readonly productModel: Model<Product>,
   ) {}
 
   async create(dto: CreateCategoryDto) {
@@ -159,14 +162,60 @@ export class CategoriesService {
   }
 
   async findAll() {
-    return this.categoryModel
+    // BƯỚC 1: Lấy cấu trúc cây danh mục từ Database
+    // Dùng .lean() để biến Mongoose Document thành Object thường, cho phép ta thêm trường 'productCount'
+    const categories = await this.categoryModel
       .find({ parentId: null, isActive: true })
       .populate({
         path: 'children',
         match: { isActive: true },
-        populate: { path: 'children' },
+        populate: { path: 'children', match: { isActive: true } }, // Nest sâu thêm nếu có category cấp 3
       })
       .sort({ name: 1 })
+      .lean()
       .exec();
+
+    // BƯỚC 2: Group và đếm số sản phẩm gán TRỰC TIẾP cho mỗi categoryId
+    const productCounts = await this.productModel.aggregate([
+      {
+        $group: {
+          _id: '$categoryId', // Gom nhóm theo id danh mục
+          count: { $sum: 1 }, // Mỗi sản phẩm đếm là 1
+        },
+      },
+    ]);
+
+    // BƯỚC 3: Chuyển mảng productCounts thành một Map để tra cứu cực nhanh
+    // Ví dụ: Map { "id_laptop_gaming" => 5, "id_tai_nghe" => 12 }
+    const countMap = new Map();
+    productCounts.forEach((pc) => {
+      if (pc._id) {
+        countMap.set(String(pc._id), pc.count);
+      }
+    });
+
+    // BƯỚC 4: Hàm đệ quy duyệt cây để gán đếm và cộng dồn từ con lên cha
+    const calculateCountAndMap = (category: any) => {
+      // 1. Lấy số lượng sản phẩm gán trực tiếp vào danh mục này
+      let totalCount = countMap.get(String(category._id)) || 0;
+
+      // 2. Nếu có danh mục con, duyệt qua các con và cộng dồn số lượng của chúng lên cha
+      if (category.children && category.children.length > 0) {
+        category.children.forEach((child: any) => {
+          totalCount += calculateCountAndMap(child); // Gọi lại chính nó (Đệ quy)
+        });
+      }
+
+      // 3. Gán tổng số tính được vào trường productCount để Frontend lấy
+      category.productCount = totalCount;
+
+      // Trả về tổng để danh mục cha cấp cao hơn (nếu có) có thể cộng tiếp
+      return totalCount;
+    };
+
+    // BƯỚC 5: Chạy hàm đệ quy cho các danh mục gốc (root)
+    categories.forEach((cat) => calculateCountAndMap(cat));
+
+    return categories;
   }
 }
