@@ -153,4 +153,13 @@ export class ProductsService {
     if (!product) throw new NotFoundException('Product not found or inactive');
     return product;
   }
+
+  async findByIdForAdmin(id: string) {
+    const product = await this.productModel
+      .findById(id)
+      .populate('categoryId')
+      .populate('brandId');
+    if (!product) throw new NotFoundException('Product not found');
+    return product;
+  }
 }

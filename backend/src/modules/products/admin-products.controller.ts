@@ -24,7 +24,12 @@ export class AdminProductsController {
   @Get()
   findAll(@Query() query: any) {
     return this.productsService.findAll(query, true);
-  } // true = Is admin
+  }
+
+  @Get(':id')
+  findOne(@Param('id') id: string) {
+    return this.productsService.findByIdForAdmin(id);
+  }
 
   @Post()
   create(@Body() dto: any) {
