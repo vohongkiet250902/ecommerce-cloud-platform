@@ -2,7 +2,9 @@ import {
   Body,
   Controller,
   Delete,
+  Get,
   Param,
+  Patch,
   Post,
   Put,
   UseGuards,
@@ -18,6 +20,11 @@ import { RolesGuard } from '../../common/guards/roles.guard';
 export class AdminBrandsController {
   constructor(private readonly brandsService: BrandsService) {}
 
+  @Get()
+  findAll() {
+    return this.brandsService.findAllForAdmin();
+  }
+
   @Post()
   create(@Body() dto: any) {
     return this.brandsService.create(dto);
@@ -26,6 +33,11 @@ export class AdminBrandsController {
   @Put(':id')
   update(@Param('id') id: string, @Body() dto: any) {
     return this.brandsService.update(id, dto);
+  }
+
+  @Patch(':id/status')
+  updateStatus(@Param('id') id: string, @Body('isActive') isActive: boolean) {
+    return this.brandsService.updateStatus(id, isActive);
   }
 
   @Delete(':id')

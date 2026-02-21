@@ -1,78 +1,48 @@
 import {
-  BadRequestException,
   Body,
   Controller,
   Delete,
+  Get,
   Param,
+  Patch,
   Post,
   Put,
   Query,
-  UploadedFiles,
   UseGuards,
-  UseInterceptors,
 } from '@nestjs/common';
-import { FilesInterceptor } from '@nestjs/platform-express';
-import { memoryStorage } from 'multer';
-
+import { ProductsService } from './products.service';
+import { Roles } from '../../common/decorators/roles.decorator';
 import { JwtGuard } from '../../common/guards/jwt.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
-import { Roles } from '../../common/decorators/roles.decorator';
 
-import { UploadService } from '../../modules/upload/upload.service';
-import { ProductsService } from './products.service';
-
-@Controller('admin/products')
 @Roles('admin')
 @UseGuards(JwtGuard, RolesGuard)
+@Controller('admin/products')
 export class AdminProductsController {
-  constructor(
-    private readonly uploadService: UploadService,
-    private readonly productsService: ProductsService, // ✅ BẮT BUỘC
-  ) {}
+  constructor(private readonly productsService: ProductsService) {}
 
-  // ===== Upload multiple images =====
-  @Post('upload-multiple')
-  @UseInterceptors(
-    FilesInterceptor('files', 10, {
-      storage: memoryStorage(),
-    }),
-  )
-  async uploadMultiple(@UploadedFiles() files: Express.Multer.File[]) {
-    if (!files || !files.length) {
-      throw new BadRequestException('No files uploaded');
-    }
+  @Get()
+  findAll(@Query() query: any) {
+    return this.productsService.findAll(query, true);
+  } // true = Is admin
 
-    const images = await Promise.all(
-      files.map((file) => this.uploadService.uploadImage(file, 'products')),
-    );
-
-    return { images };
-  }
-
-  // ===== Create product =====
   @Post()
   create(@Body() dto: any) {
     return this.productsService.create(dto);
   }
 
-  // ===== Update product =====
   @Put(':id')
   update(@Param('id') id: string, @Body() dto: any) {
     return this.productsService.update(id, dto);
   }
 
-  // ===== Delete product =====
+  @Patch(':id/status')
+  updateStatus(@Param('id') id: string, @Body('status') status: string) {
+    return this.productsService.updateStatus(id, status);
+  }
+
   @Delete(':id')
   remove(@Param('id') id: string) {
     return this.productsService.remove(id);
-  }
-
-  @Delete(':id/images')
-  removeImage(
-    @Param('id') productId: string,
-    @Query('publicId') publicId: string,
-  ) {
-    console.log('REMOVE IMAGE ROUTE HIT');
-    return this.productsService.removeImage(productId, publicId);
   }
 }

@@ -11,10 +11,8 @@ import { Product } from '../products/schemas/product.schema';
 @Injectable()
 export class BrandsService {
   constructor(
-    @InjectModel(Brand.name)
-    private readonly brandModel: Model<Brand>,
-    @InjectModel(Product.name)
-    private readonly productModel: Model<Product>,
+    @InjectModel(Brand.name) private readonly brandModel: Model<Brand>,
+    @InjectModel(Product.name) private readonly productModel: Model<Product>,
   ) {}
 
   async create(dto: any) {
@@ -31,30 +29,43 @@ export class BrandsService {
     return brand;
   }
 
+  async updateStatus(id: string, isActive: boolean) {
+    const brand = await this.brandModel.findByIdAndUpdate(
+      id,
+      { isActive },
+      { new: true },
+    );
+    if (!brand) throw new NotFoundException('Brand not found');
+    return brand;
+  }
+
   async remove(id: string) {
-    return this.brandModel.findByIdAndDelete(id);
+    const hasInStockProducts = await this.productModel.exists({
+      brandId: String(id),
+      totalStock: { $gt: 0 },
+    });
+
+    if (hasInStockProducts) {
+      throw new BadRequestException(
+        'Thương hiệu vẫn còn sản phẩm tồn kho, vui lòng chuyển sang inactive thay vì xóa.',
+      );
+    }
+
+    const deleted = await this.brandModel.findByIdAndDelete(id);
+    if (!deleted) throw new NotFoundException('Brand not found');
+    return deleted;
   }
 
-  async findAll() {
-    return this.brandModel.find({ isActive: true }).sort({ name: 1 });
-  }
-
+  // User query (Chỉ active)
   async findAllWithCounts() {
     return this.brandModel.aggregate([
-      {
-        $match: { isActive: true },
-      },
-      // BƯỚC MỚI: Ép kiểu _id từ ObjectId sang String
-      {
-        $addFields: {
-          brandIdString: { $toString: '$_id' },
-        },
-      },
+      { $match: { isActive: true } },
+      { $addFields: { brandIdString: { $toString: '$_id' } } },
       {
         $lookup: {
-          from: 'products', // Tên collection products
-          localField: 'brandIdString', // Sử dụng trường String vừa tạo để so sánh
-          foreignField: 'brandId', // Trường String bên products
+          from: 'products',
+          localField: 'brandIdString',
+          foreignField: 'brandId',
           as: 'productsData',
         },
       },
@@ -64,12 +75,35 @@ export class BrandsService {
           slug: 1,
           logo: 1,
           isActive: 1,
-          productCount: { $size: '$productsData' }, // Đếm mảng productsData
+          productCount: { $size: '$productsData' },
+        },
+      },
+      { $sort: { name: 1 } },
+    ]);
+  }
+
+  // Admin query (Lấy hết)
+  async findAllForAdmin() {
+    return this.brandModel.aggregate([
+      { $addFields: { brandIdString: { $toString: '$_id' } } },
+      {
+        $lookup: {
+          from: 'products',
+          localField: 'brandIdString',
+          foreignField: 'brandId',
+          as: 'productsData',
         },
       },
       {
-        $sort: { name: 1 },
+        $project: {
+          name: 1,
+          slug: 1,
+          logo: 1,
+          isActive: 1,
+          productCount: { $size: '$productsData' },
+        },
       },
+      { $sort: { name: 1 } },
     ]);
   }
 }

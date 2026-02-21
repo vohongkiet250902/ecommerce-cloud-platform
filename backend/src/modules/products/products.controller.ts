@@ -1,4 +1,4 @@
-import { Controller, Delete, Get, Param, Query } from '@nestjs/common';
+import { Controller, Get, Param, Query } from '@nestjs/common';
 import { ProductsService } from './products.service';
 
 @Controller('products')
@@ -7,8 +7,8 @@ export class ProductsController {
 
   @Get()
   findAll(@Query() query: any) {
-    return this.productsService.findAll(query);
-  }
+    return this.productsService.findAll(query, false);
+  } // false = Not admin
 
   @Get(':slug')
   findOne(@Param('slug') slug: string) {

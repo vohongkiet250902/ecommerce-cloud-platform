@@ -2,7 +2,9 @@ import {
   Body,
   Controller,
   Delete,
+  Get,
   Param,
+  Patch,
   Post,
   Put,
   UseGuards,
@@ -22,6 +24,13 @@ import { UpdateCategoryDto } from './dto/update-category.dto';
 export class AdminCategoriesController {
   constructor(private readonly categoriesService: CategoriesService) {}
 
+  // Lấy toàn bộ cây danh mục cho Admin (Bao gồm cả active và inactive)
+  @Get()
+  findAllForAdmin() {
+    return this.categoriesService.findAllForAdmin();
+  }
+
+  // Tạo mới danh mục
   @Post()
   @UsePipes(new ValidationPipe({ whitelist: true }))
   create(@Body() dto: CreateCategoryDto) {
@@ -32,6 +41,11 @@ export class AdminCategoriesController {
   @UsePipes(new ValidationPipe({ whitelist: true }))
   update(@Param('id') id: string, @Body() dto: UpdateCategoryDto) {
     return this.categoriesService.update(id, dto);
+  }
+
+  @Patch(':id/status')
+  updateStatus(@Param('id') id: string, @Body('isActive') isActive: boolean) {
+    return this.categoriesService.updateStatus(id, isActive);
   }
 
   @Delete(':id')
