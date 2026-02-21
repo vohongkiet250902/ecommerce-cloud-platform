@@ -1,7 +1,13 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Types } from 'mongoose';
 
-export type OrderStatus = 'pending' | 'paid' | 'cancelled';
+export type OrderStatus =
+  | 'pending'
+  | 'paid'
+  | 'shipping'
+  | 'completed'
+  | 'cancelled';
+export type PaymentStatus = 'pending' | 'paid' | 'refunded';
 export type PaymentMethod = 'cod' | 'mock' | 'vnpay';
 
 @Schema({ _id: false })
@@ -39,43 +45,27 @@ export class Order {
   totalAmount: number;
 
   @Prop({
-    enum: ['pending', 'paid', 'cancelled'],
+    enum: ['pending', 'paid', 'shipping', 'completed', 'cancelled'],
     default: 'pending',
     index: true,
   })
   status: OrderStatus;
 
   @Prop({
-    enum: ['cod', 'mock', 'vnpay'],
+    enum: ['pending', 'paid', 'refunded'],
+    default: 'pending',
+  })
+  paymentStatus: PaymentStatus;
+
+  @Prop({
+    enum: ['cod', 'mock', 'vnpay'], // ✅ Đã giữ lại vnpay
     default: 'mock',
   })
   paymentMethod: PaymentMethod;
 
-  /**
-   * Idempotency key: unique per user (sparse)
-   */
+  // ✅ Khôi phục Idempotency Key chống user spam click tạo 2 đơn liên tục
   @Prop({ trim: true })
   idempotencyKey?: string;
-
-  // optional audit for payment
-  @Prop()
-  paidAt?: Date;
-
-  @Prop()
-  paymentProvider?: string;
-
-  @Prop()
-  paymentRef?: string;
 }
 
 export const OrderSchema = SchemaFactory.createForClass(Order);
-
-// indexes
-OrderSchema.index({ userId: 1, createdAt: -1 });
-OrderSchema.index({ status: 1, createdAt: -1 });
-
-// idempotency: unique per user, only when provided
-OrderSchema.index(
-  { userId: 1, idempotencyKey: 1 },
-  { unique: true, sparse: true },
-);

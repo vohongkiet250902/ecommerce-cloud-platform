@@ -284,11 +284,10 @@ export class CartService {
       await this.assertValidProductSku(pid, it.sku);
     }
 
-    const order = await this.ordersService.create(
-      userId,
-      { items },
+    const order = await this.ordersService.create(userId, {
+      items,
       idempotencyKey,
-    );
+    });
 
     // Nếu tạo order thành công (hoặc idempotent trả lại order), clear cart.
     cart.items = [] as any;

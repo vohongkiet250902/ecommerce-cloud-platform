@@ -4,6 +4,7 @@ import {
   Get,
   Param,
   Patch,
+  Post,
   Query,
   UseGuards,
 } from '@nestjs/common';
@@ -11,7 +12,6 @@ import { Roles } from 'src/common/decorators/roles.decorator';
 import { JwtGuard } from 'src/common/guards/jwt.guard';
 import { RolesGuard } from 'src/common/guards/roles.guard';
 import { OrdersService } from './orders.service';
-import { AdminUpdateOrderStatusDto } from './dto/update-order.dto';
 
 @Roles('admin')
 @UseGuards(JwtGuard, RolesGuard)
@@ -19,6 +19,7 @@ import { AdminUpdateOrderStatusDto } from './dto/update-order.dto';
 export class AdminOrdersController {
   constructor(private readonly ordersService: OrdersService) {}
 
+  // ✅ Đã thêm lại Phân trang và Lọc
   @Get()
   findAll(
     @Query('page') page?: string,
@@ -34,12 +35,18 @@ export class AdminOrdersController {
     });
   }
 
-  // Admin chỉ được cancel (rollback stock)
+  // Cho phép update cả trạng thái giao hàng và thanh toán
   @Patch(':id/status')
   updateStatus(
     @Param('id') id: string,
-    @Body() dto: AdminUpdateOrderStatusDto,
+    @Body() body: { status?: string; paymentStatus?: string },
   ) {
-    return this.ordersService.adminUpdateStatus(id, dto.status);
+    return this.ordersService.updateStatus(id, body);
+  }
+
+  // API riêng để Hủy đơn + Hoàn kho
+  @Post(':id/cancel')
+  cancel(@Param('id') id: string) {
+    return this.ordersService.adminCancelOrder(id);
   }
 }

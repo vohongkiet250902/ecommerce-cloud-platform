@@ -7,6 +7,8 @@ import {
   IsString,
   Min,
   ValidateNested,
+  IsOptional,
+  IsIn,
 } from 'class-validator';
 
 export class CreateOrderItemDto {
@@ -27,4 +29,11 @@ export class CreateOrderDto {
   @ValidateNested({ each: true })
   @Type(() => CreateOrderItemDto)
   items: CreateOrderItemDto[];
+
+  // BƯỚC MỚI: Bổ sung trường paymentMethod vào đây để NestJS cho phép nhận dữ liệu
+  @IsOptional()
+  @IsIn(['cod', 'mock', 'vnpay'], {
+    message: "Phương thức thanh toán chỉ được là: 'cod', 'mock' hoặc 'vnpay'",
+  })
+  paymentMethod?: string;
 }

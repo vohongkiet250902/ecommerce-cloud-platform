@@ -25,7 +25,7 @@ export class OrdersController {
     @Body() dto: CreateOrderDto,
     @Headers('idempotency-key') idempotencyKey?: string,
   ) {
-    return this.ordersService.create(req.user.id, dto, idempotencyKey);
+    return this.ordersService.create(req.user.id, { ...dto, idempotencyKey });
   }
 
   @Patch(':id/cancel')
