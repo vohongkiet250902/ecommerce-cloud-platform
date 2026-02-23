@@ -12,6 +12,7 @@ import { LoggerMiddleware } from './common/middleware/logger.middleware';
 import { CategoriesModule } from './modules/categories/categories.module';
 import { BrandsModule } from './modules/brands/brands.module';
 import { PaymentsModule } from './modules/payments/payments.module';
+import { CartModule } from './modules/cart/cart.module';
 
 @Module({
   imports: [
@@ -31,6 +32,7 @@ import { PaymentsModule } from './modules/payments/payments.module';
     CategoriesModule,
     BrandsModule,
     PaymentsModule,
+    CartModule,
   ],
   controllers: [AppController],
   providers: [AppService],

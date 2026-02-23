@@ -1,20 +1,25 @@
-import {
-  IsArray,
-  ArrayMinSize,
-  ValidateNested,
-  IsNotEmpty,
-  IsNumber,
-} from 'class-validator';
 import { Type } from 'class-transformer';
+import {
+  ArrayMinSize,
+  IsArray,
+  IsInt,
+  IsMongoId,
+  IsString,
+  Min,
+  ValidateNested,
+  IsOptional,
+  IsIn,
+} from 'class-validator';
 
-class CreateOrderItemDto {
-  @IsNotEmpty()
+export class CreateOrderItemDto {
+  @IsMongoId()
   productId: string;
 
-  @IsNotEmpty()
+  @IsString()
   sku: string;
 
-  @IsNumber()
+  @IsInt()
+  @Min(1)
   quantity: number;
 }
 
@@ -24,4 +29,11 @@ export class CreateOrderDto {
   @ValidateNested({ each: true })
   @Type(() => CreateOrderItemDto)
   items: CreateOrderItemDto[];
+
+  // BƯỚC MỚI: Bổ sung trường paymentMethod vào đây để NestJS cho phép nhận dữ liệu
+  @IsOptional()
+  @IsIn(['cod', 'mock', 'vnpay'], {
+    message: "Phương thức thanh toán chỉ được là: 'cod', 'mock' hoặc 'vnpay'",
+  })
+  paymentMethod?: string;
 }

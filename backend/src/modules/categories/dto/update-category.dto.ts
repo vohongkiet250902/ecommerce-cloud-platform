@@ -1,30 +1,10 @@
-import {
-  IsArray,
-  IsBoolean,
-  IsMongoId,
-  IsOptional,
-  IsString,
-} from 'class-validator';
+import { OmitType, PartialType } from '@nestjs/mapped-types';
+import { CreateCategoryDto } from './create-category.dto';
+import { IsOptional } from 'class-validator';
 
-export class UpdateCategoryDto {
-  @IsOptional()
-  @IsString()
-  name?: string;
-
-  @IsOptional()
-  @IsString()
-  slug?: string;
-
-  // Cho phép null để đưa về root:
-  // class-validator không validate null với IsMongoId, nên ta để any và validate trong service như trên
+export class UpdateCategoryDto extends PartialType(
+  OmitType(CreateCategoryDto, ['parentId'] as const),
+) {
   @IsOptional()
   parentId?: string | null;
-
-  @IsOptional()
-  @IsArray()
-  filterableAttributes?: string[];
-
-  @IsOptional()
-  @IsBoolean()
-  isActive?: boolean;
 }

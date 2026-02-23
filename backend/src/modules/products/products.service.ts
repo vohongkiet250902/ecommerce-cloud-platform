@@ -6,45 +6,61 @@ import {
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { Product, ProductVariant } from './schemas/product.schema';
+import { Category } from '../categories/schemas/category.schema';
+import { Brand } from '../brands/schemas/brand.schema';
 import { UploadService } from '../upload/upload.service';
 
 @Injectable()
 export class ProductsService {
   constructor(
-    @InjectModel(Product.name)
-    private readonly productModel: Model<Product>,
+    @InjectModel(Product.name) private readonly productModel: Model<Product>,
+    @InjectModel(Category.name) private readonly categoryModel: Model<Category>,
+    @InjectModel(Brand.name) private readonly brandModel: Model<Brand>,
     private readonly uploadService: UploadService,
   ) {}
 
-  /* ================== PRIVATE HELPERS ================== */
-
   private validateUniqueSku(variants: ProductVariant[]) {
     const skus = variants.map((v) => v.sku);
-    const unique = new Set(skus);
-
-    if (skus.length !== unique.size) {
-      throw new BadRequestException('Duplicate SKU in product variants');
-    }
+    if (skus.length !== new Set(skus).size)
+      throw new BadRequestException('Duplicate SKU in variants');
   }
 
   private calculateTotalStock(variants: ProductVariant[] = []) {
     return variants.reduce((sum, v) => sum + (v.stock || 0), 0);
   }
-  /* ================== CRUD ================== */
+
+  private async validateCategoryAndBrand(
+    categoryId?: string,
+    brandId?: string,
+  ) {
+    if (categoryId) {
+      const category = await this.categoryModel.findById(categoryId);
+      if (!category || !category.isActive)
+        throw new BadRequestException(
+          'Danh mục không tồn tại hoặc bị vô hiệu hóa',
+        );
+    }
+    if (brandId) {
+      const brand = await this.brandModel.findById(brandId);
+      if (!brand || !brand.isActive)
+        throw new BadRequestException(
+          'Thương hiệu không tồn tại hoặc bị vô hiệu hóa',
+        );
+    }
+  }
 
   async create(dto: any) {
+    await this.validateCategoryAndBrand(dto.categoryId, dto.brandId);
     if (dto.variants?.length) {
       this.validateUniqueSku(dto.variants);
       dto.totalStock = this.calculateTotalStock(dto.variants);
     }
-
     const exists = await this.productModel.findOne({ slug: dto.slug });
     if (exists) throw new BadRequestException('Slug already exists');
     return this.productModel.create(dto);
   }
 
-  async findAll(query: any) {
-    // 1. Tách các tham số đặc biệt (System params)
+  async findAll(query: any, forAdmin: boolean = false) {
     const {
       page = 1,
       limit = 10,
@@ -53,84 +69,53 @@ export class ProductsService {
       keyword,
       minPrice,
       maxPrice,
-      sort, // Thêm sort nếu cần
-      ...filterParams // Tất cả những cái còn lại sẽ được coi là Attributes (RAM, CPU, Color...)
+      sort,
+      ...filterParams
     } = query;
-
     const filter: any = {};
 
-    // 2. Các bộ lọc cơ bản (Giữ nguyên)
+    if (!forAdmin) filter.status = 'active'; // User chỉ thấy hàng active
     if (categoryId) filter.categoryId = categoryId;
     if (brandId) filter.brandId = brandId;
-
-    if (keyword) {
-      filter.$text = { $search: keyword };
-    }
-
+    if (keyword) filter.$text = { $search: keyword };
     if (minPrice || maxPrice) {
       filter['variants.price'] = {};
       if (minPrice) filter['variants.price'].$gte = +minPrice;
       if (maxPrice) filter['variants.price'].$lte = +maxPrice;
     }
 
-    // === 3. LOGIC MỚI: Xử lý Dynamic Attributes ===
-    // Mục tiêu: Biến ?RAM=16GB thành query tìm trong variants.attributes
-
     const attributeQueries: any[] = [];
-
     Object.keys(filterParams).forEach((key) => {
-      // Bỏ qua nếu lỡ còn sót các key hệ thống
       if (['sort', 'page', 'limit'].includes(key)) return;
-
-      const value = filterParams[key];
-
-      if (value) {
+      if (filterParams[key]) {
         attributeQueries.push({
           'variants.attributes': {
-            $elemMatch: {
-              key: key,
-              value: value,
-            },
+            $elemMatch: { key, value: filterParams[key] },
           },
         });
       }
     });
 
-    // Nếu có attribute queries, dùng $and
-    if (attributeQueries.length > 0) {
-      filter.$and = attributeQueries;
-    }
+    if (attributeQueries.length > 0) filter.$and = attributeQueries;
 
-    // 4. Thực thi
     return this.productModel
       .find(filter)
       .skip((+page - 1) * +limit)
       .limit(+limit)
-      .sort({ createdAt: -1 }); // Hoặc xử lý biến sort động
-  }
-
-  async findOne(id: string) {
-    const product = await this.productModel.findById(id);
-    if (!product) throw new NotFoundException('Product not found');
-    return product;
+      .sort({ createdAt: -1 });
   }
 
   async update(id: string, dto: any) {
     const product = await this.productModel.findById(id);
     if (!product) throw new NotFoundException('Product not found');
 
-    // ===== 1. HANDLE IMAGE DELETE =====
+    await this.validateCategoryAndBrand(dto.categoryId, dto.brandId);
+
     if (dto.images) {
-      const oldImages = product.images || [];
-      const newImages = dto.images || [];
-
-      const newPublicIds = newImages.map((img) => img.publicId);
-
-      const removedImages = oldImages.filter(
+      const newPublicIds = (dto.images || []).map((img) => img.publicId);
+      const removedImages = (product.images || []).filter(
         (img) => !newPublicIds.includes(img.publicId),
       );
-
-      // delete removed images from Cloudinary
       await Promise.all(
         removedImages.map((img) =>
           this.uploadService.deleteImage(img.publicId),
@@ -138,7 +123,6 @@ export class ProductsService {
       );
     }
 
-    // ===== 2. HANDLE VARIANTS (nếu có) =====
     if (dto.variants?.length) {
       this.validateUniqueSku(dto.variants);
       dto.totalStock = this.calculateTotalStock(dto.variants);
@@ -147,11 +131,18 @@ export class ProductsService {
     return this.productModel.findByIdAndUpdate(id, dto, { new: true });
   }
 
-  async remove(id: string) {
-    const product = await this.productModel.findById(id);
+  async updateStatus(id: string, status: string) {
+    const product = await this.productModel.findByIdAndUpdate(
+      id,
+      { status },
+      { new: true },
+    );
     if (!product) throw new NotFoundException('Product not found');
+    return product;
+  }
 
-    return product.deleteOne();
+  async remove(id: string) {
+    return this.productModel.findByIdAndDelete(id);
   }
 
   async findBySlug(slug: string) {
@@ -159,34 +150,16 @@ export class ProductsService {
       .findOne({ slug, status: 'active' })
       .populate('categoryId')
       .populate('brandId');
-
-    if (!product) {
-      throw new NotFoundException('Product not found');
-    }
-
+    if (!product) throw new NotFoundException('Product not found or inactive');
     return product;
   }
 
-  async removeImage(productId: string, publicId: string) {
-    const product = await this.productModel.findById(productId);
-    if (!product) {
-      throw new NotFoundException('Product not found');
-    }
-
-    const imageExists = product.images.some((img) => img.publicId === publicId);
-
-    if (!imageExists) {
-      throw new BadRequestException('Image not found in product');
-    }
-
-    // 1. Delete image from Cloudinary
-    await this.uploadService.deleteImage(publicId);
-
-    // 2. Remove image from DB
-    product.images = product.images.filter((img) => img.publicId !== publicId);
-
-    await product.save();
-
+  async findByIdForAdmin(id: string) {
+    const product = await this.productModel
+      .findById(id)
+      .populate('categoryId')
+      .populate('brandId');
+    if (!product) throw new NotFoundException('Product not found');
     return product;
   }
 }

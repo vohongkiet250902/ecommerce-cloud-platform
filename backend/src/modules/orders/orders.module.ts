@@ -1,12 +1,10 @@
-// src/modules/orders/orders.module.ts
-
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { OrdersService } from './orders.service';
 import { OrdersController } from './orders.controller';
+import { AdminOrdersController } from './admin-orders.controller';
 import { Order, OrderSchema } from './schemas/order.schema';
 import { Product, ProductSchema } from '../products/schemas/product.schema';
-import { AdminOrdersController } from './admin-orders.controller';
 
 @Module({
   imports: [
@@ -17,5 +15,6 @@ import { AdminOrdersController } from './admin-orders.controller';
   ],
   controllers: [OrdersController, AdminOrdersController],
   providers: [OrdersService],
+  exports: [OrdersService], // để Payment module gọi markPaidFromPayment
 })
 export class OrdersModule {}

@@ -1,188 +1,242 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { Order } from './schemas/order.schema';
-import { CreateOrderDto } from './dto/create-order.dto';
 import { Product } from '../products/schemas/product.schema';
-import { OrderItem } from './schemas/order.schema';
+
 @Injectable()
 export class OrdersService {
   constructor(
-    @InjectModel(Order.name)
-    private readonly orderModel: Model<Order>,
-
-    @InjectModel(Product.name)
-    private readonly productModel: Model<Product>,
+    @InjectModel(Order.name) private readonly orderModel: Model<Order>,
+    @InjectModel(Product.name) private readonly productModel: Model<Product>,
   ) {}
 
-  async create(userId: string, dto: CreateOrderDto) {
+  async create(userId: string, dto: any) {
+    // 1. Chống spam click (Idempotency)
+    if (dto.idempotencyKey) {
+      const existingOrder = await this.orderModel.findOne({
+        idempotencyKey: dto.idempotencyKey,
+      });
+      if (existingOrder) return existingOrder;
+    }
+
     let totalAmount = 0;
+    const orderItems: any[] = [];
+    const deductedItems: any[] = []; // Mảng lưu lịch sử để ROLLBACK nếu lỗi
 
-    // 🔥 KHAI BÁO 1 LẦN DUY NHẤT
-    const orderItems: OrderItem[] = [];
-
-    for (const item of dto.items) {
-      const product = await this.productModel.findOne({
-        _id: item.productId,
-        'variants.sku': item.sku,
-      });
-
-      if (!product) {
-        throw new BadRequestException('Product not found');
-      }
-
-      const variant = product.variants.find((v) => v.sku === item.sku);
-
-      if (!variant) {
-        throw new BadRequestException('Variant not found');
-      }
-
-      const updated = await this.atomicDeductStock(
-        product._id,
-        item.sku,
-        item.quantity,
-      );
-
-      if (!updated) {
-        throw new BadRequestException(`Out of stock for SKU ${item.sku}`);
-      }
-
-      totalAmount += variant.price * item.quantity;
-
-      // ✅ PUSH VÀO BIẾN ĐÚNG
-      orderItems.push({
-        productId: product._id,
-        name: product.name,
-        sku: item.sku,
-        price: variant.price,
-        quantity: item.quantity,
-        imageUrl: product.images?.[0]?.url,
-      });
-    }
-
-    // 🔒 SAFETY CHECK (RẤT NÊN CÓ)
-    if (orderItems.length === 0) {
-      throw new BadRequestException('Order items is empty');
-    }
-    console.log('DTO ITEMS:', dto.items);
-
-    return this.orderModel.create({
-      userId: new Types.ObjectId(userId),
-      items: orderItems, // 🔥 GIỜ SẼ CÓ DATA
-      totalAmount,
-    });
-  }
-
-  private async atomicDeductStock(
-    productId: Types.ObjectId,
-    sku: string,
-    quantity: number,
-  ) {
-    const result = await this.productModel.updateOne(
-      {
-        _id: productId,
-        'variants.sku': sku,
-        'variants.stock': { $gte: quantity },
-      },
-      {
-        $inc: {
-          'variants.$.stock': -quantity,
-          totalStock: -quantity,
-        },
-      },
-    );
-    return result.modifiedCount === 1;
-  }
-
-  async cancelOrder(orderId: string, userId: string) {
-    const order = await this.orderModel.findOne({
-      _id: orderId,
-      userId: new Types.ObjectId(userId),
-    });
-
-    if (!order) {
-      throw new BadRequestException('Order not found');
-    }
-
-    if (order.status !== 'pending') {
-      throw new BadRequestException('Cannot cancel this order');
-    }
-
-    // 🔥 rollback stock
-    for (const item of order.items) {
-      await this.productModel.updateOne(
-        {
+    try {
+      for (const item of dto.items) {
+        const product = await this.productModel.findOne({
           _id: item.productId,
           'variants.sku': item.sku,
-        },
-        {
-          $inc: {
-            'variants.$.stock': item.quantity,
-            totalStock: item.quantity,
+        });
+
+        if (!product)
+          throw new BadRequestException(
+            `Sản phẩm không tồn tại (SKU: ${item.sku})`,
+          );
+
+        const variant = product.variants.find((v) => v.sku === item.sku);
+        if (!variant)
+          throw new BadRequestException(
+            `Phiên bản không tồn tại (SKU: ${item.sku})`,
+          );
+
+        // Trừ kho nguyên tử (Đảm bảo kho >= số lượng mua mới trừ)
+        const updated = await this.productModel.updateOne(
+          {
+            _id: product._id,
+            'variants.sku': item.sku,
+            'variants.stock': { $gte: item.quantity },
           },
-        },
-      );
+          {
+            $inc: {
+              'variants.$.stock': -item.quantity,
+              totalStock: -item.quantity,
+            },
+          },
+        );
+
+        if (updated.modifiedCount === 0) {
+          throw new BadRequestException(
+            `Sản phẩm SKU ${item.sku} đã hết hàng hoặc không đủ số lượng`,
+          );
+        }
+
+        // Lưu lại log để rollback nếu có sản phẩm sau bị lỗi
+        deductedItems.push({
+          productId: product._id,
+          sku: item.sku,
+          quantity: item.quantity,
+        });
+
+        totalAmount += variant.price * item.quantity;
+        orderItems.push({
+          productId: product._id,
+          name: product.name,
+          sku: item.sku,
+          price: variant.price,
+          quantity: item.quantity,
+          imageUrl: product.images?.[0]?.url,
+        });
+      }
+
+      if (orderItems.length === 0)
+        throw new BadRequestException('Đơn hàng rỗng');
+
+      // 2. Tạo đơn hàng thành công
+      return await this.orderModel.create({
+        userId: new Types.ObjectId(userId),
+        items: orderItems,
+        totalAmount,
+        paymentMethod: dto.paymentMethod || 'cod',
+        idempotencyKey: dto.idempotencyKey,
+      });
+    } catch (error) {
+      // 🚨 CỨU HỘ KHẨN CẤP: Nếu có lỗi (hết hàng 1 món nào đó), cộng lại toàn bộ kho đã trừ
+      if (deductedItems.length > 0) {
+        const rollbackOps = deductedItems.map((item) => ({
+          updateOne: {
+            filter: { _id: item.productId, 'variants.sku': item.sku },
+            update: {
+              $inc: {
+                'variants.$.stock': item.quantity,
+                totalStock: item.quantity,
+              },
+            },
+          },
+        }));
+        await this.productModel.bulkWrite(rollbackOps);
+      }
+      throw error; // Ném lỗi ra cho Controller
     }
-
-    order.status = 'cancelled';
-    await order.save();
-
-    return order;
   }
 
-  async adminCancelOrder(orderId: string) {
-    const order = await this.orderModel.findById(orderId);
-    if (!order) {
-      throw new BadRequestException('Order not found');
-    }
+  // ✅ Phân trang & Tìm kiếm cho Admin
+  async findAll(query: {
+    page: number;
+    limit: number;
+    status?: string;
+    userId?: string;
+  }) {
+    const filter: any = {};
+    if (query.status) filter.status = query.status;
+    if (query.userId && Types.ObjectId.isValid(query.userId))
+      filter.userId = new Types.ObjectId(query.userId);
 
-    if (order.status === 'cancelled') {
-      throw new BadRequestException('Order already cancelled');
-    }
+    const skip = (query.page - 1) * query.limit;
 
-    // Restore stock
-    for (const item of order.items) {
-      await this.productModel.updateOne(
-        {
-          _id: item.productId,
-          'variants.sku': item.sku,
-        },
-        {
-          $inc: {
-            'variants.$.stock': item.quantity,
-            totalStock: item.quantity,
-          },
-        },
-      );
-    }
+    const [data, total] = await Promise.all([
+      this.orderModel
+        .find(filter)
+        .populate('userId', 'name email')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(query.limit),
+      this.orderModel.countDocuments(filter),
+    ]);
 
-    order.status = 'cancelled';
-    await order.save();
-    return order;
-  }
-
-  async findAll() {
-    return this.orderModel.find().populate('userId', 'name email').sort({ createdAt: -1 });
+    return { data, total, page: query.page, limit: query.limit };
   }
 
   async updateStatus(
     orderId: string,
     updateData: { status?: string; paymentStatus?: string },
   ) {
-    return this.orderModel.findByIdAndUpdate(
-      orderId,
-      updateData,
-      { new: true },
-    );
+    const order = await this.orderModel.findByIdAndUpdate(orderId, updateData, {
+      new: true,
+    });
+    if (!order) throw new NotFoundException('Không tìm thấy đơn hàng');
+    return order;
   }
 
-  async findByUser(userId: string) {
-    return this.orderModel
-      .find({
-        userId: new Types.ObjectId(userId),
-      })
-      .populate('userId', 'name email')
-      .sort({ createdAt: -1 });
+  async adminCancelOrder(orderId: string) {
+    const order = await this.orderModel.findById(orderId);
+    if (!order) throw new BadRequestException('Order not found');
+    if (order.status === 'cancelled')
+      throw new BadRequestException('Đơn hàng này đã bị hủy rồi');
+
+    // ✅ Tối ưu: Dùng bulkWrite để hoàn kho thay vì vòng lặp for update từng cái
+    const ops = order.items.map((item) => ({
+      updateOne: {
+        filter: { _id: item.productId, 'variants.sku': item.sku },
+        update: {
+          $inc: {
+            'variants.$.stock': item.quantity,
+            totalStock: item.quantity,
+          },
+        },
+      },
+    }));
+    if (ops.length > 0) await this.productModel.bulkWrite(ops);
+
+    order.status = 'cancelled';
+    await order.save();
+    return order;
+  }
+
+  // User tự hủy đơn
+  async cancelOrder(orderId: string, userId: string) {
+    const order = await this.orderModel.findOne({
+      _id: orderId,
+      userId: new Types.ObjectId(userId),
+    });
+
+    if (!order) throw new BadRequestException('Order not found');
+    if (order.status !== 'pending')
+      throw new BadRequestException('Chỉ có thể hủy đơn hàng đang chờ xử lý');
+
+    const ops = order.items.map((item) => ({
+      updateOne: {
+        filter: { _id: item.productId, 'variants.sku': item.sku },
+        update: {
+          $inc: {
+            'variants.$.stock': item.quantity,
+            totalStock: item.quantity,
+          },
+        },
+      },
+    }));
+    if (ops.length > 0) await this.productModel.bulkWrite(ops);
+
+    order.status = 'cancelled';
+    await order.save();
+    return order;
+  }
+
+  // Cập nhật hàm findByUser để nhận thêm tham số query phân trang
+  async findByUser(
+    userId: string,
+    query?: { page: number; limit: number; status?: string },
+  ) {
+    const filter: any = { userId: new Types.ObjectId(userId) };
+
+    // Nếu có lọc theo trạng thái
+    if (query?.status) {
+      filter.status = query.status;
+    }
+
+    // Xử lý phân trang
+    const page = query?.page || 1;
+    const limit = query?.limit || 10;
+    const skip = (page - 1) * limit;
+
+    // Chạy song song 2 query: Lấy data và đếm tổng số
+    const [data, total] = await Promise.all([
+      this.orderModel
+        .find(filter)
+        .populate('userId', 'name email')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit),
+      this.orderModel.countDocuments(filter),
+    ]);
+
+    return { data, total, page, limit };
   }
 
   async findOneByUser(orderId: string, userId: string) {
@@ -190,11 +244,7 @@ export class OrdersService {
       _id: orderId,
       userId: new Types.ObjectId(userId),
     });
-
-    if (!order) {
-      throw new BadRequestException('Order not found');
-    }
-
+    if (!order) throw new BadRequestException('Order not found');
     return order;
   }
 }

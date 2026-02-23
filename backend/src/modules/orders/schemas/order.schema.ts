@@ -1,7 +1,16 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Types } from 'mongoose';
 
-@Schema({ timestamps: true })
+export type OrderStatus =
+  | 'pending'
+  | 'paid'
+  | 'shipping'
+  | 'completed'
+  | 'cancelled';
+export type PaymentStatus = 'pending' | 'paid' | 'refunded';
+export type PaymentMethod = 'cod' | 'mock' | 'vnpay';
+
+@Schema({ _id: false })
 export class OrderItem {
   @Prop({ type: Types.ObjectId, ref: 'Product', required: true })
   productId: Types.ObjectId;
@@ -32,26 +41,31 @@ export class Order {
   @Prop({ type: [OrderItemSchema], required: true })
   items: OrderItem[];
 
-  @Prop({ required: true })
+  @Prop({ required: true, min: 0 })
   totalAmount: number;
 
   @Prop({
     enum: ['pending', 'paid', 'shipping', 'completed', 'cancelled'],
     default: 'pending',
+    index: true,
   })
-  status: string;
+  status: OrderStatus;
 
   @Prop({
     enum: ['pending', 'paid', 'refunded'],
     default: 'pending',
   })
-  paymentStatus: string;
+  paymentStatus: PaymentStatus;
 
   @Prop({
-    enum: ['cod', 'mock'],
+    enum: ['cod', 'mock', 'vnpay'], // ✅ Đã giữ lại vnpay
     default: 'mock',
   })
-  paymentMethod: string;
+  paymentMethod: PaymentMethod;
+
+  // ✅ Khôi phục Idempotency Key chống user spam click tạo 2 đơn liên tục
+  @Prop({ trim: true })
+  idempotencyKey?: string;
 }
 
 export const OrderSchema = SchemaFactory.createForClass(Order);
