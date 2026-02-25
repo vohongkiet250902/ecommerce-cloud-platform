@@ -205,7 +205,11 @@ export default function ProductsPage() {
       const matchesStatus =
         statusFilter === "all" ? true : product.status === statusFilter;
       const matchesCategory =
-        categoryFilter === "all" ? true : product.categoryId === categoryFilter;
+        categoryFilter === "all" 
+          ? true 
+          : (typeof product.categoryId === "object" 
+              ? (product.categoryId as any)?._id === categoryFilter 
+              : product.categoryId === categoryFilter || (product as any).category?._id === categoryFilter);
 
       return matchesStatus && matchesCategory;
     });
@@ -230,9 +234,9 @@ export default function ProductsPage() {
       try {
         setLoading(true);
         const [productsRes, categoriesRes, brandsRes] = await Promise.all([
-          productApi.getProducts(),
-          categoryApi.getCategories(),
-          brandApi.getBrands(),
+          productApi.getAdminProducts(),
+          categoryApi.getAdminCategories(),
+          brandApi.getAdminBrands(),
         ]);
         setProducts(productsRes.data.data || productsRes.data);
         setCategories(categoriesRes.data.data || categoriesRes.data);
@@ -284,7 +288,7 @@ export default function ProductsPage() {
       form.reset();
 
       // Reload product list
-      const res = await productApi.getProducts();
+      const res = await productApi.getAdminProducts();
       setProducts(res.data.data || res.data);
     } catch {
       toast({
@@ -299,9 +303,21 @@ export default function ProductsPage() {
 
   // Handle delete product (open modal)
   const handleDelete = useCallback((product: Product) => {
+    // Check if product has remaining stock
+    const totalStock = product.variants?.reduce((sum: number, v: any) => sum + (v.stock || 0), 0) || product.totalStock || 0;
+    
+    if (totalStock > 0) {
+      toast({
+        variant: "destructive",
+        title: "❌ Không thể xóa sản phẩm",
+        description: `Sản phẩm còn ${totalStock} sản phẩm tồn kho. Bạn chỉ có thể tắt trạng thái sản phẩm.`,
+      });
+      return;
+    }
+    
     setProductToDelete(product);
     setDeleteConfirmOpen(true);
-  }, []);
+  }, [toast]);
 
   // Confirm delete
   const handleConfirmDelete = async () => {
@@ -309,6 +325,19 @@ export default function ProductsPage() {
 
     try {
       setIsDeleting(true);
+      
+      // Double-check stock before deleting
+      const totalStock = productToDelete.variants?.reduce((sum: number, v: any) => sum + (v.stock || 0), 0) || productToDelete.totalStock || 0;
+      
+      if (totalStock > 0) {
+        toast({
+          variant: "destructive",
+          title: "❌ Không thể xóa sản phẩm",
+          description: `Sản phẩm còn ${totalStock} sản phẩm tồn kho. Bạn chỉ có thể tắt trạng thái sản phẩm.`,
+        });
+        return;
+      }
+      
       await productApi.deleteProduct(productToDelete._id);
       
       toast({
@@ -319,11 +348,12 @@ export default function ProductsPage() {
 
       setProducts((prev) => prev.filter((p) => p._id !== productToDelete._id));
       setDeleteConfirmOpen(false);
-    } catch {
+    } catch (error: any) {
+      const errorMsg = error.response?.data?.message || "Không thể xóa sản phẩm";
       toast({
         variant: "destructive",
         title: "❌ Lỗi",
-        description: "Không thể xóa sản phẩm",
+        description: errorMsg,
       });
     } finally {
       setIsDeleting(false);
@@ -360,16 +390,23 @@ export default function ProductsPage() {
         key: "category",
         header: "Danh mục",
         render: (product: Product) => {
-          const category = flatCategories.find(
-            (c) => c._id === product.categoryId,
-          );
-          const brand = brands.find((b) => b._id === product.brandId);
+          // Extract IDs robustly (might be populated objects or IDs)
+          const catId = typeof product.categoryId === "object" 
+            ? (product.categoryId as any)?._id 
+            : product.categoryId || (product as any).category?._id;
+            
+          const bId = typeof product.brandId === "object" 
+            ? (product.brandId as any)?._id 
+            : product.brandId || (product as any).brand?._id;
+
+          const category = flatCategories.find((c) => c._id === catId);
+          const brand = brands.find((b) => b._id === bId);
 
           return (
             <div>
-              <p>{category?.name || "N/A"}</p>
+              <p className="font-medium">{category?.name || (product as any).category?.name || "N/A"}</p>
               <p className="text-sm text-muted-foreground">
-                {brand?.name || "N/A"}
+                {brand?.name || (product as any).brand?.name || "N/A"}
               </p>
             </div>
           );
@@ -379,7 +416,7 @@ export default function ProductsPage() {
         key: "price",
         header: "Giá",
         render: (product: Product) => {
-          const price = product.variants?.[0]?.price || 0;
+          const price = (product.variants && product.variants.length > 0) ? product.variants[0].price : 0;
           return <p className="font-semibold">{formatPrice(price)}</p>;
         },
       },
@@ -390,14 +427,14 @@ export default function ProductsPage() {
           <span
             className={cn(
               "font-medium",
-              product.totalStock === 0
+              (product.totalStock || 0) === 0
                 ? "text-destructive"
-                : product.totalStock < 10
+                : (product.totalStock || 0) < 10
                   ? "text-warning"
                   : "text-foreground",
             )}
           >
-            {product.totalStock}
+            {product.totalStock || 0}
           </span>
         ),
       },
@@ -405,7 +442,8 @@ export default function ProductsPage() {
         key: "status",
         header: "Trạng thái",
         render: (product: Product) => {
-          const config = statusConfig[product.status as keyof typeof statusConfig] || statusConfig.draft;
+          const status = product.status || "draft";
+          const config = statusConfig[status as keyof typeof statusConfig] || statusConfig.draft;
           return (
             <Badge
               variant="outline"
@@ -422,7 +460,11 @@ export default function ProductsPage() {
         render: (product: Product) => (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon">
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                className="transition-all"
+              >
                 <MoreHorizontal className="h-4 w-4" />
               </Button>
             </DropdownMenuTrigger>
@@ -558,7 +600,7 @@ export default function ProductsPage() {
         onOpenChange={setIsModalOpen}
         initialData={selectedProduct} // Pass selected product
         onSuccess={async (newProduct) => {
-          const res = await productApi.getProducts();
+          const res = await productApi.getAdminProducts();
           setProducts(res.data.data || res.data);
           setSelectedProduct(null);
         }}

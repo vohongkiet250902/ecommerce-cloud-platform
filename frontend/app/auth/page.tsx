@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useState, useEffect } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { z } from "zod";
 import { useForm } from "react-hook-form";
@@ -73,6 +73,18 @@ type SignupFormData = z.infer<typeof signupSchema>;
   ======================= */
 
 export default function AuthPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    }>
+      <AuthContent />
+    </Suspense>
+  );
+}
+
+function AuthContent() {
   const [isLogin, setIsLogin] = useState(true);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
@@ -86,10 +98,10 @@ export default function AuthPage() {
   });
 
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const redirect = searchParams.get("redirect");
   const { toast } = useToast();
   const { signIn, signUp, isAuthenticated, loading, user } = useAuth();
-  
-  // ... (useEffect for theme and router redirect remain the same) ...
   
   // Apply theme changes
   useEffect(() => {
@@ -132,13 +144,15 @@ export default function AuthPage() {
 
   useEffect(() => {
     if (!loading && isAuthenticated && user) {
-      if (user.role === "admin") {
+      if (redirect) {
+        router.push(redirect);
+      } else if (user.role === "admin") {
         router.push("/admin");
       } else {
         router.push("/");
       }
     }
-  }, [loading, isAuthenticated, user, router]);
+  }, [loading, isAuthenticated, user, router, redirect]);
 
   /* =======================
      Handlers

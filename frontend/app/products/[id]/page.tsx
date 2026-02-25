@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
@@ -26,7 +26,9 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "@/hooks/use-toast";
-import { productApi } from "@/services/api";
+import { productApi, orderApi } from "@/services/api";
+import { useCart } from "@/hooks/useCart";
+import { useAuth } from "@/hooks/useAuth";
 
 type Product = {
   _id: string;
@@ -36,8 +38,8 @@ type Product = {
   price: number;
   originalPrice?: number;
   images: { url: string; publicId: string }[];
-  category: { _id: string; name: string };
-  brand: { _id: string; name: string };
+  category: { _id: string; name: string; isActive?: boolean };
+  brand: { _id: string; name: string; isActive?: boolean };
   rating: number;
   featured?: boolean;
   numReviews: number;
@@ -79,15 +81,18 @@ const mockReviews = [
 export default function ProductDetailPage() {
   const params = useParams() as { id?: string | string[] };
   const idParam = Array.isArray(params?.id) ? params.id[0] : params?.id;
+  const router = useRouter();
 
   const [product, setProduct] = useState<Product | null>(null);
   const [loading, setLoading] = useState(true);
   const [isDarkMode, setIsDarkMode] = useState(false);
-  const [cartItemCount, setCartItemCount] = useState(3);
   const [selectedImage, setSelectedImage] = useState(0);
   const [quantity, setQuantity] = useState(1);
   const [selectedVariantIndex, setSelectedVariantIndex] = useState(0);
   const [isWishlisted, setIsWishlisted] = useState(false);
+
+  const { addItem } = useCart();
+  const { isAuthenticated } = useAuth();
 
   useEffect(() => {
     const fetchProduct = async () => {
@@ -95,7 +100,20 @@ export default function ProductDetailPage() {
       try {
         setLoading(true);
         const res = await productApi.getProductDetail(idParam);
-        setProduct(res.data.data || res.data);
+        const data = res.data.data || res.data;
+        
+        // Safety check for active category/brand or product status
+        if (!data || (data.category && data.category.isActive === false) || (data.brand && data.brand.isActive === false)) {
+            toast({
+              title: "Thông báo",
+              description: "Sản phẩm hiện không khả dụng!",
+              variant: "destructive",
+            });
+            router.push("/products");
+            return;
+        }
+
+        setProduct(data);
       } catch (error) {
         console.error("Failed to fetch product", error);
         toast({
@@ -103,13 +121,14 @@ export default function ProductDetailPage() {
           description: "Không thể tải thông tin sản phẩm",
           variant: "destructive",
         });
+        router.push("/products");
       } finally {
         setLoading(false);
       }
     };
 
     fetchProduct();
-  }, [idParam]);
+  }, [idParam, router]);
 
   useEffect(() => {
     const savedTheme = localStorage.getItem("theme");
@@ -143,21 +162,54 @@ export default function ProductDetailPage() {
   const currentVariant = product?.variants?.[selectedVariantIndex];
   const currentPrice = currentVariant?.price || product?.price || 0;
   const currentStock = currentVariant?.stock || product?.totalStock || 0;
-  // Use first image if no variant image logic is implemented yet, or if variant images are implemented they'd be here
   const images = product?.images?.map((img) => img.url) || [];
 
   const handleAddToCart = () => {
     if (!product) return;
-    setCartItemCount((prev) => prev + quantity);
+    const effectiveSku = currentVariant?.sku && currentVariant.sku !== "N/A" ? currentVariant.sku : product._id;
+    const cartId = `${product._id}-${effectiveSku}`;
+    
+    addItem({
+      id: cartId,
+      productId: product._id,
+      name: product.name,
+      sku: effectiveSku,
+      price: currentPrice,
+      quantity: quantity,
+      image: images[0] || "",
+    });
     toast({
       title: "Đã thêm vào giỏ hàng",
       description: `${product.name} x${quantity}`,
     });
   };
 
+  const [isProcessing, setIsProcessing] = useState(false);
   const handleBuyNow = () => {
-    handleAddToCart();
-    // Navigate to checkout
+    if (!product) return;
+
+    if (!isAuthenticated) {
+      toast({
+        title: "Thông báo",
+        description: "Vui lòng đăng nhập để tiếp tục thanh toán",
+      });
+      const currentPath = window.location.pathname + window.location.search;
+      router.push(`/auth?redirect=${encodeURIComponent(currentPath)}`);
+      return;
+    }
+
+    const effectiveSku = currentVariant?.sku && currentVariant.sku !== "N/A" ? currentVariant.sku : product._id;
+    const buyNowItem = {
+      id: `${product._id}-${effectiveSku}`,
+      productId: product._id,
+      name: product.name,
+      sku: effectiveSku,
+      price: currentPrice,
+      quantity: quantity,
+      image: images[0] || "",
+    };
+    sessionStorage.setItem("buyNowItem", JSON.stringify(buyNowItem));
+    router.push('/checkout?buyNow=true');
   };
 
   const nextImage = () => {
@@ -189,7 +241,6 @@ export default function ProductDetailPage() {
     );
   }
 
-  // Calculate discount if originalPrice is available (mock logic for now or from API if added)
   const discountPercent = product.originalPrice
     ? Math.round((1 - currentPrice / product.originalPrice) * 100)
     : 0;
@@ -197,7 +248,6 @@ export default function ProductDetailPage() {
   return (
     <div className="min-h-screen bg-background">
       <Header
-        cartItemCount={cartItemCount}
         isDarkMode={isDarkMode}
         toggleDarkMode={toggleDarkMode}
       />
@@ -240,7 +290,6 @@ export default function ProductDetailPage() {
                 )}
               </AnimatePresence>
 
-              {/* Navigation arrows */}
               {images.length > 1 && (
                 <>
                   <button
@@ -258,13 +307,11 @@ export default function ProductDetailPage() {
                 </>
               )}
 
-              {/* Badge */}
               {product.featured && (
                  <Badge className="absolute top-4 left-4 bg-destructive text-destructive-foreground">HOT</Badge>
               )}
             </div>
 
-            {/* Thumbnails */}
             {images.length > 1 && (
               <div className="flex gap-3 overflow-x-auto pb-2">
                 {images.map((image, index) => (
@@ -292,14 +339,13 @@ export default function ProductDetailPage() {
                 {product.name}
               </h1>
 
-              {/* Rating */}
               <div className="flex items-center gap-3">
                 <div className="flex items-center gap-1">
                   {[...Array(5)].map((_, i) => (
                     <Star
                       key={i}
                       className={`w-4 h-4 ${
-                        i < Math.floor(product.rating || 5) // Fallback to 5 if no rating
+                        i < Math.floor(product.rating || 5)
                           ? "fill-warning text-warning"
                           : "text-muted"
                       }`}
@@ -316,12 +362,10 @@ export default function ProductDetailPage() {
               </div>
             </div>
 
-            {/* Price */}
             <div className="flex items-end gap-3">
               <span className="text-3xl lg:text-4xl font-bold text-primary">
                 {formatPrice(currentPrice)}
               </span>
-              {/* If we had original price in standard schema, we could show it like this: */}
               {product.originalPrice && product.originalPrice > currentPrice && (
                 <>
                   <span className="text-xl text-muted-foreground line-through">
@@ -334,12 +378,10 @@ export default function ProductDetailPage() {
               )}
             </div>
 
-            {/* Description */}
             <p className="text-muted-foreground leading-relaxed line-clamp-3">
                 {product.description}
             </p>
 
-            {/* Variants Selection */}
             {product.variants && product.variants.length > 0 && (
               <div>
                 <h3 className="font-semibold text-foreground mb-3">
@@ -350,7 +392,6 @@ export default function ProductDetailPage() {
                 </h3>
                 <div className="flex flex-wrap gap-2">
                   {product.variants.map((variant, index) => {
-                     // Try to get a meaningful label from attributes, fallback to SKU or Price
                      const label = variant.attributes.map(a => a.value).join(" / ") || variant.sku;
                      return (
                         <button
@@ -370,7 +411,6 @@ export default function ProductDetailPage() {
               </div>
             )}
 
-            {/* Quantity */}
             <div>
               <h3 className="font-semibold text-foreground mb-3">Số lượng</h3>
               <div className="flex items-center gap-3">
@@ -397,15 +437,21 @@ export default function ProductDetailPage() {
               </div>
             </div>
 
-            {/* Actions */}
             <div className="flex gap-3">
               <Button 
                 size="lg" 
                 className="flex-1 h-12 text-base" 
                 onClick={handleBuyNow}
-                disabled={currentStock === 0}
+                disabled={currentStock === 0 || isProcessing}
               >
-                Mua ngay
+                {isProcessing ? (
+                  <>
+                    <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                    Đang xử lý...
+                  </>
+                ) : (
+                  "Mua ngay"
+                )}
               </Button>
               <Button
                 size="lg"
@@ -434,7 +480,6 @@ export default function ProductDetailPage() {
               </Button>
             </div>
 
-            {/* Benefits */}
             <div className="grid grid-cols-3 gap-4 pt-4 border-t border-border">
               <div className="flex flex-col items-center text-center gap-2">
                 <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
@@ -458,7 +503,6 @@ export default function ProductDetailPage() {
           </div>
         </div>
 
-        {/* Tabs Section */}
         <Tabs defaultValue="specs" className="mb-12">
           <TabsList className="w-full justify-start border-b border-border rounded-none bg-transparent h-auto p-0 gap-8">
             <TabsTrigger
@@ -510,7 +554,6 @@ export default function ProductDetailPage() {
 
           <TabsContent value="reviews" className="mt-6">
             <div className="space-y-6">
-              {/* Rating Summary */}
               <div className="bg-card rounded-xl border border-border p-6">
                 <div className="flex items-center gap-8">
                   <div className="text-center">
@@ -531,7 +574,6 @@ export default function ProductDetailPage() {
                       {product.numReviews || 0} đánh giá
                     </p>
                   </div>
-                  {/* Mock logic for chart as we don't have review distribution yet */}
                   <div className="flex-1 space-y-2">
                     {[5, 4, 3, 2, 1].map((star) => (
                       <div key={star} className="flex items-center gap-3">
@@ -548,7 +590,6 @@ export default function ProductDetailPage() {
                 </div>
               </div>
 
-              {/* Reviews List - Mocked for now */}
               <div className="space-y-4">
                 {mockReviews.map((review) => (
                   <div key={review.id} className="bg-card rounded-xl border border-border p-6">

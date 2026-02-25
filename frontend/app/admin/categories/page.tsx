@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useCallback } from "react";
 import {
   Plus,
   Edit,
@@ -10,6 +10,8 @@ import {
   ChevronRight,
   Loader2,
   AlertTriangle,
+  Eye,
+  EyeOff,
 } from "lucide-react";
 import { useDispatch, useSelector } from "react-redux";
 import { useForm } from "react-hook-form";
@@ -19,6 +21,7 @@ import slugify from "slugify";
 
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -56,15 +59,22 @@ export interface Category {
   slug: string;
   parentId?: string | null;
   productCount?: number;
+  isActive: boolean;
   children?: Category[];
 }
 
 const formSchema = z.object({
   name: z.string().min(1, "Vui lòng nhập tên danh mục"),
   slug: z.string(),
+  isActive: z.boolean(),
 });
 
-type FormValues = z.infer<typeof formSchema>;
+interface FormValues {
+  [key: string]: any;
+  name: string;
+  slug: string;
+  isActive: boolean;
+}
 
 /* ===================== COMPONENTS ===================== */
 
@@ -74,6 +84,7 @@ interface ItemProps {
   onEdit: (c: Category) => void;
   onAddChild: (c: Category) => void;
   onDelete: (c: Category) => void;
+  onStatusToggle: (c: Category, status: boolean) => void;
   deletingId: string | null;
 }
 
@@ -83,6 +94,7 @@ const CategoryItem = ({
   onEdit,
   onAddChild,
   onDelete,
+  onStatusToggle,
   deletingId,
 }: ItemProps) => {
   const [isExpanded, setIsExpanded] = useState(true);
@@ -118,7 +130,7 @@ const CategoryItem = ({
 
           <FolderTree className="h-5 w-5 text-primary shrink-0" />
 
-          <div className="flex flex-col min-w-0">
+          <div className={cn("flex flex-col min-w-0", !category.isActive && "opacity-50")}>
             <span className="font-medium text-foreground truncate">
               {category.name}
             </span>
@@ -128,8 +140,12 @@ const CategoryItem = ({
           </div>
         </div>
 
-        {/* RIGHT */}
         <div className="flex items-center gap-2 sm:gap-4 shrink-0">
+          {!category.isActive && (
+            <Badge variant="destructive" className="text-[10px] px-1.5 py-0 h-5">
+              Ngừng hoạt động
+            </Badge>
+          )}
           <Badge variant="secondary" className="hidden sm:inline-flex">
             {category.productCount ?? 0} sản phẩm
           </Badge>
@@ -138,8 +154,7 @@ const CategoryItem = ({
             <DropdownMenuTrigger asChild>
               <Button
                 variant="ghost"
-                size="icon"
-                className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity"
+                size="icon-sm"
               >
                 <MoreHorizontal className="h-4 w-4" />
               </Button>
@@ -157,6 +172,20 @@ const CategoryItem = ({
                   Thêm danh mục con
                 </DropdownMenuItem>
               )}
+
+              <DropdownMenuItem
+                onClick={() => onStatusToggle(category, !category.isActive)}
+              >
+                <div className="flex items-center gap-2">
+                  <div
+                    className={cn(
+                      "w-2 h-2 rounded-full",
+                      category.isActive ? "bg-success" : "bg-destructive",
+                    )}
+                  />
+                  {category.isActive ? "Ngừng hoạt động" : "Kích hoạt lại"}
+                </div>
+              </DropdownMenuItem>
 
               <DropdownMenuItem
                 className="text-destructive focus:text-destructive"
@@ -185,6 +214,7 @@ const CategoryItem = ({
             onEdit={onEdit}
             onAddChild={onAddChild}
             onDelete={onDelete}
+            onStatusToggle={onStatusToggle}
             deletingId={deletingId}
           />
         ))}
@@ -197,9 +227,8 @@ export default function CategoriesPage() {
   const dispatch = useDispatch<AppDispatch>();
   const { toast } = useToast();
 
-  const { data: categories, loading } = useSelector(
-    (state: RootState) => state.categories,
-  );
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [loading, setLoading] = useState(false);
 
   const [initialized, setInitialized] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -224,14 +253,28 @@ export default function CategoriesPage() {
     defaultValues: {
       name: "",
       slug: "",
+      isActive: true,
     },
   });
 
-  useEffect(() => {
-    dispatch(fetchCategoriesThunk()).finally(() => {
+  const { reset } = form;
+
+  const fetchAdminCategories = useCallback(async () => {
+    try {
+      setLoading(true);
+      const res = await categoryApi.getAdminCategories();
+      setCategories(res.data.data || res.data);
+    } catch (error) {
+      console.error(error);
+    } finally {
+      setLoading(false);
       setInitialized(true);
-    });
-  }, [dispatch]);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchAdminCategories();
+  }, [fetchAdminCategories]);
 
   // Generate slug automatically when name changes
   const watchedName = form.watch("name");
@@ -270,14 +313,14 @@ export default function CategoriesPage() {
   const handleOpenCreateResponse = () => {
     setDialogMode("create");
     setSelectedCategory(null);
-    form.reset({ name: "", slug: "" });
+    form.reset({ name: "", slug: "", isActive: true });
     setIsDialogOpen(true);
   };
 
   const handleOpenEdit = (cat: Category) => {
     setDialogMode("edit");
     setSelectedCategory(cat);
-    form.reset({ name: cat.name, slug: cat.slug });
+    form.reset({ name: cat.name, slug: cat.slug, isActive: cat.isActive });
     setIsDialogOpen(true);
   };
 
@@ -310,10 +353,65 @@ export default function CategoriesPage() {
     setDeleteConfirmOpen(true);
   };
 
+  const handleToggleStatus = async (cat: Category, newStatus: boolean) => {
+    try {
+      const idsToUpdate: string[] = [cat._id];
+      
+      // Cascade deactivation to children
+      if (!newStatus) {
+        const collectIds = (c: Category) => {
+          c.children?.forEach(child => {
+            idsToUpdate.push(child._id);
+            collectIds(child);
+          });
+        };
+        collectIds(cat);
+      }
+
+      const promises = idsToUpdate.map(id => categoryApi.toggleCategoryStatus(id, newStatus));
+      await Promise.all(promises);
+
+      toast({ 
+        title: "Cập nhật thành công", 
+        variant: "success",
+        description: !newStatus && idsToUpdate.length > 1 
+          ? `Đã tắt "${cat.name}" và ${idsToUpdate.length - 1} danh mục con.` 
+          : `Đã cập nhật trạng thái cho "${cat.name}".`
+      });
+      
+      dispatch(fetchCategoriesThunk());
+      fetchAdminCategories();
+    } catch (error: any) {
+      const msg = error?.response?.data?.message || "Không thể cập nhật trạng thái";
+      toast({
+        title: "Thất bại",
+        description: typeof msg === "string" ? msg : JSON.stringify(msg),
+        variant: "destructive",
+      });
+    }
+  };
+
   const onSubmit = async (values: FormValues) => {
     try {
       if (dialogMode === "edit" && selectedCategory) {
+        const statusChangedToFalse = selectedCategory.isActive && !values.isActive;
+        
         await categoryApi.updateCategory(selectedCategory._id, values);
+        
+        if (statusChangedToFalse) {
+          const idsToUpdate: string[] = [];
+          const collectIds = (c: Category) => {
+            c.children?.forEach(child => {
+              idsToUpdate.push(child._id);
+              collectIds(child);
+            });
+          };
+          collectIds(selectedCategory);
+          if (idsToUpdate.length > 0) {
+            await Promise.all(idsToUpdate.map(id => categoryApi.toggleCategoryStatus(id, false)));
+          }
+        }
+        
         toast({ title: "Cập nhật thành công", variant: "success" });
       } else if (dialogMode === "create") {
         await categoryApi.createCategory({ ...values, parentId: null });
@@ -327,12 +425,13 @@ export default function CategoriesPage() {
       }
 
       dispatch(fetchCategoriesThunk());
+      fetchAdminCategories();
       setIsDialogOpen(false);
     } catch (error: any) {
       const msg = error?.response?.data?.message || "Có lỗi xảy ra";
       toast({
         title: "Thất bại",
-        description: Array.isArray(msg) ? msg.join(", ") : msg,
+        description: typeof msg === "string" ? msg : (Array.isArray(msg) ? msg.join(", ") : JSON.stringify(msg)),
         variant: "destructive",
       });
     }
@@ -346,17 +445,22 @@ export default function CategoriesPage() {
       await categoryApi.deleteCategory(categoryToDelete._id);
       toast({ title: "Đã xóa danh mục", variant: "success" });
       dispatch(fetchCategoriesThunk());
-      setDeleteConfirmOpen(false);
+      fetchAdminCategories();
     } catch (error: any) {
       const msg = error?.response?.data?.message || "Không thể xóa danh mục";
+      const description = typeof msg === "string" ? msg : (Array.isArray(msg) ? msg.join(", ") : JSON.stringify(msg));
+      
       toast({
-        title: "Xóa thất bại",
-        description: typeof msg === "string" ? msg : JSON.stringify(msg),
+        title: "Không thể xóa",
+        description: description.includes("tồn kho") 
+          ? "Danh mục này vẫn còn sản phẩm trong kho. Vui lòng chuyển sang trạng thái 'Ngừng hoạt động' thay vì xóa."
+          : description,
         variant: "destructive",
       });
     } finally {
       setDeletingId(null);
       setCategoryToDelete(null);
+      setDeleteConfirmOpen(false);
     }
   };
 
@@ -455,6 +559,7 @@ export default function CategoriesPage() {
                 onEdit={handleOpenEdit}
                 onAddChild={handleOpenAddChild}
                 onDelete={handleOpenDelete}
+                onStatusToggle={handleToggleStatus}
                 deletingId={deletingId}
               />
             ))}
@@ -504,6 +609,29 @@ export default function CategoriesPage() {
                     </FormLabel>
                     <FormControl>
                       <Input {...field} disabled className="bg-muted/50" />
+                    </FormControl>
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name="isActive"
+                render={({ field }) => (
+                  <FormItem className="flex items-center justify-between rounded-lg border p-3 shadow-sm">
+                    <div className="space-y-0.5">
+                      <FormLabel>Trạng thái hoạt động</FormLabel>
+                      <div className="text-[12px] text-muted-foreground">
+                        {field.value
+                          ? "Danh mục đang hoạt động và hiển thị cho khách hàng"
+                          : "Danh mục đang bị ẩn khỏi cửa hàng"}
+                      </div>
+                    </div>
+                    <FormControl>
+                      <Switch
+                        checked={field.value}
+                        onCheckedChange={field.onChange}
+                      />
                     </FormControl>
                   </FormItem>
                 )}

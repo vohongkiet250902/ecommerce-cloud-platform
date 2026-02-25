@@ -100,8 +100,12 @@ export const authApi = {
 };
 
 export const productApi = {
+  // Public endpoint for user-facing product listing
   getProducts: (params?: Record<string, unknown>) =>
     apiClient.get('/products', { params }),
+  // Admin-specific listing (keeps previous behavior)
+  getAdminProducts: (params?: Record<string, unknown>) =>
+    apiClient.get('/admin/products', { params }),
   getProduct: (id: string) => apiClient.get(`/admin/products/${id}`),
   getProductDetail: (slug: string) => apiClient.get(`/products/${slug}`),
   createProduct: (data: Record<string, unknown>) =>
@@ -113,21 +117,27 @@ export const productApi = {
 
 export const categoryApi = {
   getCategories: () => apiClient.get('/categories'),
+  getAdminCategories: () => apiClient.get('/admin/categories'),
   createCategory: (data: Record<string, unknown>) =>
     apiClient.post('/admin/categories', data),
   updateCategory: (id: string, data: Record<string, unknown>) =>
     apiClient.put(`/admin/categories/${id}`, data),
+  toggleCategoryStatus: (id: string, isActive: boolean) =>
+    apiClient.patch(`/admin/categories/${id}/status`, { isActive }),
   deleteCategory: (id: string) =>
     apiClient.delete(`/admin/categories/${id}`),
 };
 
 export const brandApi = {
   getBrands: () => apiClient.get('/brands'),
+  getAdminBrands: () => apiClient.get('/admin/brands'),
   getBrand: (id: string) => apiClient.get(`/admin/brands/${id}`),
   createBrand: (data: Record<string, unknown>) =>
     apiClient.post('/admin/brands', data),
   updateBrand: (id: string, data: Record<string, unknown>) =>
     apiClient.put(`/admin/brands/${id}`, data),
+  toggleBrandStatus: (id: string, isActive: boolean) =>
+    apiClient.patch(`/admin/brands/${id}/status`, { isActive }),
   deleteBrand: (id: string) => apiClient.delete(`/admin/brands/${id}`),
 };
 
@@ -142,10 +152,30 @@ export const usersApi = {
 };
 
 export const orderApi = {
-  getOrders: () => apiClient.get('/admin/orders'),
+  getOrders: (params?: { page?: number; limit?: number; status?: string; userId?: string }) =>
+    apiClient.get('/admin/orders', { params }),
+  getUserOrders: (params?: { page?: number; limit?: number; status?: string }) =>
+    apiClient.get('/orders/me', { params }),
+  createOrder: (data: { items: { productId: string; sku: string; quantity: number }[]; paymentMethod?: string; idempotencyKey?: string }) => {
+    const { idempotencyKey, ...orderData } = data;
+    const headers = idempotencyKey ? { 'idempotency-key': idempotencyKey } : {};
+    return apiClient.post('/orders', orderData, { headers });
+  },
   updateStatus: (id: string, data: { status?: string; paymentStatus?: string }) =>
     apiClient.patch(`/admin/orders/${id}/status`, data),
   cancelOrder: (id: string) => apiClient.post(`/admin/orders/${id}/cancel`),
+  cancelMyOrder: (id: string) => apiClient.patch(`/orders/${id}/cancel`),
+};
+
+export const paymentApi = {
+  createVNPayUrl: (orderId: string) => apiClient.post('/payments/vnpay/create', { orderId }),
+};
+
+export const uploadApi = {
+  uploadMultiple: (formData: FormData) =>
+    apiClient.post('/upload/multiple', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    }),
 };
 
 export default apiClient;

@@ -52,7 +52,7 @@
 
   --radius: 0.75rem;
 
-  /* Custom ElecStore tokens */
+  /* Custom ProTech Store tokens */
   --gradient-hero: linear-gradient(
     135deg,
     hsl(239 84% 67%) 0%,
@@ -278,7 +278,7 @@
   }
 
   .nav-link {
-    @apply text-foreground/80 hover:text-primary transition-colors duration-200 font-medium;
+    @apply text-foreground/80 hover:text-primary hover:scale-105 transition-all duration-200 font-medium;
   }
 
   .nav-link-active {
@@ -286,13 +286,13 @@
   }
 
   .category-card {
-    @apply bg-card hover:bg-accent/50 transition-all duration-300 rounded-2xl p-6 text-center cursor-pointer;
+    @apply bg-card hover:bg-primary hover:text-primary-foreground transition-all duration-300 rounded-2xl p-6 text-center cursor-pointer;
     box-shadow: var(--shadow-card);
   }
 
   .category-card:hover {
-    box-shadow: var(--shadow-card-hover);
-    transform: translateY(-4px);
+    box-shadow: 0 20px 25px -5px rgb(var(--primary) / 0.2);
+    transform: translateY(-8px);
   }
 }
 

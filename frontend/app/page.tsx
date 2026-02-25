@@ -18,7 +18,7 @@ export default function Home() {
     const prefersDark = typeof window !== "undefined" ? window.matchMedia("(prefers-color-scheme: dark)").matches : false;
     return savedTheme === "dark" || (!savedTheme && prefersDark);
   });
-  const [cartItemCount] = useState(3);
+  
   const router = useRouter();
   const { user, loading } = useAuth();
 
@@ -61,7 +61,6 @@ export default function Home() {
   return (
     <div className="min-h-screen bg-background">
       <Header
-        cartItemCount={cartItemCount}
         isDarkMode={isDarkMode}
         toggleDarkMode={toggleDarkMode}
       />

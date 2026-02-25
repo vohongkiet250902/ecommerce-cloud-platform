@@ -7,6 +7,7 @@ export interface Category {
   slug: string;
   productCount?: number;
   parentId?: string | null;
+  isActive: boolean;
   children?: Category[];
 }
 

@@ -41,7 +41,6 @@ export default function ProductsPage() {
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [products, setProducts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [cartItemCount] = useState(3);
   const [sortBy, setSortBy] = useState("popular");
   const [selectedCategory, setSelectedCategory] = useState("all");
   const [selectedBrands, setSelectedBrands] = useState<string[]>([]);
@@ -56,12 +55,19 @@ export default function ProductsPage() {
   const { data: brandsData } = useSelector((state: RootState) => state.brands);
 
   // Transform for UI
+  // Transform for UI - ONLY ACTIVE ROOT CATEGORIES
   const categories = useMemo(() => [
     { value: "all", label: "Tất cả" },
-    ...categoriesData.map((c: any) => ({ value: c._id, label: c.name }))
+    ...categoriesData
+      .filter((c: any) => c.isActive) // Only active root categories
+      .map((c: any) => ({ value: c._id, label: c.name }))
   ], [categoriesData]);
   
-  const brands = useMemo(() => brandsData.map(b => ({ id: b._id, name: b.name })), [brandsData]);
+  const brands = useMemo(() => 
+    brandsData
+      .filter(b => b.isActive) // Only active
+      .map(b => ({ id: b._id, name: b.name })), 
+  [brandsData]);
 
   // Helper to find category and its children
   const getCategoryIds = useCallback((rootId: string, allCategories: any[]) => {
@@ -95,6 +101,7 @@ export default function ProductsPage() {
     const fetchProducts = async () => {
       try {
         setLoading(true);
+        // We fetch many products to filter locally as requested "no BE changes"
         const res = await productApi.getProducts({ limit: 1000 });
         setProducts(res.data.data || res.data);
       } catch (error) {
@@ -128,33 +135,62 @@ export default function ProductsPage() {
   };
 
   const filteredProducts = useMemo(() => {
-    let filtered = [...products];
+    // 1. Flatten active category IDs from tree
+    const getAllActiveIds = (list: any[]): string[] => {
+        let ids: string[] = [];
+        list.forEach(cat => {
+            if (cat.isActive) {
+                ids.push(String(cat._id));
+                if (cat.children) {
+                    ids = [...ids, ...getAllActiveIds(cat.children)];
+                }
+            }
+        });
+        return ids;
+    };
 
-    // Filter by category (Recursive)
+    const activeCategoryIdsFlattened = new Set(getAllActiveIds(categoriesData));
+    const activeBrandIds = new Set(
+        brandsData.filter((b: any) => b.isActive).map((b: any) => String(b._id))
+    );
+
+    // Initial filter: only products belonging to active categories AND active brands
+    let filtered = products.filter((p: any) => {
+        const pCatId = String(typeof p.categoryId === 'string' ? p.categoryId : p.categoryId?._id || p.category?._id || "");
+        const pBrandId = String(typeof p.brandId === 'string' ? p.brandId : p.brandId?._id || p.brand?._id || "");
+        
+        // If product doesn't have category/brand (though it should), we might want to show it or hide it.
+        // Based on request, if either is MISSING or INACTIVE, we might hide.
+        // Let's assume they must exist and be active.
+        return p.status === 'active' && activeCategoryIdsFlattened.has(pCatId) && activeBrandIds.has(pBrandId);
+    });
+
+    // 2. Filter by category (Recursive / Selected)
     if (selectedCategory !== "all") {
        const categoryIds = getCategoryIds(selectedCategory, categoriesData);
-       filtered = filtered.filter((p: any) => 
-          categoryIds.includes(p.categoryId) || categoryIds.includes(p.category?._id)
-       );
+       filtered = filtered.filter((p: any) => {
+          const pCatId = typeof p.categoryId === 'string' ? p.categoryId : p.categoryId?._id || p.category?._id;
+          return categoryIds.includes(pCatId);
+       });
     }
     
-    // Filter by brands (ID check)
+    // 3. Filter by brands (ID check)
     if (selectedBrands.length > 0) {
-      filtered = filtered.filter((p) => 
-        selectedBrands.includes(p.brandId) || selectedBrands.includes(p.brand?._id)
-      );
+      filtered = filtered.filter((p: any) => {
+        const pBrandId = typeof p.brandId === 'string' ? p.brandId : p.brandId?._id || p.brand?._id;
+        return selectedBrands.includes(pBrandId);
+      });
     }
 
-    // Filter by price range
+    // 4. Filter by price range
     filtered = filtered.filter(
       (p) => {
-         // Handle price traversing variants or fallback to root price
          const price = p.variants?.[0]?.price || p.price || 0;
          return price >= priceRange[0] && price <= priceRange[1];
       }
     );
 
-    // Sort
+    // 5. Sort
     switch (sortBy) {
       case "newest":
         filtered = filtered.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
@@ -177,12 +213,11 @@ export default function ProductsPage() {
         filtered = filtered.sort((a, b) => (b.rating || 0) - (a.rating || 0));
         break;
       default:
-        // Popular - maybe sort by sold or review count
         filtered = filtered.sort((a, b) => (b.numReviews || 0) - (a.numReviews || 0));
     }
 
     return filtered;
-  }, [products, selectedCategory, selectedBrands, priceRange, sortBy, categoriesData, getCategoryIds]);
+  }, [products, selectedCategory, selectedBrands, priceRange, sortBy, categoriesData, brandsData, getCategoryIds]);
 
   const clearFilters = () => {
     setSelectedCategory("all");
@@ -212,7 +247,6 @@ export default function ProductsPage() {
   return (
     <div className="min-h-screen bg-background">
       <Header
-        cartItemCount={cartItemCount}
         isDarkMode={isDarkMode}
         toggleDarkMode={toggleDarkMode}
       />
@@ -379,14 +413,18 @@ export default function ProductsPage() {
                       transition={{ delay: index * 0.02 }}
                     >
                       <ProductCard 
-                        id={product.slug || product._id}
+                        id={product.slug}
+                        productId={product._id}
                         name={product.name}
+                        brandName={typeof product.brandId === 'object' ? product.brandId?.name : (brands.find(b => b.id === product.brandId)?.name || "")}
                         price={product.variants?.[0]?.price || product.price || 0}
-                        originalPrice={undefined}
+                        originalPrice={product.originalPrice}
                         image={product.images?.[0]?.url || ""}
                         rating={product.rating || 5}
                         reviewCount={product.numReviews || 0}
+                        sku={product.variants?.[0]?.sku}
                         badge={product.totalStock < 10 ? "hot" : undefined}
+                        variants={product.variants}
                       />
                     </motion.div>
                   ))}

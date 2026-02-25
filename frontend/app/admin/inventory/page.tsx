@@ -53,7 +53,7 @@ export default function InventoryPage() {
   // Update Stock State
   const [isUpdateOpen, setIsUpdateOpen] = useState(false);
   const [selectedItem, setSelectedItem] = useState<InventoryItem | null>(null);
-  const [newStock, setNewStock] = useState<number>(0);
+  const [importQuantity, setImportQuantity] = useState<number>(0);
   const [updating, setUpdating] = useState(false);
 
   const fetchInventory = async () => {
@@ -113,7 +113,7 @@ export default function InventoryPage() {
 
   const handleOpenUpdate = (item: InventoryItem) => {
       setSelectedItem(item);
-      setNewStock(item.stock);
+      setImportQuantity(0);
       setIsUpdateOpen(true);
   }
 
@@ -126,11 +126,13 @@ export default function InventoryPage() {
           const product = selectedItem.rawProduct;
           // Clone variants
           const updatedVariants = [...product.variants];
-          // Update specific variant
+          // Update specific variant - add import quantity to current stock
           if (selectedItem.rawVariantIndex >= 0 && updatedVariants[selectedItem.rawVariantIndex]) {
+              const currentStock = Number(updatedVariants[selectedItem.rawVariantIndex].stock) || 0;
+              const newTotalStock = currentStock + Number(importQuantity);
               updatedVariants[selectedItem.rawVariantIndex] = {
                   ...updatedVariants[selectedItem.rawVariantIndex],
-                  stock: Number(newStock)
+                  stock: newTotalStock
               };
           }
 
@@ -144,9 +146,15 @@ export default function InventoryPage() {
 
           toast({ title: "Cập nhật tồn kho thành công", variant: "success" });
           setIsUpdateOpen(false);
+          setImportQuantity(0);
           fetchInventory();
       } catch (error: any) {
-         toast({ title: "Lỗi cập nhật", description: error?.response?.data?.message || "Thất bại", variant: "destructive" });
+         const msg = error?.response?.data?.message || "Thất bại";
+         toast({ 
+            title: "Lỗi cập nhật", 
+            description: typeof msg === "string" ? msg : (Array.isArray(msg) ? msg.join(", ") : JSON.stringify(msg)), 
+            variant: "destructive" 
+         });
       } finally {
           setUpdating(false);
       }
@@ -364,14 +372,32 @@ export default function InventoryPage() {
                       <Input value={selectedItem?.attributes} disabled className="bg-muted" />
                   </div>
                   <div className="space-y-2">
-                       <Label>Số lượng tồn kho mới</Label>
+                      <Label>Tồn kho hiện tại</Label>
+                      <Input 
+                            type="number" 
+                            value={selectedItem?.stock || 0}
+                            disabled
+                            className="bg-muted font-bold"
+                        />
+                  </div>
+                  <div className="space-y-2">
+                       <Label>Số lượng nhập thêm</Label>
                        <Input 
                             type="number" 
                             min={0} 
-                            value={newStock} 
-                            onChange={(e) => setNewStock(Number(e.target.value))} 
+                            value={importQuantity} 
+                            onChange={(e) => setImportQuantity(Number(e.target.value))} 
                             className="text-lg font-bold"
                             autoFocus
+                        />
+                  </div>
+                  <div className="space-y-2">
+                       <Label>Tồn kho sau cập nhật</Label>
+                       <Input 
+                            type="number" 
+                            value={(selectedItem?.stock || 0) + importQuantity}
+                            disabled
+                            className="bg-muted font-bold text-lg"
                         />
                   </div>
               </div>

@@ -7,33 +7,14 @@ import { z } from "zod";
 import { useSelector } from "react-redux";
 import { RootState } from "@/store";
 import slugify from "slugify";
-import { 
-  Plus, 
-  Trash2, 
-  X, 
-  UploadCloud, 
-  Image as ImageIcon, 
-  Package, 
-  Layers, 
-  List, 
-  Tags,
-  Save,
-  Info,
-  DollarSign,
-  Box,
-  Barcode
-} from "lucide-react";
+import { X, Plus, Upload, Trash2, UploadCloud, Image as ImageIcon } from "lucide-react";
 import Image from "next/image";
-
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -45,14 +26,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Separator } from "@/components/ui/separator";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { toast } from "@/hooks/use-toast";
-import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
-import { cn } from "@/lib/utils";
-
-/* ================= SCHEMA ================= */
+import { Separator } from "@/components/ui/separator";
+import { Badge } from "@/components/ui/badge";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { toast } from "@/hooks/use-toast";
+import apiClient from "@/services/api";
+import { uploadApi } from "@/services/api";
 
 const productSchema = z.object({
   name: z.string().min(1, "Tên sản phẩm là bắt buộc"),
@@ -63,8 +44,6 @@ const productSchema = z.object({
 });
 
 type ProductFormData = z.infer<typeof productSchema>;
-
-/* ================= TYPES ================= */
 
 interface ImageType {
   url: string;
@@ -82,7 +61,7 @@ interface Brand {
   name: string;
 }
 
-interface Attribute {
+interface Spec {
   key: string;
   value: string;
 }
@@ -94,18 +73,19 @@ interface Variant {
   attributes: Attribute[];
 }
 
-interface Props {
+interface Attribute {
+  key: string;
+  value: string;
+}
+
+interface AddProductModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   initialData?: any;
   onSuccess?: (newProduct: any) => void;
 }
 
-/* ================= COMPONENT ================= */
-
-export default function AddProductModal({ open, onOpenChange, initialData, onSuccess }: Props) {
-  /* ================= REDUX ================= */
-
+export default function AddProductModal({ open, onOpenChange, initialData, onSuccess }: AddProductModalProps) {
   const categories = useSelector(
     (state: RootState) => state.categories.data,
   ) as Category[];
@@ -113,8 +93,6 @@ export default function AddProductModal({ open, onOpenChange, initialData, onSuc
   const brands = useSelector(
     (state: RootState) => state.brands.data,
   ) as Brand[];
-
-  /* ================= FLATTEN CATEGORY ================= */
 
   const flattenCategories = (list: Category[], level = 0): any[] => {
     return list.flatMap((item) => [
@@ -128,24 +106,21 @@ export default function AddProductModal({ open, onOpenChange, initialData, onSuc
     [categories],
   );
 
-  /* ================= STATE ================= */
-
+  const [images, setImages] = useState<ImageType[]>([]);
+  const [specs, setSpecs] = useState<Spec[]>([
+    { key: "", value: "" },
+  ]);
   const [variants, setVariants] = useState<Variant[]>([
     { sku: "", price: 0, stock: 0, attributes: [{ key: "", value: "" }] }
   ]);
-  const [specs, setSpecs] = useState<Attribute[]>([]);
-  const [images, setImages] = useState<ImageType[]>([]);
-  const [imageUrlInput, setImageUrlInput] = useState("");
-  const [uploading, setUploading] = useState(false);
   const [isActive, setIsActive] = useState(true);
-
-  /* ================= FORM ================= */
+  const [uploading, setUploading] = useState(false);
 
   const {
     register,
     handleSubmit,
-    watch,
     setValue,
+    watch,
     reset,
     formState: { errors },
   } = useForm<ProductFormData>({
@@ -161,8 +136,6 @@ export default function AddProductModal({ open, onOpenChange, initialData, onSuc
 
   const productName = watch("name");
 
-  /* ================= AUTO SLUG ================= */
-
   useEffect(() => {
     const slug = productName
       ? slugify(productName, {
@@ -171,15 +144,12 @@ export default function AddProductModal({ open, onOpenChange, initialData, onSuc
           locale: "vi",
         })
       : "";
-
     setValue("slug", slug);
   }, [productName, setValue]);
 
-  /* ================= RESET WHEN CLOSE MODAL ================= */
   useEffect(() => {
     if (open) {
       if (initialData) {
-        // Editing mode: Populate form
         reset({
           name: initialData.name,
           slug: initialData.slug,
@@ -187,12 +157,11 @@ export default function AddProductModal({ open, onOpenChange, initialData, onSuc
           brandId: initialData.brandId,
           description: initialData.description,
         });
-        setVariants(initialData.variants || []);
-        setSpecs(initialData.specs || []);
+        setSpecs(initialData.specs || [{ key: "", value: "" }]);
         setImages(initialData.images || []);
+        setVariants(initialData.variants || [{ sku: "", price: 0, stock: 0, attributes: [{ key: "", value: "" }] }]);
         setIsActive(initialData.status === "active");
       } else {
-        // Create mode: Reset form
         reset({
           name: "",
           slug: "",
@@ -200,16 +169,13 @@ export default function AddProductModal({ open, onOpenChange, initialData, onSuc
           brandId: "",
           description: "",
         });
-        setVariants([{ sku: "", price: 0, stock: 0, attributes: [{ key: "", value: "" }] }]);
-        setSpecs([]);
+        setSpecs([{ key: "", value: "" }]);
         setImages([]);
+        setVariants([{ sku: "", price: 0, stock: 0, attributes: [{ key: "", value: "" }] }]);
         setIsActive(true);
       }
-      setImageUrlInput("");
     }
   }, [open, initialData, reset]);
-
-  /* ================= UPLOAD IMAGE ================= */
 
   const uploadImageToServer = async (
     files: FileList | File[],
@@ -222,29 +188,28 @@ export default function AddProductModal({ open, onOpenChange, initialData, onSuc
         formData.append("files", file);
       });
 
-      const res = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL}/admin/products/upload-multiple`,
-        {
-          method: "POST",
-          body: formData,
-          credentials: "include",
-        },
-      );
+      const res = await uploadApi.uploadMultiple(formData);
 
-      if (!res.ok) throw new Error("Upload failed");
+      const data = res.data?.data || res.data;
+      const uploadedImages = data.images || data;
 
-      const data = await res.json();
+      if (!uploadedImages) throw new Error("Không nhận được dữ liệu ảnh từ server");
 
-      return data.images;
-    } catch (error) {
-      console.error(error);
-      toast({ title: "Upload thất bại", variant: "destructive" });
+      return Array.isArray(uploadedImages) ? uploadedImages : [uploadedImages];
+    } catch (error: any) {
+      console.error("Upload Error:", error);
+      const errorMsg = error.response?.data?.message || error.message || "Upload thất bại";
+      toast({
+        title: "Lỗi tải ảnh",
+        description: errorMsg,
+        variant: "destructive"
+      });
     } finally {
       setUploading(false);
     }
   };
 
-  const handleAddImage = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files?.length) return;
 
     const results = await uploadImageToServer(e.target.files);
@@ -258,20 +223,6 @@ export default function AddProductModal({ open, onOpenChange, initialData, onSuc
     setImages((prev) => prev.filter((_, i) => i !== index));
   };
 
-  const handleAddImageByUrl = () => {
-    if (!imageUrlInput.trim()) return;
-    setImages((prev) => [
-      ...prev,
-      {
-        url: imageUrlInput,
-        publicId: "",
-      },
-    ]);
-    setImageUrlInput("");
-  };
-
-  /* ================= SPECS ================= */
-
   const addSpec = () => {
     setSpecs((prev) => [...prev, { key: "", value: "" }]);
   };
@@ -280,13 +231,11 @@ export default function AddProductModal({ open, onOpenChange, initialData, onSuc
     setSpecs((prev) => prev.filter((_, i) => i !== index));
   };
 
-  const updateSpec = (index: number, field: "key" | "value", value: string) => {
+  const updateSpec = (index: number, field: "key" | "value", val: string) => {
     setSpecs((prev) =>
-      prev.map((item, i) => (i === index ? { ...item, [field]: value } : item)),
+      prev.map((s, i) => (i === index ? { ...s, [field]: val } : s))
     );
   };
-
-  /* ================= VARIANTS ================= */
 
   const addVariant = () => {
     setVariants((prev) => [
@@ -310,34 +259,51 @@ export default function AddProductModal({ open, onOpenChange, initialData, onSuc
     );
   };
 
-  const updateAttribute = (
-    vIndex: number,
-    aIndex: number,
-    field: "key" | "value",
-    value: string,
-  ) => {
-    const newVariants = [...variants];
-    newVariants[vIndex].attributes[aIndex][field] = value;
-    setVariants(newVariants);
-  };
-
-  const addAttribute = (vIndex: number) => {
-    const newVariants = [...variants];
-    newVariants[vIndex].attributes.push({ key: "", value: "" });
-    setVariants(newVariants);
-  };
-
-  const removeAttribute = (vIndex: number, aIndex: number) => {
-    const newVariants = [...variants];
-    newVariants[vIndex].attributes = newVariants[vIndex].attributes.filter(
-      (_, i) => i !== aIndex
+  const addVariantAttribute = (variantIndex: number) => {
+    setVariants((prev) =>
+      prev.map((v, i) =>
+        i === variantIndex
+          ? { ...v, attributes: [...v.attributes, { key: "", value: "" }] }
+          : v
+      )
     );
-    setVariants(newVariants);
   };
 
-  /* ================= SUBMIT ================= */
+  const removeVariantAttribute = (variantIndex: number, attrIndex: number) => {
+    setVariants((prev) =>
+      prev.map((v, i) =>
+        i === variantIndex
+          ? {
+              ...v,
+              attributes: v.attributes.filter((_, j) => j !== attrIndex),
+            }
+          : v
+      )
+    );
+  };
+
+  const updateVariantAttribute = (
+    variantIndex: number,
+    attrIndex: number,
+    field: "key" | "value",
+    val: string
+  ) => {
+    setVariants((prev) =>
+      prev.map((v, i) =>
+        i === variantIndex
+          ? {
+              ...v,
+              attributes: v.attributes.map((a, j) =>
+                j === attrIndex ? { ...a, [field]: val } : a
+              ),
+            }
+          : v
+      )
+    );
+  };
 
   const onSubmit = async (data: ProductFormData) => {
+    // Validate variants
     if (variants.length === 0) {
       toast({ title: "Sản phẩm phải có ít nhất 1 biến thể", variant: "destructive" });
       return;
@@ -358,17 +324,11 @@ export default function AddProductModal({ open, onOpenChange, initialData, onSuc
       description: data.description,
       categoryId: data.categoryId,
       brandId: data.brandId,
-      
-      // Filter images
       images: images.map((img) => ({
         url: img.url,
         publicId: img.publicId || null,
       })),
-
-      // Filter specs
       specs: specs.filter((s) => s.key.trim() && s.value.trim()),
-
-      // Filter variants
       variants: variants.map((v) => ({
         sku: v.sku.trim(),
         price: Number(v.price),
@@ -376,514 +336,400 @@ export default function AddProductModal({ open, onOpenChange, initialData, onSuc
         attributes: v.attributes.filter((a) => a.key.trim() && a.value.trim()),
         status: "active",
       })),
-
       status: isActive ? "active" : "inactive",
     };
 
     try {
       const url = initialData
-        ? `${process.env.NEXT_PUBLIC_API_URL}/admin/products/${initialData._id}`
-        : `${process.env.NEXT_PUBLIC_API_URL}/admin/products`;
-      
-      const method = initialData ? "PUT" : "POST";
+        ? `/admin/products/${initialData._id}`
+        : `/admin/products`;
+      const method = initialData ? "put" : "post";
 
-      const res = await fetch(url, {
-          method,
-          headers: { "Content-Type": "application/json" },
-          credentials: "include",
-          body: JSON.stringify(payload),
-        },
-      );
+      await (apiClient[method] as any)(url, payload);
 
-      if (!res.ok) {
-        const errorData = await res.json();
-        throw new Error(errorData.message || (initialData ? "Cập nhật thất bại" : "Tạo thất bại"));
-      }
-
-      toast({ 
-        title: initialData ? "Cập nhật thành công!" : "Thêm sản phẩm thành công!", 
-        variant: "success" 
+      toast({
+        title: initialData ? "Cập nhật sản phẩm thành công!" : "Thêm sản phẩm thành công!",
       });
 
-      if (!initialData) {
-          reset();
-          setVariants([]);
-          setSpecs([]);
-          setImages([]);
-          setIsActive(true);
-      }
-      if (onSuccess) {
-          onSuccess(null);
-      }
+      reset();
+      setImages([]);
+      setSpecs([{ key: "", value: "" }]);
+      setVariants([{ sku: "", price: 0, stock: 0, attributes: [{ key: "", value: "" }] }]);
       onOpenChange(false);
-    } catch (err: any) {
-      toast({ title: err.message || "Tạo sản phẩm thất bại", variant: "destructive" });
+      onSuccess?.(payload);
+    } catch (error: any) {
+      console.error("Submit Error:", error);
+      const errorMsg = error.response?.data?.message || error.message || "Lỗi khi lưu sản phẩm";
+      toast({
+        title: "Lỗi",
+        description: errorMsg,
+        variant: "destructive"
+      });
     }
   };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-6xl h-[90vh] p-0 flex flex-col gap-0 overflow-hidden bg-background/95 backdrop-blur-3xl border-border/60 shadow-2xl">
-        <DialogHeader className="px-6 py-4 border-b border-border/40 bg-muted/20">
-          <DialogTitle className="text-xl font-bold flex items-center gap-3 text-primary relative">
-            <Package className="h-6 w-6" />
-            {initialData ? "Cập nhật sản phẩm" : "Thêm sản phẩm mới"}
+      <DialogContent className="max-w-4xl max-h-[90vh] p-0">
+        <DialogHeader className="px-6 pt-6 pb-0">
+          <DialogTitle className="text-xl font-bold">
+            {initialData ? "Chỉnh sửa sản phẩm" : "Thêm sản phẩm mới"}
           </DialogTitle>
         </DialogHeader>
 
-        <form onSubmit={handleSubmit(onSubmit)} className="flex-1 flex flex-col overflow-hidden">
-          <div className="flex-1 overflow-hidden relative">
-            <ScrollArea className="h-full">
-              <div className="p-6">
-                <Tabs defaultValue="basic" className="w-full">
-                  <TabsList className="grid w-full grid-cols-4 mb-8 sticky top-0 bg-background/80 backdrop-blur-md z-30 shadow-sm border border-border/40 p-1.5 h-auto rounded-xl">
-                    <TabsTrigger value="basic" className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground py-2.5 transition-all">
-                        <Info className="w-4 h-4 mr-2" />
-                        Thông tin cơ bản
-                    </TabsTrigger>
-                    <TabsTrigger value="images" className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground py-2.5 transition-all">
-                        <ImageIcon className="w-4 h-4 mr-2" />
-                        Hình ảnh & Media
-                    </TabsTrigger>
-                    <TabsTrigger value="specs" className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground py-2.5 transition-all">
-                        <List className="w-4 h-4 mr-2" />
-                        Thông số kỹ thuật
-                    </TabsTrigger>
-                    <TabsTrigger value="variants" className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground py-2.5 transition-all">
-                        <Tags className="w-4 h-4 mr-2" />
-                        Biến thể & Giá
-                    </TabsTrigger>
-                  </TabsList>
+        <form onSubmit={handleSubmit(onSubmit)}>
+          <ScrollArea className="h-[calc(90vh-160px)] px-6">
+            <Tabs defaultValue="basic" className="w-full">
+              <TabsList className="grid w-full grid-cols-5 mb-6">
+                <TabsTrigger value="basic">Thông tin cơ bản</TabsTrigger>
+                <TabsTrigger value="variants">Biến thể</TabsTrigger>
+                <TabsTrigger value="media">Hình ảnh</TabsTrigger>
+                <TabsTrigger value="specs">Thông số</TabsTrigger>
+                <TabsTrigger value="settings">Cài đặt</TabsTrigger>
+              </TabsList>
 
-                  {/* ================= BASIC INFO ================= */}
-                  <TabsContent value="basic" className="space-y-8 mt-2 animate-in fade-in-50 slide-in-from-bottom-5 duration-300">
-                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                      {/* Left Column (Main Info) */}
-                      <div className="lg:col-span-2 space-y-6">
-                        <div className="bg-card p-6 rounded-xl border border-border/50 shadow-sm space-y-6">
-                            <h3 className="font-semibold flex items-center text-foreground/80 text-lg">
-                                <Package className="w-5 h-5 mr-2 text-primary" /> Thông tin chính
-                            </h3>
-                            <Separator className="bg-border/50" />
-                            
-                            <div className="space-y-3">
-                              <Label className="text-base">Tên sản phẩm <span className="text-destructive">*</span></Label>
-                              <Input 
-                                {...register("name")} 
-                                placeholder="VD: Laptop Dell XPS 15 9530..." 
-                                className="h-12 text-lg bg-background/50 focus:bg-background transition-colors" 
-                              />
-                              {errors.name && <p className="text-sm text-destructive">{errors.name.message}</p>}
-                            </div>
+              {/* Tab 1: Basic Info */}
+              <TabsContent value="basic" className="space-y-5 mt-0">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="col-span-2">
+                    <Label htmlFor="name">
+                      Tên sản phẩm <span className="text-destructive">*</span>
+                    </Label>
+                    <Input
+                      id="name"
+                      placeholder="VD: iPhone 15 Pro Max 256GB"
+                      {...register("name")}
+                      className="mt-1.5"
+                    />
+                    {errors.name && (
+                      <p className="text-sm text-destructive mt-1">
+                        {errors.name.message}
+                      </p>
+                    )}
+                  </div>
 
-                            <div className="space-y-3">
-                              <Label className="text-base">Mô tả chi tiết <span className="text-destructive">*</span></Label>
-                              <Textarea 
-                                rows={12} 
-                                {...register("description")} 
-                                placeholder="Mô tả chi tiết về sản phẩm, tính năng nổi bật..." 
-                                className="resize-y min-h-[200px] bg-background/50 focus:bg-background transition-colors leading-relaxed"
-                              />
-                              {errors.description && <p className="text-sm text-destructive">{errors.description.message}</p>}
-                            </div>
+                  <div>
+                    <Label htmlFor="slug">Slug</Label>
+                    <Input
+                      id="slug"
+                      placeholder="tu-dong-tao-tu-ten"
+                      {...register("slug")}
+                      className="mt-1.5"
+                    />
+                  </div>
+
+                  <div>
+                    <Label htmlFor="categoryId">
+                      Danh mục <span className="text-destructive">*</span>
+                    </Label>
+                    <Select onValueChange={(v) => setValue("categoryId", v)}>
+                      <SelectTrigger className="mt-1.5">
+                        <SelectValue placeholder="Chọn danh mục" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {flatCategories.map((c) => (
+                          <SelectItem key={c._id} value={c._id}>
+                            {"  ".repeat(c.level)}{c.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {errors.categoryId && (
+                      <p className="text-sm text-destructive mt-1">
+                        {errors.categoryId.message}
+                      </p>
+                    )}
+                  </div>
+
+                  <div>
+                    <Label htmlFor="brandId">
+                      Thương hiệu <span className="text-destructive">*</span>
+                    </Label>
+                    <Select onValueChange={(v) => setValue("brandId", v)}>
+                      <SelectTrigger className="mt-1.5">
+                        <SelectValue placeholder="Chọn thương hiệu" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {brands.map((b) => (
+                          <SelectItem key={b._id} value={b._id}>
+                            {b.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {errors.brandId && (
+                      <p className="text-sm text-destructive mt-1">
+                        {errors.brandId.message}
+                      </p>
+                    )}
+                  </div>
+
+                  <div>
+                    <Label htmlFor="description">
+                      Mô tả chi tiết <span className="text-destructive">*</span>
+                    </Label>
+                    <Textarea
+                      id="description"
+                      placeholder="Mô tả đầy đủ về sản phẩm, tính năng nổi bật..."
+                      rows={5}
+                      {...register("description")}
+                      className="mt-1.5"
+                    />
+                    {errors.description && (
+                      <p className="text-sm text-destructive mt-1">
+                        {errors.description.message}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </TabsContent>
+
+              {/* Tab 2: Variants */}
+              <TabsContent value="variants" className="space-y-5 mt-0">
+                <div>
+                  <div className="flex items-center justify-between mb-3">
+                    <Label>Biến thể sản phẩm</Label>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={addVariant}
+                    >
+                      <Plus className="h-3.5 w-3.5 mr-1" />
+                      Thêm biến thể
+                    </Button>
+                  </div>
+                  <div className="space-y-4">
+                    {variants.map((variant, i) => (
+                      <div key={i} className="border border-border rounded-lg p-4 space-y-4">
+                        <div className="flex items-center justify-between">
+                          <h4 className="font-medium">Biến thể {i + 1}</h4>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => removeVariant(i)}
+                            disabled={variants.length === 1}
+                          >
+                            <X className="h-4 w-4 text-muted-foreground" />
+                          </Button>
                         </div>
-                      </div>
-
-                      {/* Right Column (Configuration) */}
-                      <div className="space-y-6">
-                        <div className="bg-card p-6 rounded-xl border border-border/50 shadow-sm space-y-6 sticky top-2">
-                           <h3 className="font-semibold flex items-center text-foreground/80 text-lg">
-                                <Layers className="w-5 h-5 mr-2 text-primary" /> Phân loại
-                            </h3>
-                            <Separator className="bg-border/50" />
-
-                             <div className="space-y-3">
-                                <Label>Danh mục <span className="text-destructive">*</span></Label>
-                                <Select
-                                  value={watch("categoryId")}
-                                  onValueChange={(value) => setValue("categoryId", value, { shouldValidate: true })}
-                                >
-                                  <SelectTrigger className="h-10 bg-background/50">
-                                    <SelectValue placeholder="Chọn danh mục" />
-                                  </SelectTrigger>
-                                  <SelectContent className="max-h-60 dropdown-content">
-                                    {flatCategories.map((c) => (
-                                      <SelectItem key={c._id} value={c._id}>
-                                        <span style={{ paddingLeft: `${c.level * 10}px` }}>
-                                          {c.level > 0 ? "— " : ""}
-                                          {c.name}
-                                        </span>
-                                      </SelectItem>
-                                    ))}
-                                  </SelectContent>
-                                </Select>
-                                {errors.categoryId && <p className="text-sm text-destructive">{errors.categoryId.message}</p>}
-                              </div>
-
-                              <div className="space-y-3">
-                                <Label>Thương hiệu <span className="text-destructive">*</span></Label>
-                                <Select
-                                  value={watch("brandId")}
-                                  onValueChange={(value) => setValue("brandId", value, { shouldValidate: true })}
-                                >
-                                  <SelectTrigger className="h-10 bg-background/50">
-                                    <SelectValue placeholder="Chọn thương hiệu" />
-                                  </SelectTrigger>
-                                  <SelectContent className="max-h-60 dropdown-content">
-                                    {brands.map((b) => (
-                                      <SelectItem key={b._id} value={b._id}>
-                                        {b.name}
-                                      </SelectItem>
-                                    ))}
-                                  </SelectContent>
-                                </Select>
-                                {errors.brandId && <p className="text-sm text-destructive">{errors.brandId.message}</p>}
-                              </div>
-
-                               <Separator className="bg-border/50 dashed" />
-
-                             <div className="space-y-3">
-                              <Label className="flex items-center justify-between">
-                                  Đường dẫn tĩnh
-                                  <span className="text-xs text-muted-foreground font-normal">Tự động tạo</span>
-                              </Label>
-                              <Input 
-                                {...register("slug")} 
-                                readOnly 
-                                disabled
-                                className="bg-muted/50 text-muted-foreground cursor-not-allowed border-dashed h-9 text-xs font-mono" 
-                              />
-                            </div>
+                        <div className="grid grid-cols-3 gap-4">
+                          <div>
+                            <Label htmlFor={`variant-sku-${i}`}>
+                              SKU <span className="text-destructive">*</span>
+                            </Label>
+                            <Input
+                              id={`variant-sku-${i}`}
+                              placeholder="VD: IP15PM-256-BK"
+                              value={variant.sku}
+                              onChange={(e) => updateVariant(i, "sku", e.target.value)}
+                              className="mt-1.5"
+                            />
+                          </div>
+                          <div>
+                            <Label htmlFor={`variant-price-${i}`}>
+                              Giá (VNĐ) <span className="text-destructive">*</span>
+                            </Label>
+                            <Input
+                              id={`variant-price-${i}`}
+                              type="number"
+                              placeholder="0"
+                              value={variant.price}
+                              onChange={(e) => updateVariant(i, "price", Number(e.target.value))}
+                              className="mt-1.5"
+                            />
+                          </div>
+                          <div>
+                            <Label htmlFor={`variant-stock-${i}`}>Tồn kho</Label>
+                            <Input
+                              id={`variant-stock-${i}`}
+                              type="number"
+                              placeholder="0"
+                              value={variant.stock}
+                              onChange={(e) => updateVariant(i, "stock", Number(e.target.value))}
+                              className="mt-1.5"
+                            />
+                          </div>
                         </div>
-                      </div>
-                    </div>
-                  </TabsContent>
-
-                  {/* ================= IMAGES ================= */}
-                  <TabsContent value="images" className="space-y-6 mt-2 animate-in fade-in-50 slide-in-from-bottom-5 duration-300">
-                    <div className="flex flex-col gap-2 mb-4">
-                      <h3 className="font-semibold text-lg flex items-center">
-                        <ImageIcon className="w-5 h-5 mr-2 text-primary" />
-                        Thư viện ảnh
-                      </h3>
-                      <p className="text-sm text-muted-foreground">Quản lý hình ảnh sản phẩm. Ảnh đầu tiên sẽ là ảnh đại diện.</p>
-                    </div>
-                    
-                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                        {/* Upload Area */}
-                        <div className="lg:col-span-1 space-y-4">
-                             <label className="group cursor-pointer flex flex-col items-center justify-center border-2 border-dashed border-primary/30 rounded-2xl aspect-square bg-primary/5 hover:bg-primary/10 transition-all duration-300 relative overflow-hidden">
-                                <div className="text-center p-6 space-y-4 group-hover:scale-105 transition-transform z-10 relative">
-                                  {uploading ? (
-                                    <div className="flex flex-col items-center gap-3">
-                                      <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-primary"></div>
-                                      <span className="font-medium text-primary">Đang tải lên...</span>
-                                    </div>
-                                  ) : (
-                                    <>
-                                      <div className="bg-background rounded-full p-4 shadow-sm mx-auto group-hover:shadow-md transition-shadow">
-                                        <UploadCloud className="w-8 h-8 text-primary" />
-                                      </div>
-                                      <div>
-                                          <span className="font-bold text-primary block text-lg mb-1">Tải ảnh lên</span>
-                                          <span className="text-xs text-muted-foreground block">JPG, PNG, WEBP</span>
-                                          <span className="text-xs text-muted-foreground block">(Max 5MB)</span>
-                                      </div>
-                                    </>
-                                  )}
-                                </div>
-                                <input
-                                  type="file"
-                                  accept="image/*"
-                                  hidden
-                                  multiple
-                                  disabled={uploading}
-                                  onChange={handleAddImage}
+                        <div>
+                          <div className="flex items-center justify-between mb-3">
+                            <Label>Thuộc tính</Label>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() => addVariantAttribute(i)}
+                            >
+                              <Plus className="h-3.5 w-3.5 mr-1" />
+                              Thêm thuộc tính
+                            </Button>
+                          </div>
+                          <div className="space-y-2">
+                            {variant.attributes.map((attr, j) => (
+                              <div key={j} className="flex items-center gap-2">
+                                <Input
+                                  placeholder="VD: Màu sắc"
+                                  value={attr.key}
+                                  onChange={(e) => updateVariantAttribute(i, j, "key", e.target.value)}
+                                  className="flex-1"
                                 />
-                              </label>
-
-                              <div className="bg-card border rounded-xl p-4 shadow-sm space-y-3">
-                                  <Label className="text-xs font-semibold uppercase text-muted-foreground">Hoặc nhập URL</Label>
-                                  <div className="flex gap-2">
-                                      <Input 
-                                          className="flex-1 bg-background"
-                                          placeholder="https://..." 
-                                          value={imageUrlInput}
-                                          onChange={(e) => setImageUrlInput(e.target.value)}
-                                      />
-                                      <Button type="button" onClick={handleAddImageByUrl} size="sm">Thêm</Button>
-                                  </div>
+                                <Input
+                                  placeholder="VD: Đỏ"
+                                  value={attr.value}
+                                  onChange={(e) => updateVariantAttribute(i, j, "value", e.target.value)}
+                                  className="flex-1"
+                                />
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon-sm"
+                                  onClick={() => removeVariantAttribute(i, j)}
+                                  disabled={variant.attributes.length === 1}
+                                >
+                                  <X className="h-4 w-4 text-muted-foreground" />
+                                </Button>
                               </div>
+                            ))}
+                          </div>
                         </div>
-                        
-                        {/* Image Grid */}
-                        <div className="lg:col-span-2">
-                             <div className="bg-card border rounded-2xl p-6 shadow-sm min-h-[400px]">
-                                {images.length > 0 ? (
-                                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
-                                      {images.map((img, i) => (
-                                        <div key={i} className="group relative border rounded-xl overflow-hidden aspect-square shadow-sm bg-background hover:shadow-md hover:ring-2 ring-primary transition-all duration-200">
-                                          <Image
-                                            src={img.url}
-                                            alt="product"
-                                            fill
-                                            className="object-cover"
-                                            sizes="(max-width: 768px) 100vw, 300px"
-                                          />
-                                          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center backdrop-blur-[1px]">
-                                              <Button
-                                                type="button"
-                                                variant="destructive"
-                                                size="icon"
-                                                onClick={() => removeImage(i)}
-                                                className="rounded-full shadow-lg h-9 w-9"
-                                              >
-                                                <Trash2 className="w-4 h-4" />
-                                              </Button>
-                                          </div>
-                                          <div className="absolute top-2 left-2 bg-black/60 text-white text-[10px] px-2 py-0.5 rounded-full backdrop-blur-md shadow-sm font-mono">
-                                              #{i + 1}
-                                          </div>
-                                          {i === 0 && (
-                                              <div className="absolute bottom-2 right-2 bg-primary text-primary-foreground text-[10px] px-2 py-0.5 rounded-full shadow-sm font-bold">
-                                                  MAIN
-                                              </div>
-                                          )}
-                                        </div>
-                                      ))}
-                                    </div>
-                                ) : (
-                                    <div className="h-full flex flex-col items-center justify-center text-muted-foreground/50 space-y-4">
-                                        <ImageIcon className="w-16 h-16" />
-                                        <p className="text-lg font-medium">Chưa có hình ảnh nào</p>
-                                    </div>
-                                )}
-                             </div>
-                        </div>
-                    </div>
-                  </TabsContent>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </TabsContent>
 
-                  {/* ================= SPECS ================= */}
-                  <TabsContent value="specs" className="space-y-6 mt-2 animate-in fade-in-50 slide-in-from-bottom-5 duration-300">
-                    <div className="flex justify-between items-center border-b border-border/50 pb-4">
-                        <div>
-                            <h3 className="font-semibold text-lg flex items-center">
-                                <List className="w-5 h-5 mr-2 text-primary" /> Thông số kỹ thuật
-                            </h3>
-                            <p className="text-sm text-muted-foreground mt-1">Hiển thị trong bảng thông số chi tiết của sản phẩm</p>
-                        </div>
-                        <Button type="button" onClick={addSpec} size="sm" className="gap-2 shadow-sm">
-                            <Plus className="w-4 h-4"/> Thêm dòng
-                        </Button>
-                    </div>
-
-                    <div className="max-w-3xl mx-auto">
-                        {specs.length === 0 ? (
-                             <div className="text-center py-16 bg-muted/10 border-2 border-dashed border-muted-foreground/20 rounded-2xl flex flex-col items-center gap-4">
-                                <div className="bg-muted/30 p-4 rounded-full">
-                                    <List className="w-8 h-8 text-muted-foreground/50" />
-                                </div>
-                                <div>
-                                    <p className="text-lg font-medium text-foreground">Chưa có thông số kỹ thuật</p>
-                                    <p className="text-muted-foreground text-sm">Thêm các thông số như RAM, CPU, Kích thước...</p>
-                                </div>
-                                <Button variant="outline" onClick={addSpec}>Thêm thông số ngay</Button>
-                             </div>
-                        ) : (
-                            <div className="space-y-3">
-                                {specs.map((item, i) => (
-                                  <div key={i} className="flex gap-4 items-center group bg-card border rounded-xl p-3 shadow-sm hover:shadow-md transition-all">
-                                    <div className="flex-none w-8 flex justify-center text-muted-foreground font-mono text-sm">
-                                        {i + 1}
-                                    </div>
-                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 flex-1">
-                                         <Input
-                                          placeholder="Tên thông số (VD: RAM)"
-                                          value={item.key}
-                                          onChange={(e) => updateSpec(i, "key", e.target.value)}
-                                          className="bg-transparent border-transparent hover:border-input focus:border-input transition-all font-medium"
-                                        />
-                                        <div className="flex items-center gap-2">
-                                            <span className="text-muted-foreground hidden sm:inline">:</span>
-                                            <Input
-                                              placeholder="Giá trị (VD: 16GB LPDDR5)"
-                                              value={item.value}
-                                              onChange={(e) => updateSpec(i, "value", e.target.value)}
-                                              className="bg-transparent border-transparent hover:border-input focus:border-input transition-all"
-                                            />
-                                        </div>
-                                    </div>
-                                    <Button
-                                      type="button"
-                                      variant="ghost"
-                                      size="icon"
-                                      onClick={() => removeSpec(i)}
-                                      className="text-muted-foreground hover:text-destructive hover:bg-destructive/10 opacity-0 group-hover:opacity-100 transition-opacity"
-                                    >
-                                      <Trash2 className="w-4 h-4" />
-                                    </Button>
-                                  </div>
-                                ))}
-                            </div>
+              {/* Tab 3: Images */}
+              <TabsContent value="media" className="space-y-5 mt-0">
+                <div>
+                  <Label className="mb-3 block">Hình ảnh sản phẩm</Label>
+                  <div className="grid grid-cols-4 gap-4">
+                    {images.map((img, i) => (
+                      <div
+                        key={i}
+                        className="relative group rounded-xl overflow-hidden border border-border aspect-square"
+                      >
+                        <Image
+                          src={img.url}
+                          alt={`Product ${i + 1}`}
+                          fill
+                          className="object-cover"
+                        />
+                        {i === 0 && (
+                          <Badge className="absolute top-2 left-2 bg-primary text-primary-foreground text-xs">
+                            Ảnh chính
+                          </Badge>
                         )}
-                    </div>
-                  </TabsContent>
+                        <button
+                          type="button"
+                          onClick={() => removeImage(i)}
+                          className="absolute top-2 right-2 bg-destructive text-destructive-foreground rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </div>
+                    ))}
+                    <label className="border-2 border-dashed border-border rounded-xl aspect-square flex flex-col items-center justify-center gap-2 text-muted-foreground hover:border-primary hover:text-primary transition-colors cursor-pointer">
+                      <input
+                        type="file"
+                        multiple
+                        accept="image/*"
+                        onChange={handleImageUpload}
+                        className="hidden"
+                      />
+                      {uploading ? (
+                        <UploadCloud className="h-6 w-6 animate-pulse" />
+                      ) : (
+                        <Upload className="h-6 w-6" />
+                      )}
+                      <span className="text-xs font-medium">
+                        {uploading ? "Đang tải..." : "Tải ảnh lên"}
+                      </span>
+                    </label>
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-2">
+                    Hỗ trợ JPG, PNG, WebP. Tối đa 5MB/ảnh. Ảnh đầu tiên sẽ là ảnh chính.
+                  </p>
+                </div>
+              </TabsContent>
 
-                  {/* ================= VARIANTS ================= */}
-                  <TabsContent value="variants" className="space-y-6 mt-2 animate-in fade-in-50 slide-in-from-bottom-5 duration-300">
-                    <div className="flex justify-between items-center border-b border-border/50 pb-4">
-                        <div>
-                            <h3 className="font-semibold text-lg flex items-center">
-                                <Tags className="w-5 h-5 mr-2 text-primary" /> Quản lý biến thể (SKU)
-                            </h3>
-                            <p className="text-sm text-muted-foreground mt-1">Mỗi biến thể tương ứng với một mã kho (SKU) riêng biệt</p>
-                        </div>
-                        <Button type="button" onClick={addVariant} size="sm" className="gap-2 shadow-sm">
-                            <Plus className="w-4 h-4"/> Thêm biến thể
+              {/* Tab 4: Specs */}
+              <TabsContent value="specs" className="space-y-5 mt-0">
+                <div>
+                  <div className="flex items-center justify-between mb-3">
+                    <Label>Thông số kỹ thuật</Label>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={addSpec}
+                    >
+                      <Plus className="h-3.5 w-3.5 mr-1" />
+                      Thêm thông số
+                    </Button>
+                  </div>
+                  <div className="space-y-3">
+                    {specs.map((spec, i) => (
+                      <div key={i} className="flex items-center gap-3">
+                        <Input
+                          placeholder="VD: RAM"
+                          value={spec.key}
+                          onChange={(e) => updateSpec(i, "key", e.target.value)}
+                          className="flex-1"
+                        />
+                        <Input
+                          placeholder="VD: 8GB"
+                          value={spec.value}
+                          onChange={(e) => updateSpec(i, "value", e.target.value)}
+                          className="flex-1"
+                        />
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon-sm"
+                          onClick={() => removeSpec(i)}
+                          disabled={specs.length === 1}
+                        >
+                          <Trash2 className="h-4 w-4 text-muted-foreground" />
                         </Button>
-                    </div>
-                
-                    <div className="space-y-6">
-                        {variants.length === 0 ? (
-                             <div className="text-center py-16 bg-destructive/5 border-2 border-dashed border-destructive/20 rounded-2xl">
-                                <p className="text-destructive font-semibold">Bắt buộc phải có ít nhất 1 biến thể.</p>
-                                <Button variant="link" className="text-destructive underline" onClick={addVariant}>Thêm biến thể</Button>
-                             </div>
-                        ) : (
-                             variants.map((v, i) => (
-                              <div key={i} className="bg-card border border-border/60 shadow-sm rounded-2xl overflow-hidden transition-all hover:shadow-lg hover:border-primary/20 group">
-                                <div className="bg-muted/30 px-6 py-4 border-b border-border/50 flex justify-between items-center">
-                                    <div className="flex items-center gap-3">
-                                        <Badge variant="outline" className="font-mono bg-background shadow-sm">#{i + 1}</Badge>
-                                        <div className="flex flex-col">
-                                            <span className="font-bold text-sm text-foreground/80">Biến thể sản phẩm</span>
-                                            <span className="text-xs text-muted-foreground font-mono">{v.sku || "Chưa có SKU"}</span>
-                                        </div>
-                                    </div>
-                                    <Button
-                                        type="button"
-                                        variant="ghost"
-                                        size="sm"
-                                        onClick={() => removeVariant(i)}
-                                        className="text-muted-foreground hover:text-destructive h-8 opacity-70 group-hover:opacity-100 transition-opacity bg-background border border-transparent hover:border-border shadow-sm"
-                                    >
-                                        <Trash2 className="w-4 h-4 mr-1.5" /> Xóa
-                                    </Button>
-                                </div>
-                                
-                                <div className="p-6 space-y-6">
-                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                                        <div className="space-y-2">
-                                            <Label className="text-xs font-bold text-muted-foreground uppercase flex items-center gap-1">
-                                                <Barcode className="w-3 h-3" /> Mã SKU
-                                            </Label>
-                                            <Input
-                                              placeholder="VD: IP15-PRO-256-BLK"
-                                              className="font-mono bg-background/50"
-                                              value={v.sku}
-                                              onChange={(e) => updateVariant(i, "sku", e.target.value)}
-                                            />
-                                        </div>
-                                         <div className="space-y-2">
-                                            <Label className="text-xs font-bold text-muted-foreground uppercase flex items-center gap-1">
-                                                <DollarSign className="w-3 h-3" /> Giá bán (VNĐ)
-                                            </Label>
-                                            <div className="relative">
-                                                <Input
-                                                  type="number"
-                                                  className="font-mono pl-8 bg-background/50"
-                                                  min={0}
-                                                  value={v.price}
-                                                  onChange={(e) => updateVariant(i, "price", e.target.value)}
-                                                />
-                                                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-xs">$</span>
-                                            </div>
-                                        </div>
-                                         <div className="space-y-2">
-                                            <Label className="text-xs font-bold text-muted-foreground uppercase flex items-center gap-1">
-                                                <Box className="w-3 h-3" /> Tồn kho
-                                            </Label>
-                                            <Input
-                                              type="number"
-                                              className="font-mono bg-background/50"
-                                              min={0}
-                                              value={v.stock}
-                                              onChange={(e) => updateVariant(i, "stock", e.target.value)}
-                                            />
-                                        </div>
-                                    </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </TabsContent>
 
-                                    <div className="bg-muted/10 rounded-xl p-5 space-y-4 border border-dashed border-border/60">
-                                        <div className="flex justify-between items-center">
-                                            <Label className="text-sm font-semibold flex items-center gap-2">
-                                                <Layers className="w-4 h-4 text-primary/70" />
-                                                Thuộc tính định danh
-                                            </Label>
-                                            <Button
-                                              type="button"
-                                              variant="outline"
-                                              size="sm"
-                                              className="h-7 text-xs bg-background shadow-sm"
-                                              onClick={() => addAttribute(i)}
-                                            >
-                                              <Plus className="w-3 h-3 mr-1" /> Thêm thuộc tính
-                                            </Button>
-                                        </div>
-                                        
-                                        <div className="grid gap-3">
-                                            {v.attributes.map((a, j) => (
-                                              <div key={j} className="grid grid-cols-[1fr,1fr,auto] gap-3 items-center group/attr">
-                                                <Input
-                                                  placeholder="Tên (VD: Màu sắc)"
-                                                  className="h-9 bg-background shadow-sm focus:ring-1"
-                                                  value={a.key}
-                                                  onChange={(e) => updateAttribute(i, j, "key", e.target.value)}
-                                                />
-                                                <Input
-                                                  placeholder="Giá trị (VD: Xanh Titan)"
-                                                  className="h-9 bg-background shadow-sm focus:ring-1"
-                                                  value={a.value}
-                                                  onChange={(e) => updateAttribute(i, j, "value", e.target.value)}
-                                                />
-                                                <Button
-                                                    type="button"
-                                                    variant="ghost" 
-                                                    size="icon"
-                                                    className="h-8 w-8 text-muted-foreground hover:bg-destructive/10 hover:text-destructive opacity-50 group-hover/attr:opacity-100 transition-opacity"
-                                                    onClick={() => removeAttribute(i, j)}
-                                                >
-                                                    <X className="w-4 h-4"/>
-                                                </Button>
-                                              </div>
-                                            ))}
-                                        </div>
-                                    </div>
-                                </div>
-                              </div>
-                            ))
-                        )}
+              {/* Tab 5: Settings */}
+              <TabsContent value="settings" className="space-y-5 mt-0">
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between rounded-lg border border-border p-4">
+                    <div>
+                      <p className="font-medium text-foreground">
+                        Trạng thái hiển thị
+                      </p>
+                      <p className="text-sm text-muted-foreground">
+                        Sản phẩm sẽ hiển thị trên website khi bật
+                      </p>
                     </div>
-                  </TabsContent>
-                </Tabs>
-              </div>
-            </ScrollArea>
-          </div>
+                    <Switch checked={isActive} onCheckedChange={setIsActive} />
+                  </div>
+                </div>
+              </TabsContent>
+            </Tabs>
+          </ScrollArea>
 
-          <div className="p-4 border-t border-border/40 bg-background/80 backdrop-blur-md flex justify-end gap-3 sticky bottom-0 z-40 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)]">
-             <Button type="button" variant="outline" onClick={() => onOpenChange(false)} className="w-24 border-border/60 hover:bg-muted">
+          <Separator />
+
+          <div className="flex items-center justify-end gap-3 px-6 py-4">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => onOpenChange(false)}
+            >
               Hủy
             </Button>
-            <Button type="submit" disabled={uploading} className="w-40 shadow-md">
-              {uploading ? (
-                 <>
-                    <span className="animate-spin rounded-full h-4 w-4 border-b-2 border-primary-foreground mr-2"></span>
-                    Đang lưu...
-                 </>
-              ) : (
-                <>
-                    <Save className="w-4 h-4 mr-2" /> Lưu sản phẩm
-                </>
-              )}
+            <Button type="submit" disabled={uploading}>
+              <Plus className="h-4 w-4 mr-1" />
+              {initialData ? "Cập nhật sản phẩm" : "Thêm sản phẩm"}
             </Button>
           </div>
         </form>

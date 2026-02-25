@@ -122,8 +122,13 @@ export default function UsersPage() {
             title: newStatus ? "Đã mở khóa tài khoản" : "Đã khóa tài khoản", 
             variant: "success" 
         });
-    } catch (error) {
-        toast({ title: "Lỗi cập nhật", variant: "destructive" });
+    } catch (error: any) {
+        const msg = error?.response?.data?.message || "Lỗi cập nhật";
+        toast({ 
+            title: "Lỗi cập nhật", 
+            description: typeof msg === "string" ? msg : (Array.isArray(msg) ? msg.join(", ") : JSON.stringify(msg)),
+            variant: "destructive" 
+        });
         fetchUsers(); // Revert on error
     }
   }
@@ -198,7 +203,7 @@ export default function UsersPage() {
       render: (user: User) => (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="icon" className="h-8 w-8">
+            <Button variant="ghost" size="icon-sm">
               <MoreHorizontal className="h-4 w-4" />
             </Button>
           </DropdownMenuTrigger>

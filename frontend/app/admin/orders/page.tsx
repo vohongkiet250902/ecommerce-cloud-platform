@@ -14,6 +14,12 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -76,13 +82,33 @@ const formatPrice = (price: number) =>
 export default function OrdersPage() {
   const { toast } = useToast();
   const [orders, setOrders] = useState<Order[]>([]);
+  const [allOrders, setAllOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
+  const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [page, setPage] = useState(1);
+  const [limit] = useState(30);
+  const [total, setTotal] = useState(0);
+  const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
+  const [detailModalOpen, setDetailModalOpen] = useState(false);
 
-  const fetchOrders = async () => {
+  const fetchAllOrders = async () => {
+    try {
+      const res = await orderApi.getOrders({ limit: 1000 }); // Fetch many for stats
+      setAllOrders(res.data.data);
+    } catch (error) {
+      console.error("Error fetching all orders for stats", error);
+    }
+  };
+
+  const fetchOrders = async (currentPage = 1, status = "all") => {
     try {
       setLoading(true);
-      const res = await orderApi.getOrders();
-      setOrders(res.data);
+      const params: any = { page: currentPage, limit };
+      if (status !== "all") params.status = status;
+      const res = await orderApi.getOrders(params);
+      setOrders(res.data.data);
+      setTotal(res.data.total);
+      setPage(res.data.page);
     } catch (error) {
       console.error(error);
       toast({
@@ -96,33 +122,32 @@ export default function OrdersPage() {
   };
 
   useEffect(() => {
-    fetchOrders();
-  }, []);
+    fetchOrders(1, statusFilter);
+  }, [statusFilter]);
 
   const handleUpdateStatus = async (id: string, data: { status?: string; paymentStatus?: string }) => {
     try {
       await orderApi.updateStatus(id, data);
       toast({ title: "Cập nhật thành công", variant: "success" });
-      fetchOrders();
+      fetchOrders(page, statusFilter);
     } catch (error) {
       toast({ title: "Lỗi cập nhật", variant: "destructive" });
     }
   };
 
+  const handleViewDetail = (order: Order) => {
+    setSelectedOrder(order);
+    setDetailModalOpen(true);
+  };
+
   const handleCancelOrder = async (id: string) => {
     try {
-        if (!confirm("Bạn có chắc chắn muốn hủy đơn hàng này? Hành động này sẽ hoàn lại tồn kho.")) return;
-       await orderApi.cancelOrder(id);
-       toast({ title: "Đã hủy đơn hàng", variant: "success" });
-       fetchOrders();
-    } catch (error: any) {
-        toast({ 
-            title: "Lỗi hủy đơn", 
-            description: error?.response?.data?.message || "Không thể hủy đơn hàng",
-            variant: "destructive" 
-        });
+      await handleUpdateStatus(id, { status: 'cancelled' });
+      toast({ title: "Đã hủy đơn hàng", variant: "success" });
+    } catch {
+      toast({ title: "Lỗi khi hủy đơn hàng", variant: "destructive" });
     }
-  }
+  };
 
   const columns = [
     {
@@ -198,12 +223,12 @@ export default function OrdersPage() {
       render: (order: Order) => (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="icon" className="h-8 w-8">
+            <Button variant="ghost" size="icon-sm">
               <MoreHorizontal className="h-4 w-4" />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="dropdown-content">
-            <DropdownMenuItem>
+            <DropdownMenuItem onClick={() => handleViewDetail(order)}>
               <Eye className="mr-2 h-4 w-4" />
               Xem chi tiết
             </DropdownMenuItem>
@@ -259,7 +284,7 @@ export default function OrdersPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" onClick={fetchOrders}>
+          <Button variant="outline" onClick={() => fetchOrders(page, statusFilter)}>
             <RefreshCw className="h-4 w-4 mr-2" />
             Làm mới
           </Button>
@@ -310,7 +335,7 @@ export default function OrdersPage() {
 
       {/* Filters */}
       <div className="flex items-center gap-4">
-        <Select defaultValue="all">
+        <Select value={statusFilter} onValueChange={(value) => { setStatusFilter(value); setPage(1); }}>
           <SelectTrigger className="w-[180px]">
             <SelectValue placeholder="Trạng thái" />
           </SelectTrigger>
@@ -323,18 +348,6 @@ export default function OrdersPage() {
             <SelectItem value="cancelled">Đã hủy</SelectItem>
           </SelectContent>
         </Select>
-
-        <Select defaultValue="all">
-          <SelectTrigger className="w-[180px]">
-            <SelectValue placeholder="Thanh toán" />
-          </SelectTrigger>
-          <SelectContent className="dropdown-content">
-            <SelectItem value="all">Tất cả</SelectItem>
-            <SelectItem value="pending">Chưa thanh toán</SelectItem>
-            <SelectItem value="paid">Đã thanh toán</SelectItem>
-            <SelectItem value="refunded">Hoàn tiền</SelectItem>
-          </SelectContent>
-        </Select>
       </div>
 
       {/* Table */}
@@ -342,8 +355,57 @@ export default function OrdersPage() {
         data={orders}
         columns={columns}
         searchPlaceholder="Tìm kiếm mã đơn hoặc khách hàng..."
-        searchKey="_id"
+        pageSize={30}
       />
+
+      {/* Order Detail Modal */}
+      <Dialog open={detailModalOpen} onOpenChange={setDetailModalOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Chi tiết đơn hàng #{selectedOrder?._id.slice(-6).toUpperCase()}</DialogTitle>
+          </DialogHeader>
+          {selectedOrder && (
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <h4 className="font-semibold">Khách hàng</h4>
+                  <p>{selectedOrder.userId?.name || "Khách vãng lai"}</p>
+                  <p className="text-sm text-muted-foreground">{selectedOrder.userId?.email}</p>
+                </div>
+                <div>
+                  <h4 className="font-semibold">Trạng thái</h4>
+                  <Badge variant="outline" className={cn("font-medium", statusConfig[selectedOrder.status]?.className)}>
+                    {statusConfig[selectedOrder.status]?.label}
+                  </Badge>
+                  <p className="text-sm mt-1">
+                    Thanh toán: <Badge variant="secondary" className={cn("text-xs", paymentStatusConfig[selectedOrder.paymentStatus]?.className)}>
+                      {paymentStatusConfig[selectedOrder.paymentStatus]?.label}
+                    </Badge>
+                  </p>
+                </div>
+              </div>
+              <div>
+                <h4 className="font-semibold mb-2">Sản phẩm</h4>
+                <div className="space-y-2">
+                  {selectedOrder.items.map((item, index) => (
+                    <div key={index} className="flex justify-between items-center p-2 border rounded">
+                      <div>
+                        <p className="font-medium">{item.name}</p>
+                        <p className="text-sm text-muted-foreground">SKU: {item.sku} | SL: {item.quantity}</p>
+                      </div>
+                      <p className="font-semibold">{formatPrice(item.price * item.quantity)}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div className="flex justify-between items-center pt-4 border-t">
+                <span className="font-semibold">Tổng tiền:</span>
+                <span className="text-lg font-bold">{formatPrice(selectedOrder.totalAmount)}</span>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -6,77 +6,85 @@ import { ArrowRight } from "lucide-react";
 import { ProductCard } from "@/components/ProductCard";
 const products = [
   {
-    id: 1,
+    id: "65c3b1e5f1a2b3c4d5e6f701",
     name: "iPhone 15 Pro Max 256GB - Titan Tự Nhiên",
     price: 34990000,
     originalPrice: 38990000,
     image: "https://images.unsplash.com/photo-1695048133142-1a20484d2569?w=400&h=400&fit=crop",
+    sku: "IP15PM-TITAN-256",
     rating: 4.9,
     reviewCount: 1256,
     badge: "hot" as const,
   },
   {
-    id: 2,
+    id: "65c3b1e5f1a2b3c4d5e6f702",
     name: "MacBook Air 15 inch M3 - Midnight",
     price: 32990000,
     image: "https://images.unsplash.com/photo-1517336714731-489689fd1ca8?w=400&h=400&fit=crop",
+    sku: "MBA-M3-MID-15",
     rating: 4.8,
     reviewCount: 892,
     badge: "new" as const,
   },
   {
-    id: 3,
+    id: "65c3b1e5f1a2b3c4d5e6f703",
     name: "Samsung Galaxy S24 Ultra 256GB",
     price: 28990000,
     originalPrice: 33990000,
     image: "https://images.unsplash.com/photo-1610945265064-0e34e5519bbf?w=400&h=400&fit=crop",
+    sku: "S24U-TITAN-256",
     rating: 4.7,
     reviewCount: 645,
     badge: "sale" as const,
   },
   {
-    id: 4,
+    id: "65c3b1e5f1a2b3c4d5e6f704",
     name: "iPad Pro 12.9 inch M4 WiFi 256GB",
     price: 31990000,
     image: "https://images.unsplash.com/photo-1544244015-0df4b3ffc6b0?w=400&h=400&fit=crop",
+    sku: "IPAD-M4-256",
     rating: 4.9,
     reviewCount: 432,
     badge: "new" as const,
   },
   {
-    id: 5,
+    id: "65c3b1e5f1a2b3c4d5e6f705",
     name: "AirPods Pro 2 với MagSafe Case",
     price: 5990000,
     originalPrice: 6990000,
     image: "https://images.unsplash.com/photo-1600294037681-c80b4cb5b434?w=400&h=400&fit=crop",
+    sku: "AIRPODS-PRO-2",
     rating: 4.8,
     reviewCount: 2341,
     badge: "sale" as const,
   },
   {
-    id: 6,
+    id: "65c3b1e5f1a2b3c4d5e6f706",
     name: "Apple Watch Ultra 2 GPS + Cellular",
     price: 21990000,
     image: "https://images.unsplash.com/photo-1434493789847-2f02dc6ca35d?w=400&h=400&fit=crop",
+    sku: "AW-ULTRA-2",
     rating: 4.9,
     reviewCount: 567,
     badge: "hot" as const,
   },
   {
-    id: 7,
+    id: "65c3b1e5f1a2b3c4d5e6f707",
     name: "ASUS ROG Zephyrus G14 RTX 4060",
     price: 42990000,
     originalPrice: 47990000,
     image: "https://images.unsplash.com/photo-1593642632559-0c6d3fc62b89?w=400&h=400&fit=crop",
+    sku: "ASUS-G14-4060",
     rating: 4.6,
     reviewCount: 234,
     badge: "sale" as const,
   },
   {
-    id: 8,
+    id: "65c3b1e5f1a2b3c4d5e6f708",
     name: "Xiaomi 14 Ultra 512GB",
     price: 22990000,
     image: "https://images.unsplash.com/photo-1511707171634-5f897ff02aa9?w=400&h=400&fit=crop",
+    sku: "XIAOMI-14U-512",
     rating: 4.5,
     reviewCount: 178,
     badge: "new" as const,
@@ -132,7 +140,7 @@ export default function FeaturedProducts() {
         >
           {products.map((product) => (
             <motion.div key={product.id} variants={itemVariants}>
-              <ProductCard {...product} />
+              <ProductCard {...product} id={product.id.toString()} productId={product.id.toString()} variants={[]} />
             </motion.div>
           ))}
         </motion.div>

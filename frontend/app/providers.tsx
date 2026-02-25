@@ -5,6 +5,7 @@ import { store } from "@/store";
 import { useEffect } from "react";
 import { fetchCategoriesThunk } from "@/store/categories/categories.slice";
 import { fetchBrandsThunk } from "@/store/brands/brands.slice";
+import { CartProvider } from "@/hooks/useCart";
 
 export default function Providers({ children }: { children: React.ReactNode }) {
   useEffect(() => {
@@ -12,5 +13,9 @@ export default function Providers({ children }: { children: React.ReactNode }) {
     store.dispatch(fetchBrandsThunk());
   }, []);
 
-  return <Provider store={store}>{children}</Provider>;
+  return (
+    <Provider store={store}>
+      <CartProvider>{children}</CartProvider>
+    </Provider>
+  );
 }

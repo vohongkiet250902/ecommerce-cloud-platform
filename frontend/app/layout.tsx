@@ -14,8 +14,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Ecommerce Cloud Platform",
-  description: "A platform to manage your ecommerce applications seamlessly.",
+  title: "ProTech Store - Hệ thống bán lẻ thiết bị công nghệ hàng đầu",
+  description: "Chuyên cung cấp iPhone, MacBook, Laptop và phụ kiện công nghệ chính hãng với giá tốt nhất.",
 };
 
 export default function RootLayout({

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useCallback } from "react";
 import {
   Plus,
   Edit,
@@ -18,6 +18,8 @@ import * as z from "zod";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
+import { cn } from "@/lib/utils";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -52,6 +54,7 @@ const formSchema = z.object({
   name: z.string().min(1, "Tên thương hiệu không được để trống"),
   slug: z.string().optional(), // Used as Website URL
   logo: z.string().optional(),
+  isActive: z.boolean(),
 });
 
 type FormValues = z.infer<typeof formSchema>;
@@ -62,10 +65,9 @@ export default function BrandsPage() {
   const { toast } = useToast();
   const dispatch = useDispatch<AppDispatch>();
 
-  /* ===== Redux ===== */
-  const { data: brands, loading } = useSelector(
-    (state: RootState) => state.brands
-  );
+  /* ===== State ===== */
+  const [brands, setBrands] = useState<Brand[]>([]);
+  const [loading, setLoading] = useState(false);
 
   const [initialized, setInitialized] = useState(false);
 
@@ -86,21 +88,32 @@ export default function BrandsPage() {
       name: "",
       slug: "",
       logo: "",
+      isActive: true,
     },
   });
 
-  /* ===== Fetch ===== */
-  useEffect(() => {
-    dispatch(fetchBrandsThunk()).finally(() => {
+  const fetchAdminBrands = useCallback(async () => {
+    try {
+      setLoading(true);
+      const res = await brandApi.getAdminBrands();
+      setBrands(res.data.data || res.data);
+    } catch (error) {
+      console.error(error);
+    } finally {
+      setLoading(false);
       setInitialized(true);
-    });
-  }, [dispatch]);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchAdminBrands();
+  }, [fetchAdminBrands]);
 
   /* ===== Handlers ===== */
   const handleOpenCreate = () => {
     setDialogMode("create");
     setSelectedBrand(null);
-    form.reset({ name: "", slug: "", logo: "" });
+    form.reset({ name: "", slug: "", logo: "", isActive: true });
     setIsDialogOpen(true);
   };
 
@@ -111,6 +124,7 @@ export default function BrandsPage() {
       name: brand.name,
       slug: brand.slug, // Maps to "Website" input
       logo: brand.logo || "",
+      isActive: brand.isActive,
     });
     setIsDialogOpen(true);
   };
@@ -118,6 +132,26 @@ export default function BrandsPage() {
   const handleOpenDelete = (brand: Brand) => {
     setBrandToDelete(brand);
     setDeleteConfirmOpen(true);
+  };
+
+  const handleToggleStatus = async (brand: Brand, newStatus: boolean) => {
+    try {
+      await brandApi.toggleBrandStatus(brand._id, newStatus);
+      toast({ 
+        title: "Cập nhật thành công", 
+        variant: "success",
+        description: `Đã ${newStatus ? "kích hoạt" : "ngừng hoạt động"} thương hiệu "${brand.name}".`
+      });
+      dispatch(fetchBrandsThunk());
+      fetchAdminBrands();
+    } catch (error: any) {
+      const msg = error?.response?.data?.message || "Không thể cập nhật trạng thái";
+      toast({
+        title: "Thất bại",
+        description: typeof msg === "string" ? msg : JSON.stringify(msg),
+        variant: "destructive",
+      });
+    }
   };
 
   const onSubmit = async (values: FormValues) => {
@@ -131,12 +165,13 @@ export default function BrandsPage() {
       }
 
       dispatch(fetchBrandsThunk());
+      fetchAdminBrands();
       setIsDialogOpen(false);
     } catch (error: any) {
+      const msg = error?.response?.data?.message || "Không thể lưu thương hiệu";
       toast({
         title: "Lỗi",
-        description:
-          error?.response?.data?.message || "Không thể lưu thương hiệu",
+        description: typeof msg === "string" ? msg : (Array.isArray(msg) ? msg.join(", ") : JSON.stringify(msg)),
         variant: "destructive",
       });
     }
@@ -149,17 +184,22 @@ export default function BrandsPage() {
       await brandApi.deleteBrand(brandToDelete._id);
       toast({ title: "Đã xóa thương hiệu", variant: "success" });
       dispatch(fetchBrandsThunk());
-      setDeleteConfirmOpen(false);
+      fetchAdminBrands();
     } catch (error: any) {
+      const msg = error?.response?.data?.message || "Không thể xóa thương hiệu";
+      const description = typeof msg === "string" ? msg : (Array.isArray(msg) ? msg.join(", ") : JSON.stringify(msg));
+      
       toast({
-        title: "Lỗi xóa",
-        description:
-          error?.response?.data?.message || "Không thể xóa thương hiệu",
+        title: "Không thể xóa",
+        description: description.includes("tồn kho") 
+          ? "Thương hiệu này vẫn còn sản phẩm trong kho. Vui lòng chuyển sang trạng thái 'Ngừng hoạt động' thay vì xóa."
+          : description,
         variant: "destructive",
       });
     } finally {
       setIsDeleting(false);
       setBrandToDelete(null);
+      setDeleteConfirmOpen(false);
     }
   };
 
@@ -217,6 +257,21 @@ export default function BrandsPage() {
         ),
       },
       {
+        key: "isActive",
+        header: "Trạng thái",
+        render: (b: Brand) => (
+          b.isActive ? (
+            <Badge variant="outline" className="bg-success/10 text-success border-success/20 font-normal">
+              Đang hoạt động
+            </Badge>
+          ) : (
+            <Badge variant="destructive" className="font-normal">
+              Ngừng hoạt động
+            </Badge>
+          )
+        ),
+      },
+      {
         key: "actions",
         header: "",
         render: (brand: Brand) => (
@@ -225,17 +280,29 @@ export default function BrandsPage() {
               <DropdownMenuTrigger asChild>
                 <Button
                   variant="ghost"
-                  size="icon"
-                  className="h-8 w-8 hover:bg-muted"
+                  size="icon-sm"
                 >
                   <MoreHorizontal className="h-4 w-4" />
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="dropdown-content">
+              <DropdownMenuContent align="end" className="w-48 dropdown-content">
                 <DropdownMenuItem onClick={() => handleOpenEdit(brand)}>
                   <Edit className="mr-2 h-4 w-4" />
                   Chỉnh sửa
                 </DropdownMenuItem>
+                
+                <DropdownMenuItem onClick={() => handleToggleStatus(brand, !brand.isActive)}>
+                  <div className="flex items-center gap-2">
+                    <div
+                      className={cn(
+                        "w-2 h-2 rounded-full",
+                        brand.isActive ? "bg-success" : "bg-destructive",
+                      )}
+                    />
+                    {brand.isActive ? "Ngừng hoạt động" : "Kích hoạt lại"}
+                  </div>
+                </DropdownMenuItem>
+
                 <DropdownMenuItem
                   className="text-destructive focus:text-destructive"
                   onClick={() => handleOpenDelete(brand)}
@@ -249,7 +316,7 @@ export default function BrandsPage() {
         ),
       },
     ],
-    []
+    [dispatch, toast]
   );
 
   /* ===== Stats ===== */
@@ -368,6 +435,27 @@ export default function BrandsPage() {
                       />
                     </FormControl>
                     <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name="isActive"
+                render={({ field }) => (
+                  <FormItem className="flex items-center justify-between rounded-lg border p-3 shadow-sm">
+                    <div className="space-y-0.5">
+                      <FormLabel>Trạng thái hoạt động</FormLabel>
+                      <div className="text-[12px] text-muted-foreground">
+                        Hiển thị thương hiệu này trên cửa hàng
+                      </div>
+                    </div>
+                    <FormControl>
+                      <Switch
+                        checked={field.value}
+                        onCheckedChange={field.onChange}
+                      />
+                    </FormControl>
                   </FormItem>
                 )}
               />

@@ -9,6 +9,7 @@ import {
   Phone,
   MapPin,
 } from "lucide-react";
+import Link from "next/link";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 
@@ -91,14 +92,19 @@ export default function Footer() {
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-8">
           {/* Brand */}
           <div className="col-span-2 lg:col-span-2">
-            <div className="flex items-center gap-2 mb-4">
-              <div className="w-10 h-10 gradient-hero rounded-xl flex items-center justify-center">
-                <span className="text-primary-foreground font-bold text-lg">
-                  E
-                </span>
+            <Link href="/" className="flex items-center gap-2 mb-4 group inline-flex">
+              <div className="w-10 h-10 rounded-xl overflow-hidden flex items-center justify-center group-hover:scale-110 transition-transform duration-300">
+                <img 
+                  src="/assets/img/protechstore.png" 
+                  alt="ProTech Store Logo" 
+                  className="w-full h-full object-cover rounded-xl"
+                />
               </div>
-              <span className="text-xl font-bold">ElecStore</span>
-            </div>
+              <div className="flex items-baseline gap-1">
+                <span className="text-xl font-black text-background tracking-tight">ProTech</span>
+                <span className="text-xl font-black text-primary tracking-tight">Store</span>
+              </div>
+            </Link>
             <p className="text-background/70 mb-6 text-sm leading-relaxed">
               Hệ thống bán lẻ thiết bị điện tử hàng đầu Việt Nam với hơn 100 cửa
               hàng trên toàn quốc.
@@ -112,11 +118,11 @@ export default function Footer() {
                 1900 123 456
               </a>
               <a
-                href="mailto:support@elecstore.vn"
+                href="mailto:support@protechstore.vn"
                 className="flex items-center gap-2 text-sm text-background/70 hover:text-background transition-colors"
               >
                 <Mail className="w-4 h-4" />
-                support@elecstore.vn
+                support@protechstore.vn
               </a>
               <p className="flex items-center gap-2 text-sm text-background/70">
                 <MapPin className="w-4 h-4" />
@@ -151,7 +157,7 @@ export default function Footer() {
         <div className="container mx-auto px-4 py-6">
           <div className="flex flex-col md:flex-row items-center justify-between gap-4">
             <p className="text-sm text-background/70 text-center md:text-left">
-              © 2024 ElecStore. Tất cả quyền được bảo lưu.
+              © 2026 ProTech Store. Tất cả quyền được bảo lưu.
             </p>
             <div className="flex items-center gap-4">
               {socialLinks.map((social) => (
