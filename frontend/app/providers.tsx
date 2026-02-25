@@ -6,6 +6,7 @@ import { useEffect } from "react";
 import { fetchCategoriesThunk } from "@/store/categories/categories.slice";
 import { fetchBrandsThunk } from "@/store/brands/brands.slice";
 import { CartProvider } from "@/hooks/useCart";
+import { AuthProvider } from "@/context/AuthContext";
 
 export default function Providers({ children }: { children: React.ReactNode }) {
   useEffect(() => {
@@ -15,7 +16,9 @@ export default function Providers({ children }: { children: React.ReactNode }) {
 
   return (
     <Provider store={store}>
-      <CartProvider>{children}</CartProvider>
+      <AuthProvider>
+        <CartProvider>{children}</CartProvider>
+      </AuthProvider>
     </Provider>
   );
 }

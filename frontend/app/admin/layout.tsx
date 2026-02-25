@@ -387,7 +387,6 @@ export default function AdminLayout({
           <main className="p-6">{children}</main>
         </div>
       </div>
-      <Toaster />
     </TooltipProvider>
   );
 }

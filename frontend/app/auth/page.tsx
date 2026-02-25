@@ -17,6 +17,8 @@ import {
   Moon,
   User,
 } from "lucide-react";
+import Image from "next/image";
+import { motion, AnimatePresence } from "framer-motion";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -55,10 +57,16 @@ const signupSchema = z
       .trim()
       .min(2, { message: "Họ tên phải có ít nhất 2 ký tự" }),
     email: z.string().trim().email({ message: "Email không hợp lệ" }),
-    password: z.string().min(6, { message: "Mật khẩu phải có ít nhất 6 ký tự" }),
+    password: z
+      .string()
+      .min(8, { message: "Mật khẩu phải có ít nhất 8 ký tự" })
+      .regex(/[A-Z]/, { message: "Mật khẩu phải chứa ít nhất 1 chữ cái viết hoa" })
+      .regex(/[a-z]/, { message: "Mật khẩu phải chứa ít nhất 1 chữ cái viết thường" })
+      .regex(/[0-9]/, { message: "Mật khẩu phải chứa ít nhất 1 chữ số" })
+      .regex(/[^A-Za-z0-9]/, { message: "Mật khẩu phải chứa ít nhất 1 ký tự đặc biệt" }),
     confirmPassword: z
       .string()
-      .min(6, { message: "Xác nhận mật khẩu phải có ít nhất 6 ký tự" }),
+      .min(8, { message: "Mật khẩu xác nhận phải có ít nhất 8 ký tự" }),
   })
   .refine((data) => data.password === data.confirmPassword, {
     message: "Mật khẩu xác nhận không khớp",
@@ -83,6 +91,36 @@ export default function AuthPage() {
     </Suspense>
   );
 }
+
+// Helper for error display
+const ErrorMessage = ({ message }: { message: string | null }) => {
+  if (!message) return null;
+  return (
+     <div className="flex items-center gap-2 p-3 text-sm text-destructive bg-destructive/10 rounded-md border border-destructive/20 mb-4 animate-in fade-in slide-in-from-top-1">
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          width="16"
+          height="16"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          className="flex-shrink-0"
+        >
+          <circle cx="12" cy="12" r="10" />
+          <line x1="12" x2="12" y1="8" y2="12" />
+          <line x1="12" x2="12.01" y1="16" y2="16" />
+        </svg>
+        <span className="font-medium">{message}</span>
+     </div>
+  );
+};
+
+/* =======================
+   Render
+======================= */
 
 function AuthContent() {
   const [isLogin, setIsLogin] = useState(true);
@@ -121,6 +159,8 @@ function AuthContent() {
   const loginForm = useForm<LoginFormData>({
     resolver: zodResolver(loginSchema),
     defaultValues: { email: "", password: "" },
+    mode: "onSubmit",
+    reValidateMode: "onChange",
   });
 
   const signupForm = useForm<SignupFormData>({
@@ -131,6 +171,8 @@ function AuthContent() {
       password: "",
       confirmPassword: "",
     },
+    mode: "onSubmit",
+    reValidateMode: "onChange",
   });
 
   // Reset error when switching forms
@@ -144,10 +186,11 @@ function AuthContent() {
 
   useEffect(() => {
     if (!loading && isAuthenticated && user) {
-      if (redirect) {
-        router.push(redirect);
-      } else if (user.role === "admin") {
+      if (user.role === "admin") {
+        // Nếu là admin, ưu tiên vào trang admin luôn
         router.push("/admin");
+      } else if (redirect) {
+        router.push(redirect);
       } else {
         router.push("/");
       }
@@ -171,11 +214,16 @@ function AuthContent() {
         if (
           errorMsg.includes("invalid login credentials") ||
           errorMsg.includes("user not found") ||
-          errorMsg.includes("bad credentials")
+          errorMsg.includes("bad credentials") ||
+          errorMsg.includes("invalid credentials")
         ) {
           msg = "Email hoặc mật khẩu không đúng.";
         } else if (errorMsg.includes("email not confirmed")) {
-          msg = "Email chưa được xác nhận. Vui lòng kiểm tra hộp thư của bạn.";
+          msg = "Tài khoản của bạn đã bị khóa.";
+        } else if (errorMsg.includes("network error") || errorMsg.includes("fetch")) {
+          msg = "Lỗi kết nối mạng. Vui lòng kiểm tra lại đường truyền.";
+        } else if (errorMsg.includes("rate limit")) {
+          msg = "Bạn đã thử quá nhiều lần. Vui lòng quay lại sau.";
         } else if (error.message) {
            msg = error.message;
         }
@@ -201,11 +249,15 @@ function AuthContent() {
       const { error } = await signUp(data.email, data.password, data.fullName);
 
       if (error) {
-        let msg = "Đăng ký thất bại";
+        let msg = "Đăng ký thất bại. Email đã tồn tại.";
         const errorMsg = error.message.toLowerCase();
         
-        if (errorMsg.includes("user already registered")) {
+        if (errorMsg.includes("user already registered") || errorMsg.includes("already exists")) {
           msg = "Email này đã được đăng ký. Vui lòng sử dụng email khác.";
+        } else if (errorMsg.includes("network error") || errorMsg.includes("fetch")) {
+          msg = "Lỗi kết nối mạng. Vui lòng kiểm tra lại đường truyền.";
+        } else if (errorMsg.includes("rate limit")) {
+          msg = "Bạn đã thử quá nhiều lần. Vui lòng quay lại sau.";
         } else if (error.message) {
            msg = error.message;
         }
@@ -217,10 +269,11 @@ function AuthContent() {
       toast({
         variant: "success",
         title: "✅ Thành công",
-        description: "Đăng ký thành công! Bạn có thể đăng nhập ngay.",
+        description: "Đăng ký tài khoản thành công! Đang tự động đăng nhập...",
       });
 
-      setIsLogin(true);
+      // Tự động đăng nhập sau khi đăng ký
+      await signIn(data.email, data.password);
       signupForm.reset();
     } catch (err) {
       const errorMsg =
@@ -231,12 +284,6 @@ function AuthContent() {
     }
   };
   
-  // ... (loading view remains same)
-
-  /* =======================
-     Loading View
-  ======================= */
-
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
@@ -244,36 +291,6 @@ function AuthContent() {
       </div>
     );
   }
-
-  // Helper for error display
-  const ErrorMessage = ({ message }: { message: string | null }) => {
-    if (!message) return null;
-    return (
-       <div className="flex items-center gap-2 p-3 text-sm text-destructive bg-destructive/10 rounded-md border border-destructive/20 mb-4 animate-in fade-in slide-in-from-top-1">
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            width="16"
-            height="16"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            className="flex-shrink-0"
-          >
-            <circle cx="12" cy="12" r="10" />
-            <line x1="12" x2="12" y1="8" y2="12" />
-            <line x1="12" x2="12.01" y1="16" y2="16" />
-          </svg>
-          <span className="font-medium">{message}</span>
-       </div>
-    );
-  };
-
-  /* =======================
-     Render
-  ======================= */
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background via-secondary/20 to-background p-4 relative overflow-hidden">
@@ -309,261 +326,338 @@ function AuthContent() {
 
         <Card className="shadow-2xl border-0 bg-card/80 backdrop-blur-sm">
           <CardHeader className="text-center pb-2">
-            <div className="mx-auto mb-4 h-14 w-14 rounded-2xl bg-gradient-to-br from-primary to-primary/60 flex items-center justify-center shadow-lg transform rotate-3 hover:rotate-6 transition-transform">
-              <span className="text-3xl font-bold text-primary-foreground">
-                E
-              </span>
+            <div className="mx-auto mb-4 relative h-16 w-16 transform hover:scale-105 transition-transform duration-300 rounded-2xl overflow-hidden bg-white/50 dark:bg-white/10 p-1 shadow-sm border border-primary/10">
+              <Image
+                src="/assets/img/protechstore.png"
+                alt="ProTech Store Logo"
+                fill
+                className="object-cover"
+                priority
+              />
             </div>
-            <CardTitle className="text-2xl font-bold tracking-tight">
-              {isLogin ? "Đăng nhập" : "Tạo tài khoản"}
+            <CardTitle className="text-3xl font-extrabold tracking-tight bg-gradient-to-r from-primary to-primary/60 bg-clip-text text-transparent">
+              ProTech Store
             </CardTitle>
-            <CardDescription className="text-base mt-2">
-              {isLogin
-                ? "Chào mừng bạn quay trở lại!"
-                : "Tham gia cùng chúng tôi để trải nghiệm mua sắm tuyệt vời"}
+            <CardDescription className="text-base mt-2 font-medium">
+              {isLogin ? "Đăng nhập tài khoản" : "Tạo tài khoản mới"}
             </CardDescription>
           </CardHeader>
 
-          <CardContent className="pt-6">
-            {isLogin ? (
-              /* LOGIN FORM */
-              <Form {...loginForm}>
-                <form
-                  onSubmit={loginForm.handleSubmit(handleLogin)}
-                  className="space-y-5"
+          <CardContent className="pt-6 overflow-hidden">
+            <AnimatePresence mode="wait" initial={false}>
+              {isLogin ? (
+                /* LOGIN FORM */
+                <motion.div
+                  key="login-form-container"
+                  initial={{ opacity: 0, x: -20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: 20 }}
+                  transition={{ duration: 0.3, ease: "easeInOut" }}
                 >
-                  <ErrorMessage message={error} />
-                  
-                  <FormField
-                    control={loginForm.control}
-                    name="email"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Email</FormLabel>
-                        <FormControl>
-                          <div className="relative group">
-                            <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground group-hover:text-primary transition-colors pointer-events-none" />
-                            <Input
-                              {...field}
-                              placeholder="name@example.com"
-                              className="pl-10 h-11"
-                              autoComplete="email"
-                            />
-                          </div>
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
+                  <Form {...loginForm}>
+                    <form
+                      onSubmit={loginForm.handleSubmit(handleLogin)}
+                      className="space-y-5"
+                    >
+                      <ErrorMessage message={error} />
+                      
+                      <FormField
+                        control={loginForm.control}
+                        name="email"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Email</FormLabel>
+                            <FormControl>
+                              <div className="relative group">
+                                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground group-hover:text-primary transition-colors pointer-events-none" />
+                                <Input
+                                  {...field}
+                                  placeholder="name@example.com"
+                                  className="pl-10 h-11"
+                                  autoComplete="email"
+                                />
+                              </div>
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
 
-                  <FormField
-                    control={loginForm.control}
-                    name="password"
-                    render={({ field }) => (
-                      <FormItem>
-                        <div className="flex items-center justify-between">
-                          <FormLabel>Mật khẩu</FormLabel>
-                          {/* <Link
-                            href="/auth/forgot-password"
-                            className="text-xs text-primary hover:underline"
-                          >
-                            Quên mật khẩu?
-                          </Link> */}
-                        </div>
-                        <FormControl>
-                          <div className="relative group">
-                            <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground group-hover:text-primary transition-colors pointer-events-none" />
-                            <Input
-                              {...field}
-                              type={showPassword ? "text" : "password"}
-                              placeholder="••••••••"
-                              className="pl-10 pr-10 h-11"
-                              autoComplete="current-password"
-                            />
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="icon"
-                              className="absolute right-1 top-1/2 -translate-y-1/2 h-8 w-8 text-muted-foreground hover:text-foreground"
-                              onClick={() => setShowPassword(!showPassword)}
-                              tabIndex={-1}
-                            >
-                              {showPassword ? (
-                                <EyeOff className="h-4 w-4" />
-                              ) : (
-                                <Eye className="h-4 w-4" />
-                              )}
-                            </Button>
-                          </div>
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
+                      <FormField
+                        control={loginForm.control}
+                        name="password"
+                        render={({ field }) => (
+                          <FormItem>
+                            <div className="flex items-center justify-between">
+                              <FormLabel>Mật khẩu</FormLabel>
+                              <Link
+                                href="/auth/forgot-password"
+                                className="text-xs text-primary hover:underline"
+                              >
+                                Quên mật khẩu?
+                              </Link>
+                            </div>
+                            <FormControl>
+                              <div className="relative group">
+                                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground group-hover:text-primary transition-colors pointer-events-none" />
+                                <Input
+                                  {...field}
+                                  type={showPassword ? "text" : "password"}
+                                  placeholder="••••••••"
+                                  className="pl-10 pr-10 h-11"
+                                  autoComplete="current-password"
+                                />
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon"
+                                  className="absolute right-1 top-1/2 -translate-y-1/2 h-8 w-8 text-muted-foreground hover:text-foreground"
+                                  onClick={() => setShowPassword(!showPassword)}
+                                  tabIndex={-1}
+                                >
+                                  {showPassword ? (
+                                    <EyeOff className="h-4 w-4" />
+                                  ) : (
+                                    <Eye className="h-4 w-4" />
+                                  )}
+                                </Button>
+                              </div>
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
 
-                  <Button
-                    type="submit"
-                    className="w-full h-11 text-base font-medium shadow-md hover:shadow-lg transition-all"
-                    disabled={isLoading}
-                  >
-                    {isLoading ? (
-                      <>
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        Đang xử lý...
-                      </>
-                    ) : (
-                      "Đăng nhập"
-                    )}
-                  </Button>
-                </form>
-              </Form>
-            ) : (
-              /* SIGNUP FORM */
-              <Form {...signupForm}>
-                <form
-                  onSubmit={signupForm.handleSubmit(handleSignup)}
-                  className="space-y-5"
+                      <Button
+                        type="submit"
+                        className="w-full h-11 text-base font-medium shadow-md hover:shadow-lg transition-all"
+                        disabled={isLoading}
+                      >
+                        {isLoading ? (
+                          <>
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            Đang xử lý...
+                          </>
+                        ) : (
+                          "Đăng nhập"
+                        )}
+                      </Button>
+                    </form>
+                  </Form>
+                </motion.div>
+              ) : (
+                /* SIGNUP FORM */
+                <motion.div
+                  key="signup-form-container"
+                  initial={{ opacity: 0, x: 20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: -20 }}
+                  transition={{ duration: 0.3, ease: "easeInOut" }}
                 >
-                  <ErrorMessage message={error} />
+                  <Form {...signupForm}>
+                    <form
+                      onSubmit={signupForm.handleSubmit(handleSignup)}
+                      className="space-y-5"
+                    >
+                      <ErrorMessage message={error} />
 
-                  <FormField
-                    control={signupForm.control}
-                    name="fullName"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Họ và tên</FormLabel>
-                        <FormControl>
-                          <div className="relative group">
-                            <User className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground group-hover:text-primary transition-colors pointer-events-none" />
-                            <Input
-                              {...field}
-                              placeholder="Nguyễn Văn A"
-                              className="pl-10 h-11"
-                              autoComplete="name"
-                            />
-                          </div>
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
+                      <FormField
+                        control={signupForm.control}
+                        name="fullName"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Họ và tên</FormLabel>
+                            <FormControl>
+                              <div className="relative group">
+                                <User className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground group-hover:text-primary transition-colors pointer-events-none" />
+                                <Input
+                                  {...field}
+                                  placeholder="Nguyễn Văn A"
+                                  className="pl-10 h-11"
+                                  autoComplete="name"
+                                />
+                              </div>
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
 
-                  <FormField
-                    control={signupForm.control}
-                    name="email"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Email</FormLabel>
-                        <FormControl>
-                          <div className="relative group">
-                            <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground group-hover:text-primary transition-colors pointer-events-none" />
-                            <Input
-                              {...field}
-                              type="email"
-                              placeholder="name@example.com"
-                              className="pl-10 h-11"
-                              autoComplete="email"
-                            />
-                          </div>
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
+                      <FormField
+                        control={signupForm.control}
+                        name="email"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Email</FormLabel>
+                            <FormControl>
+                              <div className="relative group">
+                                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground group-hover:text-primary transition-colors pointer-events-none" />
+                                <Input
+                                  {...field}
+                                  type="email"
+                                  placeholder="name@example.com"
+                                  className="pl-10 h-11"
+                                  autoComplete="email"
+                                />
+                              </div>
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
 
-                  <FormField
-                    control={signupForm.control}
-                    name="password"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Mật khẩu</FormLabel>
-                        <FormControl>
-                          <div className="relative group">
-                            <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground group-hover:text-primary transition-colors pointer-events-none" />
-                            <Input
-                              {...field}
-                              type={showPassword ? "text" : "password"}
-                              placeholder="••••••••"
-                              className="pl-10 pr-10 h-11"
-                              autoComplete="new-password"
-                            />
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="icon"
-                              className="absolute right-1 top-1/2 -translate-y-1/2 h-8 w-8 text-muted-foreground hover:text-foreground"
-                              onClick={() => setShowPassword(!showPassword)}
-                              tabIndex={-1}
-                            >
-                              {showPassword ? (
-                                <EyeOff className="h-4 w-4" />
-                              ) : (
-                                <Eye className="h-4 w-4" />
-                              )}
-                            </Button>
-                          </div>
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
+                      <FormField
+                        control={signupForm.control}
+                        name="password"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Mật khẩu</FormLabel>
+                            <FormControl>
+                              <div className="space-y-3">
+                                <div className="relative group">
+                                  <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground group-hover:text-primary transition-colors pointer-events-none" />
+                                  <Input
+                                    {...field}
+                                    type={showPassword ? "text" : "password"}
+                                    placeholder="••••••••"
+                                    className="pl-10 pr-10 h-11"
+                                    autoComplete="new-password"
+                                    onChange={(e) => {
+                                      field.onChange(e);
+                                      if (signupForm.getValues("confirmPassword")) {
+                                        signupForm.trigger("confirmPassword");
+                                      }
+                                    }}
+                                  />
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="icon"
+                                    className="absolute right-1 top-1/2 -translate-y-1/2 h-8 w-8 text-muted-foreground hover:text-foreground"
+                                    onClick={() => setShowPassword(!showPassword)}
+                                    tabIndex={-1}
+                                  >
+                                    {showPassword ? (
+                                      <EyeOff className="h-4 w-4" />
+                                    ) : (
+                                      <Eye className="h-4 w-4" />
+                                    )}
+                                  </Button>
+                                </div>
+                                
+                                {/* Password Strength Meter */}
+                                {field.value && (
+                                  <div className="space-y-2 animate-in fade-in slide-in-from-top-1 duration-300">
+                                    <div className="flex gap-1 h-1.5 w-full bg-secondary rounded-full overflow-hidden">
+                                      {[1, 2, 3, 4, 5].map((level) => {
+                                        const value = field.value || "";
+                                        let score = 0;
+                                        if (value.length >= 8) score++;
+                                        if (/[A-Z]/.test(value)) score++;
+                                        if (/[a-z]/.test(value)) score++;
+                                        if (/[0-9]/.test(value)) score++;
+                                        if (/[^A-Za-z0-9]/.test(value)) score++;
+                                        
+                                        const isActive = level <= score;
+                                        const getColor = () => {
+                                          if (score <= 2) return "bg-destructive";
+                                          if (score <= 4) return "bg-warning";
+                                          return "bg-success";
+                                        };
+                                        
+                                        return (
+                                          <div 
+                                            key={level}
+                                            className={`h-full flex-1 transition-all duration-500 ${isActive ? getColor() : "bg-muted"}`}
+                                          />
+                                        );
+                                      })}
+                                    </div>
+                                    <div className="flex justify-between items-center text-[10px] font-medium uppercase tracking-wider">
+                                      <span className={
+                                        (field.value.length >= 8 ? "text-success" : "text-muted-foreground") 
+                                      }>8+ ký tự</span>
+                                      <span className={
+                                        (/[A-Z]/.test(field.value) && /[a-z]/.test(field.value) ? "text-success" : "text-muted-foreground")
+                                      }>Aa</span>
+                                      <span className={
+                                        (/[0-9]/.test(field.value) ? "text-success" : "text-muted-foreground")
+                                      }>123</span>
+                                      <span className={
+                                        (/[^A-Za-z0-9]/.test(field.value) ? "text-success" : "text-muted-foreground")
+                                      }>@#$</span>
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
 
-                  <FormField
-                    control={signupForm.control}
-                    name="confirmPassword"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Xác nhận mật khẩu</FormLabel>
-                        <FormControl>
-                          <div className="relative group">
-                            <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground group-hover:text-primary transition-colors pointer-events-none" />
-                            <Input
-                              {...field}
-                              type={showConfirmPassword ? "text" : "password"}
-                              placeholder="••••••••"
-                              className="pl-10 pr-10 h-11"
-                              autoComplete="new-password"
-                            />
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="icon"
-                              className="absolute right-1 top-1/2 -translate-y-1/2 h-8 w-8 text-muted-foreground hover:text-foreground"
-                              onClick={() =>
-                                setShowConfirmPassword(!showConfirmPassword)
-                              }
-                              tabIndex={-1}
-                            >
-                              {showConfirmPassword ? (
-                                <EyeOff className="h-4 w-4" />
-                              ) : (
-                                <Eye className="h-4 w-4" />
-                              )}
-                            </Button>
-                          </div>
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
+                      <FormField
+                        control={signupForm.control}
+                        name="confirmPassword"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Xác nhận mật khẩu</FormLabel>
+                            <FormControl>
+                              <div className="relative group">
+                                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground group-hover:text-primary transition-colors pointer-events-none" />
+                                <Input
+                                  {...field}
+                                  type={showConfirmPassword ? "text" : "password"}
+                                  placeholder="••••••••"
+                                  className="pl-10 pr-10 h-11"
+                                  autoComplete="new-password"
+                                  onChange={(e) => {
+                                    field.onChange(e);
+                                    signupForm.trigger("confirmPassword");
+                                  }}
+                                />
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon"
+                                  className="absolute right-1 top-1/2 -translate-y-1/2 h-8 w-8 text-muted-foreground hover:text-foreground"
+                                  onClick={() =>
+                                    setShowConfirmPassword(!showConfirmPassword)
+                                  }
+                                  tabIndex={-1}
+                                >
+                                  {showConfirmPassword ? (
+                                    <EyeOff className="h-4 w-4" />
+                                  ) : (
+                                    <Eye className="h-4 w-4" />
+                                  )}
+                                </Button>
+                              </div>
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
 
-                  <Button
-                    type="submit"
-                    className="w-full h-11 text-base font-medium shadow-md hover:shadow-lg transition-all"
-                    disabled={isLoading}
-                  >
-                    {isLoading ? (
-                      <>
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        Đang xử lý...
-                      </>
-                    ) : (
-                      "Đăng ký tài khoản"
-                    )}
-                  </Button>
-                </form>
-              </Form>
-            )}
+                      <Button
+                        type="submit"
+                        className="w-full h-11 text-base font-medium shadow-md hover:shadow-lg transition-all"
+                        disabled={isLoading}
+                      >
+                        {isLoading ? (
+                          <>
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            Đang xử lý...
+                          </>
+                        ) : (
+                          "Đăng ký tài khoản"
+                        )}
+                      </Button>
+                    </form>
+                  </Form>
+                </motion.div>
+              )}
+            </AnimatePresence>
 
             <div className="mt-8 text-center flex flex-col items-center gap-2">
               <p className="text-sm text-muted-foreground">
@@ -571,7 +665,7 @@ function AuthContent() {
               </p>
               <Button
                 variant="link"
-                className="text-primary font-semibold hover:text-primary/80 p-0 h-auto"
+                className="text-primary font-semibold hover:text-primary/80 p-0 h-auto cursor-pointer"
                 onClick={() => {
                   setIsLogin(!isLogin);
                   loginForm.reset();
@@ -585,7 +679,7 @@ function AuthContent() {
         </Card>
 
         <p className="text-center text-xs text-muted-foreground mt-8">
-          &copy; {new Date().getFullYear()} Ecommerce Platform. All rights reserved.
+          &copy; {new Date().getFullYear()} ProTech Store. Bảo lưu mọi quyền.
         </p>
       </div>
     </div>

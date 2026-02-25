@@ -2,11 +2,13 @@ import {
   Injectable,
   UnauthorizedException,
   ForbiddenException,
+  BadRequestException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import { UsersService } from '../users/users.service';
 import type { Request, Response } from 'express';
+import { RegisterDto } from './dto/register.dto';
 
 @Injectable()
 export class AuthService {
@@ -33,8 +35,7 @@ export class AuthService {
     const payload = {
       sub: user._id.toString(),
       role: user.role,
-      // (optional) nếu muốn JwtStrategy có email thì add:
-      // email: user.email,
+      email: user.email,
     };
 
     const accessToken = this.jwtService.sign(payload, {
@@ -72,6 +73,33 @@ export class AuthService {
         name: user.fullName,
         email: user.email,
         role: user.role,
+      },
+    };
+  }
+
+  async register(registerDto: RegisterDto) {
+    const existingUser = await this.usersService.findByEmail(registerDto.email);
+    if (existingUser) {
+      throw new BadRequestException('Email này đã được sử dụng');
+    }
+
+    const salt = await bcrypt.genSalt();
+    const hashedPassword = await bcrypt.hash(registerDto.password, salt);
+
+    const newUser = await this.usersService.create({
+      fullName: registerDto.fullName,
+      email: registerDto.email,
+      password: hashedPassword,
+      role: 'user',
+      isActive: true,
+    });
+
+    return {
+      message: 'Đăng ký thành công',
+      user: {
+        id: newUser._id,
+        email: newUser.email,
+        fullName: newUser.fullName,
       },
     };
   }
