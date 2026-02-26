@@ -9,14 +9,12 @@ import * as crypto from 'crypto';
 export class UsersService {
   constructor(@InjectModel(User.name) private userModel: Model<UserDocument>) {}
 
-  // ✅ HMAC-SHA256 với secret riêng (pepper)
   private hashRefreshToken(token: string) {
     const secret =
       process.env.REFRESH_TOKEN_HASH_SECRET || 'dev_refresh_hash_secret';
     return crypto.createHmac('sha256', secret).update(token).digest('hex');
   }
 
-  // --- PUBLIC METHODS ---
   async create(userData: Partial<User>): Promise<UserDocument> {
     const newUser = new this.userModel(userData);
     return newUser.save();
@@ -32,11 +30,10 @@ export class UsersService {
     return this.userModel.findOne({ email }).exec(); // schema đã select:false
   }
 
-  // --- INTERNAL METHODS (Auth) ---
   async findByEmailInternal(email: string): Promise<UserDocument | null> {
     return this.userModel
       .findOne({ email })
-      .select('+password +refreshToken')
+      .select('+password +otpHash +otpExpires +refreshToken +isActive')
       .exec();
   }
 
@@ -45,7 +42,6 @@ export class UsersService {
     return this.userModel.findById(id).select('+refreshToken').exec();
   }
 
-  // ✅ set refreshTokenHash
   async setRefreshToken(userId: string, refreshToken: string) {
     const refreshTokenHash = this.hashRefreshToken(refreshToken);
     await this.userModel.updateOne(
@@ -54,7 +50,6 @@ export class UsersService {
     );
   }
 
-  // ✅ verify refresh token
   async isRefreshTokenValid(userId: string, refreshToken: string) {
     const user = await this.findByIdInternal(userId);
     if (!user?.refreshToken) return false;
@@ -63,7 +58,6 @@ export class UsersService {
     return user.refreshToken === refreshTokenHash;
   }
 
-  // ✅ clear refresh token (logout)
   async clearRefreshToken(userId: string) {
     await this.userModel.updateOne(
       { _id: userId },
@@ -80,7 +74,6 @@ export class UsersService {
       .exec();
   }
 
-  // --- ADMIN METHODS giữ nguyên (schema đã tự ẩn nhạy cảm) ---
   async findAllForAdmin(): Promise<UserDocument[]> {
     return this.userModel.find().exec();
   }
@@ -106,5 +99,27 @@ export class UsersService {
     );
     if (!user) throw new NotFoundException('User not found');
     return { message: 'Cập nhật trạng thái user thành công' };
+  }
+
+  async updateOtp(userId: string, otpHash: string, otpExpires: Date) {
+    return this.userModel.updateOne({ _id: userId }, { otpHash, otpExpires });
+  }
+
+  // SỬA LỖI 1: Thêm hàm này vào (bạn đang thiếu hàm này)
+  async activateUser(userId: string) {
+    return this.userModel.updateOne(
+      { _id: userId },
+      {
+        isActive: true,
+        $unset: { otpHash: 1, otpExpires: 1 }, // Xoá OTP sau khi kích hoạt xong
+      },
+    );
+  }
+
+  async clearOtp(userId: string) {
+    return this.userModel.updateOne(
+      { _id: userId },
+      { $unset: { otpHash: 1, otpExpires: 1 } },
+    );
   }
 }

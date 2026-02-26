@@ -17,6 +17,7 @@ import {
   KeyRound,
   Eye,
   EyeOff,
+  AlertTriangle,
 } from "lucide-react";
 import Image from "next/image";
 import { motion, AnimatePresence } from "framer-motion";
@@ -40,6 +41,8 @@ import {
 } from "@/components/ui/form";
 
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/hooks/useAuth";
+import { cn } from "@/lib/utils";
 
 /* =======================
    Schemas
@@ -75,10 +78,21 @@ type EmailFormData = z.infer<typeof emailSchema>;
 type OtpFormData = z.infer<typeof otpSchema>;
 type ResetPasswordFormData = z.infer<typeof resetPasswordSchema>;
 
+const ErrorMessage = ({ message }: { message: string | null }) => {
+  if (!message) return null;
+  return (
+     <div className="flex items-center gap-2 p-3 text-sm text-destructive bg-destructive/10 rounded-md border border-destructive/20 mb-4 animate-in fade-in slide-in-from-top-1">
+        <AlertTriangle className="h-4 w-4" />
+        <span className="font-medium">{message}</span>
+     </div>
+  );
+};
+
 export default function ForgotPasswordPage() {
   const router = useRouter();
   const [step, setStep] = useState<1 | 2 | 3>(1); // 1: Email, 2: OTP, 3: Reset
   const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [userEmail, setUserEmail] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
@@ -106,6 +120,10 @@ export default function ForgotPasswordPage() {
     setIsDarkMode((prev) => !prev);
   };
 
+  useEffect(() => {
+    setError(null);
+  }, [step]);
+
   /* =======================
      Forms
   ======================= */
@@ -125,24 +143,57 @@ export default function ForgotPasswordPage() {
     defaultValues: { password: "", confirmPassword: "" },
   });
 
+  // Clear error when user types
+  useEffect(() => {
+    const subscription = emailForm.watch(() => {
+      if (error) setError(null);
+    });
+    return () => subscription.unsubscribe();
+  }, [emailForm, error]);
+
+  useEffect(() => {
+    const subscription = otpForm.watch(() => {
+      if (error) setError(null);
+    });
+    return () => subscription.unsubscribe();
+  }, [otpForm, error]);
+
+  useEffect(() => {
+    const subscription = resetForm.watch(() => {
+      if (error) setError(null);
+    });
+    return () => subscription.unsubscribe();
+  }, [resetForm, error]);
+
+  const { forgotPassword, resetPassword, verifyResetOtp } = useAuth();
+  const [otpCode, setOtpCode] = useState("");
+
   /* =======================
      Handlers
   ======================= */
 
   const onEmailSubmit = async (data: EmailFormData) => {
     setIsLoading(true);
+    setError(null);
     try {
-      // Giả lập API gửi mail
-      await new Promise((resolve) => setTimeout(resolve, 1500));
+      const { error } = await forgotPassword(data.email);
+      if (error) {
+        if ((error as any).status === 404) {
+          setError("Địa chỉ email này chưa được đăng ký trong hệ thống.");
+        } else {
+          setError(error.message || "Yêu cầu gửi mã thất bại. Vui lòng thử lại.");
+        }
+        return;
+      }
       setUserEmail(data.email);
       setStep(2);
       toast({
         variant: "success",
-        title: "✅ Đã gửi mã OTP",
-        description: `Mã xác thực đã được gửi đến ${data.email}`,
+        title: "🔑 Đã gửi mã OTP",
+        description: `Mã xác thực đã được gửi thành công đến ${data.email}.`,
       });
     } catch (err) {
-      toast({ variant: "destructive", title: "❌ Lỗi", description: "Không thể gửi mã. Thử lại sau." });
+      setError("Không thể kết nối đến máy chủ. Vui lòng kiểm tra internet.");
     } finally {
       setIsLoading(false);
     }
@@ -150,17 +201,26 @@ export default function ForgotPasswordPage() {
 
   const onOtpSubmit = async (data: OtpFormData) => {
     setIsLoading(true);
+    setError(null);
     try {
-      // Giả lập API kiểm tra OTP (mặc định cho là 123456)
-      await new Promise((resolve) => setTimeout(resolve, 1000));
+      const res = await verifyResetOtp(userEmail, data.otp);
+      if (res.error) {
+        if ((res as any).status === 400) {
+          setError("Mã OTP không chính xác hoặc đã hết hạn.");
+        } else {
+          setError(res.error.message || "Xác thực mã OTP thất bại.");
+        }
+        return;
+      }
+      setOtpCode(data.otp);
       setStep(3);
       toast({
         variant: "success",
-        title: "✅ Xác thực thành công",
-        description: "Vui lòng nhập mật khẩu mới của bạn.",
+        title: "👉 Tiếp tục",
+        description: "Mã OTP hợp lệ. Bây giờ bạn có thể đặt lại mật khẩu mới.",
       });
     } catch (err) {
-      toast({ variant: "destructive", title: "❌ Lỗi", description: "Mã OTP không hợp lệ." });
+      setError("Đã xảy ra lỗi không xác định. Vui lòng thử lại.");
     } finally {
       setIsLoading(false);
     }
@@ -169,19 +229,32 @@ export default function ForgotPasswordPage() {
   const onResetSubmit = async (data: ResetPasswordFormData) => {
     setIsLoading(true);
     try {
-      // Giả lập API đổi mật khẩu
-      await new Promise((resolve) => setTimeout(resolve, 2000));
+      const res = await resetPassword({ 
+        email: userEmail, 
+        otp: otpCode, 
+        newPassword: data.password 
+      });
+
+      if (res.error) {
+        if ((res as any).status === 400) {
+          setError("Yêu cầu không hợp lệ hoặc mã OTP đã hết hiệu lực.");
+        } else {
+          setError(res.error.message || "Đặt lại mật khẩu thất bại.");
+        }
+        return;
+      }
+
       toast({
         variant: "success",
-        title: "✅ Đổi mật khẩu thành công",
-        description: "Bạn có thể đăng nhập bằng mật khẩu mới ngay bây giờ.",
+        title: "🎊 Thành công",
+        description: "Mật khẩu đã được thay đổi. Chào mừng bạn đã quay lại!",
       });
-      // Redirect về Login sau một khoảng trễ ngắn để hiển thị toast
+      
       setTimeout(() => {
         router.push("/auth");
-      }, 1500);
+      }, 2000);
     } catch (err) {
-      toast({ variant: "destructive", title: "❌ Lỗi", description: "Có lỗi xảy ra." });
+      setError("Gặp lỗi khi lưu mật khẩu mới. Vui lòng thử lại sau.");
     } finally {
       setIsLoading(false);
     }
@@ -247,6 +320,7 @@ export default function ForgotPasswordPage() {
           </CardHeader>
 
           <CardContent className="pt-6 overflow-hidden">
+            <ErrorMessage message={error} />
             <AnimatePresence mode="wait" initial={false}>
               {/* STEP 1: Email Form */}
               {step === 1 && (

@@ -39,19 +39,25 @@ apiClient.interceptors.response.use(
   async (error: AxiosError) => {
     const originalRequest = error.config as InternalAxiosRequestConfig & { _retry?: boolean };
 
-    // Do not retry for specific endpoints to avoid infinite loops
-    // Also skip if no config/url
-    if (!originalRequest || !originalRequest.url || originalRequest.url.includes('/users/me') || originalRequest.url.includes('/auth/login')) {
+    // Avoid infinite loops and skip refresh for non-auth requests if needed
+    if (!originalRequest || !originalRequest.url) {
       return Promise.reject(error);
     }
 
-    if (error.response?.status === 401 && !originalRequest._retry) {
+    const isAuthRequest = originalRequest.url.includes('/auth/login') || 
+                         originalRequest.url.includes('/auth/register') ||
+                         originalRequest.url.includes('/auth/refresh') ||
+                         originalRequest.url.includes('/auth/verify-account') ||
+                         originalRequest.url.includes('/auth/forgot-password') ||
+                         originalRequest.url.includes('/auth/reset-password');
+
+    // 1. If 401 Unauthorized and not a retry
+    if (error.response?.status === 401 && !originalRequest._retry && !isAuthRequest) {
       if (isRefreshing) {
         return new Promise((resolve, reject) => {
           failedQueue.push({ resolve, reject });
         })
-          .then((token) => {
-            originalRequest.headers.Authorization = `Bearer ${token}`;
+          .then(() => {
             return apiClient(originalRequest);
           })
           .catch((err: AxiosError) => {
@@ -63,21 +69,14 @@ apiClient.interceptors.response.use(
       isRefreshing = true;
 
       try {
-        const res = await apiClient.post('/auth/refresh');
-        const { accessToken } = res.data;
-        
+        await apiClient.post('/auth/refresh');
         isRefreshing = false;
-        processQueue(null, accessToken);
-        
-        // Update the header for the original request
-        originalRequest.headers.Authorization = `Bearer ${accessToken}`;
+        processQueue(null, 'success');
         return apiClient(originalRequest);
       } catch (err) {
         processQueue(err as AxiosError, null);
-        // Redirect to login only if we are in the browser and not already on auth page
-        if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/auth')) {
-          window.location.href = '/auth';
-        }
+        // If refresh fails, let the caller handle the error.
+        // Redirection to /auth should be managed by protected routes/layouts.
         return Promise.reject(err);
       }
     }
@@ -93,6 +92,21 @@ export const authApi = {
 
   register: (fullName: string, email: string, password: string) =>
     apiClient.post('/auth/register', { fullName, email, password }),
+
+  verifyAccount: (email: string, otp: string) =>
+    apiClient.post('/auth/verify-account', { email, otp }),
+
+  resendActivation: (email: string) =>
+    apiClient.post('/auth/resend-activation', { email }),
+
+  forgotPassword: (email: string) =>
+    apiClient.post('/auth/forgot-password', { email }),
+
+  verifyResetOtp: (email: string, otp: string) =>
+    apiClient.post('/auth/verify-reset-otp', { email, otp }),
+
+  resetPassword: (data: Record<string, any>) =>
+    apiClient.post('/auth/reset-password', data),
 
   refresh: () => apiClient.post('/auth/refresh'),
   logout: () => apiClient.post('/auth/logout'),

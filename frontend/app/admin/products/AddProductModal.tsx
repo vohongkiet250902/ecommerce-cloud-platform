@@ -701,7 +701,7 @@ export default function AddProductModal({ open, onOpenChange, initialData, onSuc
               {/* Tab 5: Settings */}
               <TabsContent value="settings" className="space-y-5 mt-0">
                 <div className="space-y-4">
-                  <div className="flex items-center justify-between rounded-lg border border-border p-4">
+                  <div className="flex items-center justify-between rounded-lg border border-border/50 p-4 transition-colors hover:bg-muted/5">
                     <div>
                       <p className="font-medium text-foreground">
                         Trạng thái hiển thị

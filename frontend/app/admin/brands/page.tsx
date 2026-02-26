@@ -8,6 +8,12 @@ import {
   MoreHorizontal,
   Loader2,
   AlertTriangle,
+  ImagePlus,
+  CloudUpload,
+  X,
+  Filter,
+  Search,
+  ArrowUpDown,
 } from "lucide-react";
 import Image from "next/image";
 import { useDispatch, useSelector } from "react-redux";
@@ -44,9 +50,9 @@ import {
 } from "@/components/ui/form";
 import { DataTable } from "@/components/shared/DataTable";
 import { useToast } from "@/hooks/use-toast";
-import { brandApi } from "@/services/api";
+import { brandApi, uploadApi } from "@/services/api";
 import type { RootState, AppDispatch } from "@/store";
-import { fetchBrandsThunk, type Brand } from "@/store/brands/brands.slice";
+import { fetchAdminBrandsThunk, type Brand } from "@/store/brands/brands.slice";
 
 /* ================= TYPES ================= */
 
@@ -66,10 +72,13 @@ export default function BrandsPage() {
   const dispatch = useDispatch<AppDispatch>();
 
   /* ===== State ===== */
-  const [brands, setBrands] = useState<Brand[]>([]);
-  const [loading, setLoading] = useState(false);
-
+  const { data: reduxBrands, loading } = useSelector((state: RootState) => state.brands);
   const [initialized, setInitialized] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+
+  // Filter & Sort states
+  const [statusFilter, setStatusFilter] = useState<"all" | "active" | "inactive">("all");
+  const [sortBy, setSortBy] = useState<"name" | "products">("name");
 
   // Dialog States
   const [isDialogOpen, setIsDialogOpen] = useState(false);
@@ -80,6 +89,10 @@ export default function BrandsPage() {
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [brandToDelete, setBrandToDelete] = useState<Brand | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+
+  // Status Confirm States
+  const [statusConfirmOpen, setStatusConfirmOpen] = useState(false);
+  const [statusToToggle, setStatusToToggle] = useState<{ brand: Brand; status: boolean } | null>(null);
 
   // Form
   const form = useForm<FormValues>({
@@ -92,18 +105,44 @@ export default function BrandsPage() {
     },
   });
 
+  const handleUploadImage = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    try {
+      setIsUploading(true);
+      const formData = new FormData();
+      formData.append("files", file);
+
+      const res = await uploadApi.uploadMultiple(formData);
+      const imageUrl = res.data.data.images[0].url;
+
+      form.setValue("logo", imageUrl);
+      toast({
+        title: "Tải ảnh thành công",
+        variant: "success",
+      });
+    } catch (error) {
+      console.error(error);
+      toast({
+        title: "Tải ảnh thất bại",
+        variant: "destructive",
+        description: "Vui lòng thử lại sau",
+      });
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
   const fetchAdminBrands = useCallback(async () => {
     try {
-      setLoading(true);
-      const res = await brandApi.getAdminBrands();
-      setBrands(res.data.data || res.data);
+      await dispatch(fetchAdminBrandsThunk()).unwrap();
     } catch (error) {
       console.error(error);
     } finally {
-      setLoading(false);
       setInitialized(true);
     }
-  }, []);
+  }, [dispatch]);
 
   useEffect(() => {
     fetchAdminBrands();
@@ -134,21 +173,31 @@ export default function BrandsPage() {
     setDeleteConfirmOpen(true);
   };
 
-  const handleToggleStatus = async (brand: Brand, newStatus: boolean) => {
+  const handleToggleStatus = (brand: Brand, newStatus: boolean) => {
+    if (!newStatus) {
+      setStatusToToggle({ brand, status: newStatus });
+      setStatusConfirmOpen(true);
+      return;
+    }
+    executeToggleStatus(brand, newStatus);
+  };
+
+  const executeToggleStatus = async (brand: Brand, newStatus: boolean) => {
     try {
       await brandApi.toggleBrandStatus(brand._id, newStatus);
       toast({ 
-        title: "Cập nhật thành công", 
+        title: "✅ Cập nhật thành công", 
         variant: "success",
-        description: `Đã ${newStatus ? "kích hoạt" : "ngừng hoạt động"} thương hiệu "${brand.name}".`
+        description: `Thương hiệu "${brand.name}" hiện đã ${newStatus ? "được kích hoạt" : "ngừng hoạt động"}.`
       });
-      dispatch(fetchBrandsThunk());
-      fetchAdminBrands();
+      dispatch(fetchAdminBrandsThunk());
+      setStatusConfirmOpen(false);
+      setStatusToToggle(null);
     } catch (error: any) {
       const msg = error?.response?.data?.message || "Không thể cập nhật trạng thái";
       toast({
-        title: "Thất bại",
-        description: typeof msg === "string" ? msg : JSON.stringify(msg),
+        title: "❌ Cập nhật thất bại",
+        description: typeof msg === "string" ? msg : "Đã xảy ra lỗi khi thay đổi trạng thái thương hiệu.",
         variant: "destructive",
       });
     }
@@ -156,22 +205,36 @@ export default function BrandsPage() {
 
   const onSubmit = async (values: FormValues) => {
     try {
-      if (dialogMode === "edit" && selectedBrand) {
-        await brandApi.updateBrand(selectedBrand._id, values);
-        toast({ title: "Cập nhật thành công", variant: "success" });
-      } else {
-        await brandApi.createBrand(values);
-        toast({ title: "Tạo thương hiệu thành công", variant: "success" });
+      // Kiểm tra trùng lặp tên (chỉ khi tạo mới hoặc đổi tên khi edit)
+      const isDuplicate = reduxBrands.some((b: Brand) => 
+        b.name.toLowerCase() === values.name.toLowerCase() && 
+        (dialogMode === "create" || b._id !== selectedBrand?._id)
+      );
+
+      if (isDuplicate) {
+        toast({
+          title: "❌ Tên thương hiệu đã tồn tại",
+          description: `Thương hiệu "${values.name}" đã có trong hệ thống. Vui lòng chọn tên khác.`,
+          variant: "destructive",
+        });
+        return;
       }
 
-      dispatch(fetchBrandsThunk());
-      fetchAdminBrands();
+      if (dialogMode === "edit" && selectedBrand) {
+        await brandApi.updateBrand(selectedBrand._id, values);
+        toast({ title: "✅ Cập nhật thành công", variant: "success" });
+      } else {
+        await brandApi.createBrand(values);
+        toast({ title: "✅ Tạo thương hiệu thành công", variant: "success" });
+      }
+
+      dispatch(fetchAdminBrandsThunk());
       setIsDialogOpen(false);
     } catch (error: any) {
-      const msg = error?.response?.data?.message || "Không thể lưu thương hiệu";
+      const msg = error?.response?.data?.message || "Không thể lưu thông tin thương hiệu";
       toast({
-        title: "Lỗi",
-        description: typeof msg === "string" ? msg : (Array.isArray(msg) ? msg.join(", ") : JSON.stringify(msg)),
+        title: "❌ Thao tác thất bại",
+        description: typeof msg === "string" ? msg : "Vui lòng kiểm tra lại thông tin và thử lại.",
         variant: "destructive",
       });
     }
@@ -182,17 +245,16 @@ export default function BrandsPage() {
     setIsDeleting(true);
     try {
       await brandApi.deleteBrand(brandToDelete._id);
-      toast({ title: "Đã xóa thương hiệu", variant: "success" });
-      dispatch(fetchBrandsThunk());
-      fetchAdminBrands();
+      toast({ title: "✅ Đã xóa thương hiệu", variant: "success" });
+      dispatch(fetchAdminBrandsThunk());
     } catch (error: any) {
       const msg = error?.response?.data?.message || "Không thể xóa thương hiệu";
       const description = typeof msg === "string" ? msg : (Array.isArray(msg) ? msg.join(", ") : JSON.stringify(msg));
       
       toast({
-        title: "Không thể xóa",
+        title: "❌ Không thể xóa",
         description: description.includes("tồn kho") 
-          ? "Thương hiệu này vẫn còn sản phẩm trong kho. Vui lòng chuyển sang trạng thái 'Ngừng hoạt động' thay vì xóa."
+          ? "Thương hiệu này vẫn còn sản phẩm trong kho. Vui lòng chuyển sang trạng thái 'Ngừng hoạt động' thay vì xóa để đảm bảo toàn vẹn dữ liệu."
           : description,
         variant: "destructive",
       });
@@ -202,6 +264,32 @@ export default function BrandsPage() {
       setDeleteConfirmOpen(false);
     }
   };
+
+  /* ===================== DERIVED DATA ===================== */
+  const filteredBrands = useMemo(() => {
+    let filtered = reduxBrands;
+
+    // Filter by Status (Search is handled by DataTable internally)
+    if (statusFilter !== "all") {
+      filtered = filtered.filter((b) => 
+        statusFilter === "active" ? b.isActive : !b.isActive
+      );
+    }
+
+    // Sort by Name (A-Z) hoặc Sản phẩm
+    return [...filtered].sort((a, b) => {
+      if (sortBy === "name") return a.name.localeCompare(b.name);
+      if (sortBy === "products") return (b.productCount ?? 0) - (a.productCount ?? 0);
+      return 0;
+    });
+  }, [reduxBrands, statusFilter, sortBy]);
+
+  const { totalBrandsCount, totalProductsCount } = useMemo(() => {
+    return {
+      totalBrandsCount: reduxBrands.length,
+      totalProductsCount: reduxBrands.reduce((acc: number, b: Brand) => acc + (b.productCount ?? 0), 0)
+    };
+  }, [reduxBrands]);
 
   /* ===== Table Columns ===== */
   const tableColumns = useMemo(
@@ -222,9 +310,11 @@ export default function BrandsPage() {
                   unoptimized
                 />
               ) : (
-                <span className="font-bold text-xs text-muted-foreground">
+                <div 
+                  className="w-full h-full flex items-center justify-center text-primary font-bold text-sm bg-primary/10 rounded-md ring-1 ring-primary/20"
+                >
                   {brand.name.charAt(0).toUpperCase()}
-                </span>
+                </div>
               )}
             </div>
             <span className="font-medium">{brand.name}</span>
@@ -320,11 +410,7 @@ export default function BrandsPage() {
   );
 
   /* ===== Stats ===== */
-  const totalBrands = brands.length;
-  const totalProducts = useMemo(
-    () => brands.reduce((s, b) => s + (b.productCount ?? 0), 0),
-    [brands]
-  );
+  // Moved into useMemo for accuracy and Redux sync
 
   if (!initialized && loading) {
     return (
@@ -352,30 +438,62 @@ export default function BrandsPage() {
 
       {/* Stats Cards */}
       <div className="grid grid-cols-2 gap-4">
-        <div className="bg-card p-4 rounded-xl border border-border shadow-sm">
+        <div className="bg-card p-4 rounded-xl border border-border/50 shadow-sm transition-colors hover:bg-muted/5">
           <p className="text-sm text-muted-foreground font-medium">
             Tổng thương hiệu
           </p>
           <div className="flex items-baseline gap-2 mt-2">
-            <p className="text-2xl font-bold">{totalBrands}</p>
+            <p className="text-2xl font-bold">{totalBrandsCount}</p>
           </div>
         </div>
-        <div className="bg-card p-4 rounded-xl border border-border shadow-sm">
+        <div className="bg-card p-4 rounded-xl border border-border/50 shadow-sm transition-colors hover:bg-muted/5">
           <p className="text-sm text-muted-foreground font-medium">
             Tổng sản phẩm liên kết
           </p>
           <div className="flex items-baseline gap-2 mt-2">
-            <p className="text-2xl font-bold text-primary">{totalProducts}</p>
+            <p className="text-2xl font-bold text-primary">{totalProductsCount}</p>
           </div>
         </div>
       </div>
 
-      {/* Table */}
       <DataTable
-        data={brands}
+        data={filteredBrands}
         columns={tableColumns}
         searchKey="name"
         searchPlaceholder="Tìm kiếm thương hiệu..."
+        pageSize={10}
+        filterNode={
+          <div className="flex items-center gap-2">
+            {/* Sort Dropdown */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="sm" className="h-10 gap-2 border-dashed bg-background/50 border-border/40">
+                  <ArrowUpDown className="h-4 w-4" />
+                  <span>Sắp xếp: {sortBy === "name" ? "Tên A-Z" : "Nhiều sản phẩm nhất"}</span>
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="dropdown-content">
+                <DropdownMenuItem onClick={() => setSortBy("name")}>Tên A-Z</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setSortBy("products")}>Nhiều sản phẩm nhất</DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+
+            {/* Status Filter */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="sm" className="h-10 gap-2 border-dashed bg-background/50 border-border/40">
+                  <Filter className="h-4 w-4" />
+                  <span>{statusFilter === "all" ? "Tất cả trạng thái" : statusFilter === "active" ? "Đang hoạt động" : "Ngừng hoạt động"}</span>
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="dropdown-content">
+                <DropdownMenuItem onClick={() => setStatusFilter("all")}>Tất cả trạng thái</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setStatusFilter("active")}>Đang hoạt động</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setStatusFilter("inactive")}>Ngừng hoạt động</DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        }
       />
 
       {/* Form Dialog */}
@@ -396,12 +514,57 @@ export default function BrandsPage() {
                 name="logo"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Logo URL</FormLabel>
+                    <FormLabel>Logo thương hiệu</FormLabel>
                     <FormControl>
-                      <Input
-                        placeholder="https://example.com/logo.png"
-                        {...field}
-                      />
+                      <div className="space-y-4">
+                        {field.value ? (
+                          <div className="relative w-full aspect-video rounded-lg overflow-hidden border border-border group">
+                            <Image
+                              src={field.value}
+                              alt="Brand Logo"
+                              fill
+                              className="object-contain bg-muted/30 p-4"
+                            />
+                            <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
+                              <Button
+                                type="button"
+                                variant="destructive"
+                                size="icon"
+                                onClick={() => field.onChange("")}
+                              >
+                                <X className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div
+                            className={cn(
+                              "relative w-full h-40 rounded-lg border-2 border-dashed border-border flex flex-col items-center justify-center gap-2 cursor-pointer hover:bg-muted/50 transition-colors",
+                              isUploading && "pointer-events-none opacity-60"
+                            )}
+                            onClick={() => document.getElementById("logo-upload")?.click()}
+                          >
+                            {isUploading ? (
+                              <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+                            ) : (
+                              <>
+                                <CloudUpload className="h-10 w-10 text-muted-foreground" />
+                                <div className="text-center">
+                                  <p className="text-sm font-medium">Nhấn để tải logo lên</p>
+                                  <p className="text-xs text-muted-foreground">PNG, JPG hoặc SVG</p>
+                                </div>
+                              </>
+                            )}
+                            <input
+                              id="logo-upload"
+                              type="file"
+                              accept="image/*"
+                              className="hidden"
+                              onChange={handleUploadImage}
+                            />
+                          </div>
+                        )}
+                      </div>
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -443,7 +606,7 @@ export default function BrandsPage() {
                 control={form.control}
                 name="isActive"
                 render={({ field }) => (
-                  <FormItem className="flex items-center justify-between rounded-lg border p-3 shadow-sm">
+                  <FormItem className="flex items-center justify-between rounded-lg border border-border/50 p-3 shadow-sm transition-colors hover:bg-muted/5">
                     <div className="space-y-0.5">
                       <FormLabel>Trạng thái hoạt động</FormLabel>
                       <div className="text-[12px] text-muted-foreground">
@@ -514,6 +677,56 @@ export default function BrandsPage() {
               ) : (
                 "Xóa thương hiệu"
               )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      {/* Status Confirm Dialog */}
+      <Dialog open={statusConfirmOpen} onOpenChange={setStatusConfirmOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-warning">
+              <AlertTriangle className="h-5 w-5" />
+              Xác nhận ngừng hoạt động
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="py-4 space-y-3">
+            <p className="text-foreground font-medium">
+              Bạn có chắc chắn muốn ngừng hoạt động thương hiệu{" "}
+              <span className="font-bold text-primary">
+                "{statusToToggle?.brand.name}"
+              </span>?
+            </p>
+            <div className="p-4 bg-muted/50 rounded-lg border border-warning/20 text-sm text-muted-foreground">
+              <div className="flex items-start gap-2">
+                <span className="text-warning text-lg leading-none">⚠️</span>
+                <span>
+                  Hành động này có thể làm ẩn các sản phẩm thuộc thương hiệu này khỏi cửa hàng.
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setStatusConfirmOpen(false);
+                setStatusToToggle(null);
+              }}
+            >
+              Hủy
+            </Button>
+            <Button
+              variant="default"
+              onClick={() => {
+                if (statusToToggle) {
+                  executeToggleStatus(statusToToggle.brand, statusToToggle.status);
+                }
+              }}
+            >
+              Xác nhận
             </Button>
           </DialogFooter>
         </DialogContent>

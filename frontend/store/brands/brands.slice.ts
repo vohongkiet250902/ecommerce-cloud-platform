@@ -29,6 +29,14 @@ export const fetchBrandsThunk = createAsyncThunk(
   },
 );
 
+export const fetchAdminBrandsThunk = createAsyncThunk(
+  "brands/fetchAdminAll",
+  async () => {
+    const res = await brandApi.getAdminBrands();
+    return res.data.data || res.data;
+  },
+);
+
 const brandsSlice = createSlice({
   name: "brands",
   initialState,
@@ -40,10 +48,19 @@ const brandsSlice = createSlice({
       })
       .addCase(fetchBrandsThunk.fulfilled, (state, action) => {
         state.loading = false;
-
         state.data = Array.isArray(action.payload) ? action.payload : [];
       })
       .addCase(fetchBrandsThunk.rejected, (state) => {
+        state.loading = false;
+      })
+      .addCase(fetchAdminBrandsThunk.pending, (state) => {
+        state.loading = true;
+      })
+      .addCase(fetchAdminBrandsThunk.fulfilled, (state, action) => {
+        state.loading = false;
+        state.data = Array.isArray(action.payload) ? action.payload : [];
+      })
+      .addCase(fetchAdminBrandsThunk.rejected, (state) => {
         state.loading = false;
       });
   },

@@ -14,15 +14,14 @@ import { BrandsModule } from './modules/brands/brands.module';
 import { PaymentsModule } from './modules/payments/payments.module';
 import { CartModule } from './modules/cart/cart.module';
 import { UploadModule } from './modules/upload/upload.module';
+import { MailerModule } from '@nestjs-modules/mailer';
 
 @Module({
   imports: [
-    UsersModule,
-    AuthModule,
-    ProductsModule,
-    OrdersModule,
-    SearchModule,
+    // Configuration
     ConfigModule.forRoot({ isGlobal: true }),
+    
+    // Database
     MongooseModule.forRootAsync({
       imports: [ConfigModule],
       useFactory: (configService: ConfigService) => ({
@@ -30,6 +29,30 @@ import { UploadModule } from './modules/upload/upload.module';
       }),
       inject: [ConfigService],
     }),
+
+    // Email
+    MailerModule.forRootAsync({
+      inject: [ConfigService],
+      useFactory: (configService: ConfigService) => ({
+        transport: {
+          host: configService.get<string>('MAIL_HOST'),
+          auth: {
+            user: configService.get<string>('MAIL_USER'),
+            pass: configService.get<string>('MAIL_PASSWORD'),
+          },
+        },
+        defaults: {
+          from: `"No Reply" <${configService.get<string>('MAIL_FROM')}>`,
+        },
+      }),
+    }),
+
+    // Feature Modules
+    UsersModule,
+    AuthModule,
+    ProductsModule,
+    OrdersModule,
+    SearchModule,
     CategoriesModule,
     BrandsModule,
     PaymentsModule,

@@ -30,7 +30,7 @@ export interface DataTableProps<T> {
   searchPlaceholder?: string;
   searchKey?: keyof T;
   pageSize?: number;
-  showFilter?: boolean;
+  filterNode?: React.ReactNode;
 }
 
 /* =======================
@@ -42,7 +42,7 @@ export function DataTable<T extends object>({
   searchPlaceholder = "Tìm kiếm...",
   searchKey,
   pageSize = 10,
-  showFilter = false,
+  filterNode,
 }: DataTableProps<T>) {
   const [search, setSearch] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
@@ -81,12 +81,7 @@ export function DataTable<T extends object>({
           />
         </div>
 
-        {showFilter && (
-          <Button variant="outline" size="sm" className="h-10 gap-2 border-dashed">
-            <Filter className="h-4 w-4" />
-            <span className="hidden sm:inline">Bộ lọc</span>
-          </Button>
-        )}
+        {filterNode}
       </div>
 
       {/* Table Area */}
