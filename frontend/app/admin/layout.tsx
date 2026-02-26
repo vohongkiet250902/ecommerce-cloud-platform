@@ -28,8 +28,10 @@ import {
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Toaster } from "@/components/ui/toaster";
 import {
   Tooltip,
   TooltipTrigger,
@@ -69,8 +71,8 @@ const NavItem = ({ href, icon: Icon, label, collapsed }: NavItemProps) => {
       className={cn(
         "flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-200 group",
         isActive
-          ? "bg-primary text-primary-foreground"
-          : "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+          ? "bg-primary text-primary-foreground shadow-lg shadow-primary/30"
+          : "text-sidebar-foreground hover:bg-primary hover:text-primary-foreground hover:shadow-md transition-all duration-300"
       )}
     >
       <Icon
@@ -120,7 +122,18 @@ export default function AdminLayout({
 }) {
   const router = useRouter();
   const { user, isAuthenticated, loading, signOut } = useAuth();
+  const isMobile = useIsMobile();
   const [collapsed, setCollapsed] = useState(false);
+
+  // Auto collapse on mobile
+  useEffect(() => {
+    if (isMobile) {
+      setCollapsed(true);
+    } else {
+      setCollapsed(false);
+    }
+  }, [isMobile]);
+
   const [isDarkMode, setIsDarkMode] = useState(() => {
     // Initialize state from localStorage or system preference
     const savedTheme = typeof window !== "undefined" ? localStorage.getItem("theme") : null;
@@ -191,19 +204,28 @@ export default function AdminLayout({
           {/* Logo */}
           <div className="h-16 flex items-center justify-between px-4 border-b border-sidebar-border">
             {!collapsed && (
-              <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center">
-                  <Zap className="h-5 w-5 text-primary-foreground" />
+              <Link href="/" className="flex items-center gap-2 group">
+                <div className="w-8 h-8 rounded-lg overflow-hidden flex items-center justify-center group-hover:rotate-6 transition-transform duration-300">
+                  <img 
+                    src="/assets/img/protechstore.png" 
+                    alt="Logo" 
+                    className="w-full h-full object-cover rounded-lg"
+                  />
                 </div>
-                <span className="font-bold text-lg text-foreground">
-                  Admin Panel
-                </span>
-              </div>
+                <div className="flex items-baseline gap-1">
+                  <span className="font-black text-foreground tracking-tight">ProTech</span>
+                  <span className="font-black text-primary tracking-tight">Admin</span>
+                </div>
+              </Link>
             )}
             {collapsed && (
-              <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center mx-auto">
-                <Zap className="h-5 w-5 text-primary-foreground" />
-              </div>
+              <Link href="/" className="w-8 h-8 rounded-lg overflow-hidden flex items-center justify-center mx-auto hover:scale-110 transition-transform">
+                <img 
+                  src="/assets/img/protechstore.png" 
+                  alt="Logo" 
+                  className="w-full h-full object-cover rounded-lg"
+                />
+              </Link>
             )}
           </div>
 

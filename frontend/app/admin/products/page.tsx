@@ -1,13 +1,24 @@
 "use client";
 
 import { useState, useMemo, useEffect, useCallback } from "react";
-import { Plus, Edit, Trash2, Eye, MoreHorizontal, Loader2, X } from "lucide-react";
+import { useRouter } from "next/navigation";
+import {
+  Plus,
+  Edit,
+  Trash2,
+  Eye,
+  MoreHorizontal,
+  Loader2,
+  X,
+  AlertTriangle,
+} from "lucide-react";
 import { useForm } from "react-hook-form";
+import Image from "next/image";
 
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { DataTable } from "@/components/shared/DataTable";
-import { Input } from "@/components/ui/input";
+import AddProductModal from "./AddProductModal";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -15,13 +26,19 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
-  Form,
-  FormControl,
-  FormField,
-  FormItem,
-  FormLabel,
-  FormMessage,
-} from "@/components/ui/form";
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { productApi, categoryApi, brandApi } from "@/services/api";
 import { cn } from "@/lib/utils";
@@ -31,24 +48,49 @@ import { cn } from "@/lib/utils";
 interface Product {
   _id: string;
   name: string;
-  category: {
+  slug: string;
+  description: string;
+  categoryId: string;
+  brandId: string;
+  images: {
+    url: string;
+    publicId: string;
     _id: string;
-    name: string;
-  };
-  brand: {
-    _id: string;
-    name: string;
-  };
-  price: number;
-  salePrice?: number;
-  stock: number;
-  status: "active" | "inactive" | "draft";
-  image?: string;
+  }[];
+  variants: {
+    sku: string;
+    price: number;
+    stock: number;
+    attributes: {
+      key: string;
+      value: string;
+    }[];
+    image: string | null;
+    status: string;
+  }[];
+  specs: {
+    key: string;
+    value: string;
+  }[];
+  totalStock: number;
+  status: string;
+  createdAt: string;
+  updatedAt: string;
+  __v: number;
 }
 
 interface Category {
   _id: string;
   name: string;
+  slug: string;
+  parentId: string | null;
+  filterableAttributes: any[];
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+  __v: number;
+  children: Category[];
+  id: string;
 }
 
 interface Brand {
@@ -87,7 +129,7 @@ const formatPrice = (price: number) =>
   new Intl.NumberFormat("vi-VN").format(price) + "đ";
 
 const validateFormData = (
-  data: ProductFormData
+  data: ProductFormData,
 ): { valid: boolean; errors: Record<string, string> } => {
   const errors: Record<string, string> = {};
 
@@ -128,15 +170,51 @@ const validateFormData = (
 
 /* ================= PAGE ================= */
 
+const flattenCategories = (categories: Category[]): Category[] => {
+  return categories.flatMap((category) => [
+    category,
+    ...(category.children ? flattenCategories(category.children) : []),
+  ]);
+};
+
 export default function ProductsPage() {
+  const router = useRouter();
   const { toast } = useToast();
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [brands, setBrands] = useState<Brand[]>([]);
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [productToDelete, setProductToDelete] = useState<Product | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
+
+  const flatCategories = useMemo(
+    () => flattenCategories(categories),
+    [categories],
+  );
+
+  const [statusFilter, setStatusFilter] = useState<"all" | "active" | "inactive" | "draft">("all");
+  const [categoryFilter, setCategoryFilter] = useState<string>("all");
+
+  const filteredProducts = useMemo(() => {
+    return products.filter((product) => {
+      const matchesStatus =
+        statusFilter === "all" ? true : product.status === statusFilter;
+      const matchesCategory =
+        categoryFilter === "all" 
+          ? true 
+          : (typeof product.categoryId === "object" 
+              ? (product.categoryId as any)?._id === categoryFilter 
+              : product.categoryId === categoryFilter || (product as any).category?._id === categoryFilter);
+
+      return matchesStatus && matchesCategory;
+    });
+  }, [products, statusFilter, categoryFilter]);
+
 
   const form = useForm<ProductFormData>({
     defaultValues: {
@@ -156,11 +234,10 @@ export default function ProductsPage() {
       try {
         setLoading(true);
         const [productsRes, categoriesRes, brandsRes] = await Promise.all([
-          productApi.getProducts(),
-          categoryApi.getCategories(),
-          brandApi.getBrands(),
+          productApi.getAdminProducts(),
+          categoryApi.getAdminCategories(),
+          brandApi.getAdminBrands(),
         ]);
-
         setProducts(productsRes.data.data || productsRes.data);
         setCategories(categoriesRes.data.data || categoriesRes.data);
         setBrands(brandsRes.data.data || brandsRes.data);
@@ -211,7 +288,7 @@ export default function ProductsPage() {
       form.reset();
 
       // Reload product list
-      const res = await productApi.getProducts();
+      const res = await productApi.getAdminProducts();
       setProducts(res.data.data || res.data);
     } catch {
       toast({
@@ -224,29 +301,65 @@ export default function ProductsPage() {
     }
   };
 
-  // Handle delete product
-  const handleDelete = useCallback(
-    async (id: string) => {
-      if (!confirm("Bạn có chắc muốn xóa sản phẩm này?")) return;
+  // Handle delete product (open modal)
+  const handleDelete = useCallback((product: Product) => {
+    // Check if product has remaining stock
+    const totalStock = product.variants?.reduce((sum: number, v: any) => sum + (v.stock || 0), 0) || product.totalStock || 0;
+    
+    if (totalStock > 0) {
+      toast({
+        variant: "destructive",
+        title: "❌ Không thể xóa sản phẩm",
+        description: `Sản phẩm còn ${totalStock} sản phẩm tồn kho. Bạn chỉ có thể tắt trạng thái sản phẩm.`,
+      });
+      return;
+    }
+    
+    setProductToDelete(product);
+    setDeleteConfirmOpen(true);
+  }, [toast]);
 
-      try {
-        await productApi.deleteProduct(id);
-        toast({
-          title: "✅ Thành công",
-          description: "Xóa sản phẩm thành công",
-        });
+  // Confirm delete
+  const handleConfirmDelete = async () => {
+    if (!productToDelete) return;
 
-        setProducts((prev) => prev.filter((p) => p._id !== id));
-      } catch {
+    try {
+      setIsDeleting(true);
+      
+      // Double-check stock before deleting
+      const totalStock = productToDelete.variants?.reduce((sum: number, v: any) => sum + (v.stock || 0), 0) || productToDelete.totalStock || 0;
+      
+      if (totalStock > 0) {
         toast({
           variant: "destructive",
-          title: "❌ Lỗi",
-          description: "Không thể xóa sản phẩm",
+          title: "❌ Không thể xóa sản phẩm",
+          description: `Sản phẩm còn ${totalStock} sản phẩm tồn kho. Bạn chỉ có thể tắt trạng thái sản phẩm.`,
         });
+        return;
       }
-    },
-    [toast]
-  );
+      
+      await productApi.deleteProduct(productToDelete._id);
+      
+      toast({
+        title: "✅ Thành công",
+        description: "Xóa sản phẩm thành công",
+        variant: "success",
+      });
+
+      setProducts((prev) => prev.filter((p) => p._id !== productToDelete._id));
+      setDeleteConfirmOpen(false);
+    } catch (error: any) {
+      const errorMsg = error.response?.data?.message || "Không thể xóa sản phẩm";
+      toast({
+        variant: "destructive",
+        title: "❌ Lỗi",
+        description: errorMsg,
+      });
+    } finally {
+      setIsDeleting(false);
+      setProductToDelete(null);
+    }
+  };
 
   const columns = useMemo(
     () => [
@@ -254,40 +367,58 @@ export default function ProductsPage() {
         key: "name",
         header: "Sản phẩm",
         render: (product: Product) => (
-          <div>
-            <p className="font-medium">{product.name}</p>
-            <p className="text-sm text-muted-foreground">{product._id}</p>
+          <div className="flex items-center gap-3">
+             <div className="h-10 w-10 relative rounded-md overflow-hidden bg-muted border border-border shrink-0">
+               {product.images?.[0]?.url ? (
+                   <Image 
+                      src={product.images[0].url} 
+                      alt={product.name} 
+                      fill 
+                      className="object-cover" 
+                   />
+               ) : (
+                   <div className="flex items-center justify-center h-full text-xs text-muted-foreground">Img</div>
+               )}
+            </div>
+            <div>
+              <p className="font-medium line-clamp-1 text-foreground">{product.name}</p>
+            </div>
           </div>
         ),
       },
       {
         key: "category",
         header: "Danh mục",
-        render: (product: Product) => (
-          <div>
-            <p>{product.category?.name || "N/A"}</p>
-            <p className="text-sm text-muted-foreground">
-              {product.brand?.name || "N/A"}
-            </p>
-          </div>
-        ),
+        render: (product: Product) => {
+          // Extract IDs robustly (might be populated objects or IDs)
+          const catId = typeof product.categoryId === "object" 
+            ? (product.categoryId as any)?._id 
+            : product.categoryId || (product as any).category?._id;
+            
+          const bId = typeof product.brandId === "object" 
+            ? (product.brandId as any)?._id 
+            : product.brandId || (product as any).brand?._id;
+
+          const category = flatCategories.find((c) => c._id === catId);
+          const brand = brands.find((b) => b._id === bId);
+
+          return (
+            <div>
+              <p className="font-medium">{category?.name || (product as any).category?.name || "N/A"}</p>
+              <p className="text-sm text-muted-foreground">
+                {brand?.name || (product as any).brand?.name || "N/A"}
+              </p>
+            </div>
+          );
+        },
       },
       {
         key: "price",
         header: "Giá",
-        render: (product: Product) =>
-          product.salePrice ? (
-            <div>
-              <p className="font-semibold text-destructive">
-                {formatPrice(product.salePrice)}
-              </p>
-              <p className="text-sm line-through text-muted-foreground">
-                {formatPrice(product.price)}
-              </p>
-            </div>
-          ) : (
-            <p className="font-semibold">{formatPrice(product.price)}</p>
-          ),
+        render: (product: Product) => {
+          const price = (product.variants && product.variants.length > 0) ? product.variants[0].price : 0;
+          return <p className="font-semibold">{formatPrice(price)}</p>;
+        },
       },
       {
         key: "stock",
@@ -296,14 +427,14 @@ export default function ProductsPage() {
           <span
             className={cn(
               "font-medium",
-              product.stock === 0
+              (product.totalStock || 0) === 0
                 ? "text-destructive"
-                : product.stock < 10
+                : (product.totalStock || 0) < 10
                   ? "text-warning"
-                  : "text-foreground"
+                  : "text-foreground",
             )}
           >
-            {product.stock}
+            {product.totalStock || 0}
           </span>
         ),
       },
@@ -311,7 +442,8 @@ export default function ProductsPage() {
         key: "status",
         header: "Trạng thái",
         render: (product: Product) => {
-          const config = statusConfig[product.status];
+          const status = product.status || "draft";
+          const config = statusConfig[status as keyof typeof statusConfig] || statusConfig.draft;
           return (
             <Badge
               variant="outline"
@@ -328,20 +460,27 @@ export default function ProductsPage() {
         render: (product: Product) => (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon">
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                className="transition-all"
+              >
                 <MoreHorizontal className="h-4 w-4" />
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="dropdown-content">
-              <DropdownMenuItem>
+              <DropdownMenuItem onClick={() => router.push(`/admin/products/${product._id}`)}>
                 <Eye className="mr-2 h-4 w-4" /> Xem chi tiết
               </DropdownMenuItem>
-              <DropdownMenuItem>
+              <DropdownMenuItem onClick={() => {
+                setSelectedProduct(product);
+                setIsModalOpen(true);
+              }}>
                 <Edit className="mr-2 h-4 w-4" /> Chỉnh sửa
               </DropdownMenuItem>
               <DropdownMenuItem
-                className="text-destructive"
-                onClick={() => handleDelete(product._id)}
+                className="text-destructive focus:text-destructive"
+                onClick={() => handleDelete(product)}
               >
                 <Trash2 className="mr-2 h-4 w-4" /> Xóa
               </DropdownMenuItem>
@@ -350,7 +489,8 @@ export default function ProductsPage() {
         ),
       },
     ],
-    [handleDelete]
+    [handleDelete, flatCategories, brands, router],
+
   );
 
   return (
@@ -361,7 +501,10 @@ export default function ProductsPage() {
           <h1 className="text-2xl font-bold">Sản phẩm</h1>
           <p className="text-muted-foreground">Quản lý danh sách sản phẩm</p>
         </div>
-        <Button onClick={() => setIsModalOpen(true)}>
+        <Button onClick={() => {
+          setSelectedProduct(null);
+          setIsModalOpen(true);
+        }}>
           <Plus className="mr-2 h-4 w-4" />
           Thêm sản phẩm
         </Button>
@@ -369,28 +512,73 @@ export default function ProductsPage() {
 
       {/* Stats */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <div className="bg-card rounded-xl p-4 card-shadow">
-          <p className="text-sm text-muted-foreground">Tổng sản phẩm</p>
-          <p className="text-2xl font-bold text-foreground">{products.length}</p>
+        <div className="bg-card rounded-xl p-4 border border-border shadow-sm">
+          <p className="text-sm text-muted-foreground font-medium">Tổng sản phẩm</p>
+          <div className="flex items-baseline gap-2 mt-2">
+            <span className="text-2xl font-bold text-foreground">{products.length}</span>
+          </div>
         </div>
-        <div className="bg-card rounded-xl p-4 card-shadow">
-          <p className="text-sm text-muted-foreground">Đang bán</p>
-          <p className="text-2xl font-bold text-success">
-            {products.filter((p) => p.status === "active").length}
-          </p>
+        <div className="bg-card rounded-xl p-4 border border-border shadow-sm">
+          <p className="text-sm text-muted-foreground font-medium">Đang bán</p>
+          <div className="flex items-baseline gap-2 mt-2">
+            <span className="text-2xl font-bold text-success">
+              {products.filter((p) => p.status === "active").length}
+            </span>
+          </div>
         </div>
-        <div className="bg-card rounded-xl p-4 card-shadow">
-          <p className="text-sm text-muted-foreground">Hết hàng</p>
-          <p className="text-2xl font-bold text-destructive">
-            {products.filter((p) => p.stock === 0).length}
-          </p>
+        <div className="bg-card rounded-xl p-4 border border-border shadow-sm">
+          <p className="text-sm text-muted-foreground font-medium">Hết hàng</p>
+          <div className="flex items-baseline gap-2 mt-2">
+            <span className="text-2xl font-bold text-destructive">
+              {products.filter((p) => p.totalStock === 0).length}
+            </span>
+          </div>
         </div>
-        <div className="bg-card rounded-xl p-4 card-shadow">
-          <p className="text-sm text-muted-foreground">Tồn kho thấp</p>
-          <p className="text-2xl font-bold text-warning">
-            {products.filter((p) => p.stock > 0 && p.stock < 10).length}
-          </p>
+        <div className="bg-card rounded-xl p-4 border border-border shadow-sm">
+          <p className="text-sm text-muted-foreground font-medium">Tồn kho thấp</p>
+          <div className="flex items-baseline gap-2 mt-2">
+            <span className="text-2xl font-bold text-warning">
+              {products.filter((p) => p.totalStock > 0 && p.totalStock < 10).length}
+            </span>
+          </div>
         </div>
+      </div>
+
+      {/* Filters */}
+       <div className="flex items-center gap-4">
+        <Select
+          value={statusFilter}
+          onValueChange={(value) => setStatusFilter(value as "all" | "active" | "inactive" | "draft")}
+        >
+          <SelectTrigger className="w-[180px]">
+            <SelectValue placeholder="Trạng thái" />
+          </SelectTrigger>
+          <SelectContent className="dropdown-content">
+            <SelectItem value="all">Tất cả trạng thái</SelectItem>
+            <SelectItem value="active">Đang bán</SelectItem>
+            <SelectItem value="inactive">Ngừng bán</SelectItem>
+            <SelectItem value="draft">Nháp</SelectItem>
+          </SelectContent>
+        </Select>
+
+        <Select
+          value={categoryFilter}
+          onValueChange={setCategoryFilter}
+        >
+          <SelectTrigger className="w-[180px]">
+            <SelectValue placeholder="Danh mục" />
+          </SelectTrigger>
+          <SelectContent className="dropdown-content">
+            <SelectItem value="all">Tất cả danh mục</SelectItem>
+            {flatCategories.map((c) => (
+                <SelectItem key={c._id} value={c._id}>
+                    <span style={{ paddingLeft: `${(c as any).level * 10}px` }}>
+                        {c.name}
+                    </span>
+                </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
 
       {/* Data Table */}
@@ -400,237 +588,69 @@ export default function ProductsPage() {
         </div>
       ) : (
         <DataTable
-          data={products}
+          data={filteredProducts}
           columns={columns}
           searchKey="name"
           searchPlaceholder="Tìm kiếm sản phẩm..."
         />
       )}
 
-      {/* Add Product Modal */}
-      {isModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
-          <div className="bg-card rounded-xl shadow-lg max-w-md w-full max-h-[90vh] overflow-y-auto">
-            {/* Modal Header */}
-            <div className="flex items-center justify-between p-6 border-b border-border">
-              <h2 className="text-xl font-bold">Thêm sản phẩm mới</h2>
-              <button
-                onClick={() => {
-                  setIsModalOpen(false);
-                  form.reset();
-                  setFormErrors({});
-                }}
-                className="text-muted-foreground hover:text-foreground"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
+      <AddProductModal
+        open={isModalOpen}
+        onOpenChange={setIsModalOpen}
+        initialData={selectedProduct} // Pass selected product
+        onSuccess={async (newProduct) => {
+          const res = await productApi.getAdminProducts();
+          setProducts(res.data.data || res.data);
+          setSelectedProduct(null);
+        }}
+      />
 
-            {/* Modal Body */}
-            <div className="p-6">
-              <Form {...form}>
-                <form
-                  onSubmit={form.handleSubmit(onSubmit)}
-                  className="space-y-4"
-                >
-                  {/* Name */}
-                  <FormField
-                    control={form.control}
-                    name="name"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Tên sản phẩm</FormLabel>
-                        <FormControl>
-                          <Input placeholder="Nhập tên sản phẩm" {...field} />
-                        </FormControl>
-                        {formErrors.name && (
-                          <p className="text-sm text-destructive">
-                            {formErrors.name}
-                          </p>
-                        )}
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
+      {/* Delete Confirm Dialog */}
+      <Dialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-destructive">
+              <AlertTriangle className="h-5 w-5" />
+              Xác nhận xóa
+            </DialogTitle>
+          </DialogHeader>
 
-                  {/* Category */}
-                  <FormField
-                    control={form.control}
-                    name="categoryId"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Danh mục</FormLabel>
-                        <FormControl>
-                          <select
-                            {...field}
-                            className="w-full px-3 py-2 border border-input rounded-md bg-background text-foreground"
-                          >
-                            <option value="">-- Chọn danh mục --</option>
-                            {categories.map((cat) => (
-                              <option key={cat._id} value={cat._id}>
-                                {cat.name}
-                              </option>
-                            ))}
-                          </select>
-                        </FormControl>
-                        {formErrors.categoryId && (
-                          <p className="text-sm text-destructive">
-                            {formErrors.categoryId}
-                          </p>
-                        )}
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-
-                  {/* Brand */}
-                  <FormField
-                    control={form.control}
-                    name="brandId"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Thương hiệu</FormLabel>
-                        <FormControl>
-                          <select
-                            {...field}
-                            className="w-full px-3 py-2 border border-input rounded-md bg-background text-foreground"
-                          >
-                            <option value="">-- Chọn thương hiệu --</option>
-                            {brands.map((brand) => (
-                              <option key={brand._id} value={brand._id}>
-                                {brand.name}
-                              </option>
-                            ))}
-                          </select>
-                        </FormControl>
-                        {formErrors.brandId && (
-                          <p className="text-sm text-destructive">
-                            {formErrors.brandId}
-                          </p>
-                        )}
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-
-                  {/* Price */}
-                  <FormField
-                    control={form.control}
-                    name="price"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Giá gốc (đ)</FormLabel>
-                        <FormControl>
-                          <Input type="number" placeholder="0" {...field} />
-                        </FormControl>
-                        {formErrors.price && (
-                          <p className="text-sm text-destructive">
-                            {formErrors.price}
-                          </p>
-                        )}
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-
-                  {/* Sale Price */}
-                  <FormField
-                    control={form.control}
-                    name="salePrice"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Giá sale (đ)</FormLabel>
-                        <FormControl>
-                          <Input
-                            type="number"
-                            placeholder="0 (tùy chọn)"
-                            {...field}
-                          />
-                        </FormControl>
-                        {formErrors.salePrice && (
-                          <p className="text-sm text-destructive">
-                            {formErrors.salePrice}
-                          </p>
-                        )}
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-
-                  {/* Stock */}
-                  <FormField
-                    control={form.control}
-                    name="stock"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Tồn kho</FormLabel>
-                        <FormControl>
-                          <Input type="number" placeholder="0" {...field} />
-                        </FormControl>
-                        {formErrors.stock && (
-                          <p className="text-sm text-destructive">
-                            {formErrors.stock}
-                          </p>
-                        )}
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-
-                  {/* Status */}
-                  <FormField
-                    control={form.control}
-                    name="status"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Trạng thái</FormLabel>
-                        <FormControl>
-                          <select
-                            {...field}
-                            className="w-full px-3 py-2 border border-input rounded-md bg-background text-foreground"
-                          >
-                            <option value="draft">Nháp</option>
-                            <option value="active">Đang bán</option>
-                            <option value="inactive">Ngừng bán</option>
-                          </select>
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-
-                  {/* Buttons */}
-                  <div className="flex gap-2 pt-4">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="flex-1"
-                      onClick={() => {
-                        setIsModalOpen(false);
-                        form.reset();
-                        setFormErrors({});
-                      }}
-                      disabled={isSubmitting}
-                    >
-                      Hủy
-                    </Button>
-                    <Button
-                      type="submit"
-                      className="flex-1"
-                      disabled={isSubmitting}
-                    >
-                      {isSubmitting && (
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      )}
-                      Thêm
-                    </Button>
-                  </div>
-                </form>
-              </Form>
-            </div>
+          <div className="py-4">
+            <p className="text-muted-foreground">
+              Bạn có chắc chắn muốn xóa sản phẩm{" "}
+              <span className="font-bold text-foreground">
+                {productToDelete?.name}
+              </span>
+              ?
+            </p>
           </div>
-        </div>
-      )}
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setDeleteConfirmOpen(false)}
+              disabled={isDeleting}
+            >
+              Hủy
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleConfirmDelete}
+              disabled={isDeleting}
+            >
+              {isDeleting ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Đang xóa...
+                </>
+              ) : (
+                "Xóa sản phẩm"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

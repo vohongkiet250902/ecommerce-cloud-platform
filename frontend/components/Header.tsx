@@ -18,11 +18,14 @@ import {
 import { motion, AnimatePresence } from "framer-motion";
 import { useAuth } from "@/hooks/useAuth";
 import { useRouter } from "next/navigation";
+import { useCart } from "@/hooks/useCart";
+import { CartSidebar } from "./CartSidebar";
 
 interface HeaderProps {
   cartItemCount?: number;
   isDarkMode: boolean;
   toggleDarkMode: () => void;
+  onCartClick?: () => void;
 }
 
 const navItems = [
@@ -41,15 +44,34 @@ const searchSuggestions = [
 ];
 
 export default function Header({
-  cartItemCount = 0,
+  cartItemCount: manualCartItemCount,
   isDarkMode,
   toggleDarkMode,
+  onCartClick,
 }: HeaderProps) {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [showSuggestions, setShowSuggestions] = useState(false);
   const { user, isAuthenticated, signOut } = useAuth();
+  const { 
+    cartItems, 
+    cartItemCount: hookCartItemCount, 
+    isCartOpen, 
+    setIsCartOpen, 
+    updateQuantity, 
+    removeItem 
+  } = useCart();
   const router = useRouter();
+
+  const cartItemCount = manualCartItemCount ?? hookCartItemCount;
+
+  const handleCartClick = () => {
+    if (onCartClick) {
+      onCartClick();
+    } else {
+      setIsCartOpen(true);
+    }
+  };
 
   const filteredSuggestions = searchSuggestions.filter((item) =>
     item.toLowerCase().includes(searchQuery.toLowerCase())
@@ -64,15 +86,22 @@ export default function Header({
       <div className="container mx-auto px-4">
         <div className="flex items-center justify-between h-16 lg:h-20">
           {/* Logo */}
-          <Link href="/" className="flex items-center gap-2">
-            <div className="w-10 h-10 gradient-hero rounded-xl flex items-center justify-center">
-              <span className="text-primary-foreground font-bold text-lg">
-                E
+          <Link href="/" className="flex items-center gap-2 group">
+            <div className="w-10 h-10 rounded-xl overflow-hidden flex items-center justify-center group-hover:scale-110 transition-transform duration-300">
+              <img 
+                src="/assets/img/protechstore.png" 
+                alt="ProTech Store Logo" 
+                className="w-full h-full object-cover rounded-xl"
+              />
+            </div>
+            <div className="flex flex-col sm:flex-row sm:items-baseline sm:gap-1">
+              <span className="text-xl font-black text-foreground hidden sm:block tracking-tight">
+                ProTech
+              </span>
+              <span className="text-xl font-black text-primary hidden sm:block tracking-tight">
+                Store
               </span>
             </div>
-            <span className="text-xl font-bold text-foreground hidden sm:block">
-              ElecStore
-            </span>
           </Link>
 
           {/* Desktop Navigation */}
@@ -115,7 +144,7 @@ export default function Header({
                         <button
                           key={index}
                           type="button"
-                          className="w-full px-4 py-3 text-left hover:bg-accent transition-colors text-sm"
+                          className="w-full px-4 py-3 text-left hover:bg-primary hover:text-primary-foreground transition-all text-sm"
                           onMouseDown={(e) => e.preventDefault()} // tránh blur trước khi click
                           onClick={() => setSearchQuery(suggestion)}
                         >
@@ -202,9 +231,10 @@ export default function Header({
               variant="ghost"
               size="icon"
               className="rounded-full relative"
+              onClick={handleCartClick}
             >
               <ShoppingCart className="w-5 h-5" />
-              {cartItemCount > 0 && (
+              {cartItemCount >= 0 && (
                 <Badge className="absolute -top-1 -right-1 w-5 h-5 p-0 flex items-center justify-center bg-destructive text-destructive-foreground text-xs">
                   {cartItemCount}
                 </Badge>
@@ -256,7 +286,7 @@ export default function Header({
                 <Link
                   key={item.label}
                   href={item.href}
-                  className="nav-link py-3 px-4 rounded-lg hover:bg-accent"
+                  className="nav-link py-3 px-4 rounded-lg hover:bg-primary hover:text-primary-foreground"
                   onClick={() => setIsMenuOpen(false)}
                 >
                   {item.label}
@@ -267,16 +297,24 @@ export default function Header({
                 <>
                   <Link
                     href="/account"
-                    className="nav-link py-3 px-4 rounded-lg hover:bg-accent flex items-center gap-2"
+                    className="nav-link py-3 px-4 rounded-lg hover:bg-primary hover:text-primary-foreground flex items-center gap-2"
                     onClick={() => setIsMenuOpen(false)}
                   >
                     <User className="w-4 h-4" />
                     Tài khoản ({user.role})
                   </Link>
+                  <Link
+                    href="/orders"
+                    className="nav-link py-3 px-4 rounded-lg hover:bg-primary hover:text-primary-foreground flex items-center gap-2"
+                    onClick={() => setIsMenuOpen(false)}
+                  >
+                    <ShoppingCart className="w-4 h-4" />
+                    Đơn hàng của tôi
+                  </Link>
                   {user.role === 'admin' && (
                     <Link
                       href="/admin"
-                      className="nav-link py-3 px-4 rounded-lg hover:bg-accent flex items-center gap-2"
+                      className="nav-link py-3 px-4 rounded-lg hover:bg-primary hover:text-primary-foreground flex items-center gap-2"
                       onClick={() => setIsMenuOpen(false)}
                     >
                       <User className="w-4 h-4" />
@@ -284,7 +322,7 @@ export default function Header({
                     </Link>
                   )}
                   <button
-                    className="nav-link py-3 px-4 rounded-lg hover:bg-accent flex items-center gap-2 w-full text-left text-destructive"
+                    className="nav-link py-3 px-4 rounded-lg hover:bg-primary hover:text-primary-foreground flex items-center gap-2 w-full text-left"
                     onClick={() => {
                       handleLogout();
                       setIsMenuOpen(false);
@@ -297,7 +335,7 @@ export default function Header({
               ) : (
                 <Link
                   href="/auth"
-                  className="nav-link py-3 px-4 rounded-lg hover:bg-accent flex items-center gap-2"
+                  className="nav-link py-3 px-4 rounded-lg hover:bg-primary hover:text-primary-foreground flex items-center gap-2"
                   onClick={() => setIsMenuOpen(false)}
                 >
                   <User className="w-4 h-4" />
@@ -308,6 +346,14 @@ export default function Header({
           </motion.div>
         )}
       </AnimatePresence>
+
+      <CartSidebar
+        isOpen={isCartOpen}
+        onOpenChange={setIsCartOpen}
+        cartItems={cartItems}
+        onUpdateQuantity={updateQuantity}
+        onRemoveItem={removeItem}
+      />
     </header>
   );
 }

@@ -5,8 +5,13 @@ import { Slider } from "@/components/ui/slider";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 
+interface BrandOption {
+  id: string;
+  name: string;
+}
+
 interface ProductFiltersProps {
-  brands: string[];
+  brands: BrandOption[];
   selectedBrands: string[];
   onBrandsChange: (brands: string[]) => void;
   priceRange: [number, number];
@@ -30,11 +35,11 @@ export default function ProductFilters({
     }).format(value);
   };
 
-  const handleBrandToggle = (brand: string) => {
-    if (selectedBrands.includes(brand)) {
-      onBrandsChange(selectedBrands.filter((b) => b !== brand));
+  const handleBrandToggle = (brandId: string) => {
+    if (selectedBrands.includes(brandId)) {
+      onBrandsChange(selectedBrands.filter((id) => id !== brandId));
     } else {
-      onBrandsChange([...selectedBrands, brand]);
+      onBrandsChange([...selectedBrands, brandId]);
     }
   };
 
@@ -75,17 +80,17 @@ export default function ProductFilters({
         <h3 className="font-semibold text-foreground mb-4">Thương hiệu</h3>
         <div className="space-y-3">
           {brands.map((brand) => (
-            <div key={brand} className="flex items-center space-x-3">
+            <div key={brand.id} className="flex items-center space-x-3">
               <Checkbox
-                id={brand}
-                checked={selectedBrands.includes(brand)}
-                onCheckedChange={() => handleBrandToggle(brand)}
+                id={brand.id}
+                checked={selectedBrands.includes(brand.id)}
+                onCheckedChange={() => handleBrandToggle(brand.id)}
               />
               <Label
-                htmlFor={brand}
+                htmlFor={brand.id}
                 className="text-sm font-normal cursor-pointer text-foreground"
               >
-                {brand}
+                {brand.name}
               </Label>
             </div>
           ))}

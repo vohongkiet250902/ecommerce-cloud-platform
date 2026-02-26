@@ -59,14 +59,14 @@ export default function Settings() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div className="space-y-2">
                 <Label htmlFor="storeName">Tên cửa hàng</Label>
-                <Input id="storeName" defaultValue="ElecStore" />
+                <Input id="storeName" defaultValue="ProTech Store" />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="email">Email liên hệ</Label>
                 <Input
                   id="email"
                   type="email"
-                  defaultValue="contact@elecstore.com"
+                  defaultValue="contact@protechstore.vn"
                 />
               </div>
               <div className="space-y-2">
@@ -75,7 +75,7 @@ export default function Settings() {
               </div>
               <div className="space-y-2">
                 <Label htmlFor="website">Website</Label>
-                <Input id="website" defaultValue="https://elecstore.com" />
+                <Input id="website" defaultValue="https://protechstore.vn" />
               </div>
               <div className="space-y-2 md:col-span-2">
                 <Label htmlFor="address">Địa chỉ</Label>
@@ -165,7 +165,7 @@ export default function Settings() {
                 <Input
                   id="adminEmail"
                   type="email"
-                  defaultValue="admin@elecstore.com"
+                  defaultValue="admin@protechstore.vn"
                 />
               </div>
               <div className="space-y-2">

@@ -25,18 +25,19 @@ const ToastViewport = React.forwardRef<
 ToastViewport.displayName = ToastPrimitives.Viewport.displayName;
 
 const toastVariants = cva(
-  "group pointer-events-auto relative flex w-full items-center justify-between space-x-4 overflow-hidden rounded-md border p-6 pr-8 shadow-lg transition-all " +
-    "data-[swipe=cancel]:translate-x-0 data-[swipe=end]:translate-x-[var(--radix-toast-swipe-end-x)] " +
-    "data-[swipe=move]:translate-x-[var(--radix-toast-swipe-move-x)] data-[swipe=move]:transition-none " +
-    "data-[state=open]:animate-in data-[state=closed]:animate-out data-[swipe=end]:animate-out " +
-    "data-[state=closed]:fade-out-80 data-[state=closed]:slide-out-to-right-full " +
-    "data-[state=open]:slide-in-from-top-full data-[state=open]:sm:slide-in-from-bottom-full",
+  "group pointer-events-auto relative flex w-full items-start gap-3 overflow-hidden rounded-xl border p-4 shadow-xl backdrop-blur transition-all " +
+    "data-[state=open]:animate-in data-[state=closed]:animate-out " +
+    "data-[state=open]:fade-in data-[state=closed]:fade-out " +
+    "data-[state=open]:slide-in-from-top-2 data-[state=closed]:slide-out-to-top-2",
   {
     variants: {
       variant: {
-        default: "border bg-background text-foreground",
+        default:
+          "bg-background border-border text-foreground",
         destructive:
-          "destructive group border-destructive bg-destructive text-destructive-foreground",
+          "bg-red-50 border-red-200 text-red-800 dark:bg-red-950 dark:border-red-800 dark:text-red-200",
+        success:
+          "bg-green-50 border-green-200 text-green-800 dark:bg-green-950 dark:border-green-800 dark:text-green-200",
       },
     },
     defaultVariants: {

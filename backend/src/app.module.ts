@@ -14,6 +14,7 @@ import { BrandsModule } from './modules/brands/brands.module';
 import { PaymentsModule } from './modules/payments/payments.module';
 import { CartModule } from './modules/cart/cart.module';
 import { MailerModule } from '@nestjs-modules/mailer';
+import { UploadModule } from './modules/upload/upload.module';
 
 @Module({
   imports: [
@@ -27,6 +28,7 @@ import { MailerModule } from '@nestjs-modules/mailer';
     BrandsModule,
     PaymentsModule,
     CartModule,
+    UploadModule,
     //config DB
     MongooseModule.forRootAsync({
       imports: [ConfigModule],
