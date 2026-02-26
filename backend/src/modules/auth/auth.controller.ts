@@ -1,37 +1,65 @@
-import { Controller, Post, Body, Req, Res, UseGuards } from '@nestjs/common';
+import { Controller, Post, Body, Res, Req, UseGuards } from '@nestjs/common';
 import { AuthService } from './auth.service';
-import { JwtGuard } from '../../common/guards/jwt.guard';
-import type { Request, Response } from 'express';
+import type { Request, Response } from 'express'; // Import type từ express
+import { JwtGuard } from '../../common/guards/jwt.guard'; // Đảm bảo đường dẫn đúng tới JwtGuard của bạn
+
 import { RegisterDto } from './dto/register.dto';
+import { ResendOtpDto, VerifyAccountDto } from './dto/verify-account.dto';
+import { LoginDto } from './dto/login.dto';
+import { ForgotPasswordDto } from './dto/forgot-password.dto';
+import { ResetPasswordDto } from './dto/reset-password.dto';
 
 @Controller('auth')
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
+  // 1. Đăng ký
+  @Post('register')
+  register(@Body() dto: RegisterDto) {
+    return this.authService.register(dto);
+  }
+
+  // 2. Kích hoạt tài khoản
+  @Post('verify-account')
+  verifyAccount(@Body() dto: VerifyAccountDto) {
+    return this.authService.verifyAccount(dto);
+  }
+
+  // 3. Gửi lại mã kích hoạt
+  @Post('resend-activation')
+  resendActivation(@Body() dto: ResendOtpDto) {
+    return this.authService.resendActivationOtp(dto);
+  }
+
+  // 4. Đăng nhập
   @Post('login')
-  async login(
-    @Body() body: { email: string; password: string },
-    @Res({ passthrough: true }) res: Response,
-  ) {
-    return this.authService.login(body.email, body.password, res);
+  login(@Body() dto: LoginDto, @Res({ passthrough: true }) res: Response) {
+    return this.authService.login(dto, res);
   }
 
-  @UseGuards(JwtGuard)
-  @Post('logout')
-  async logout(@Req() req: any, @Res({ passthrough: true }) res: Response) {
-    return this.authService.logout(req.user.id, res);
+  // 5. Quên mật khẩu
+  @Post('forgot-password')
+  forgotPassword(@Body() dto: ForgotPasswordDto) {
+    return this.authService.forgotPassword(dto);
   }
 
+  // 6. Đặt lại mật khẩu
+  @Post('reset-password')
+  resetPassword(@Body() dto: ResetPasswordDto) {
+    return this.authService.resetPassword(dto);
+  }
+
+  // 7. Refresh Token
+  // Route này nhận Cookie nên cần @Req()
   @Post('refresh')
-  async refresh(
-    @Req() req: Request,
-    @Res({ passthrough: true }) res: Response,
-  ) {
+  refresh(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
     return this.authService.refresh(req, res);
   }
 
-  @Post('register')
-  async register(@Body() registerDto: RegisterDto) {
-    return this.authService.register(registerDto);
+  // 8. Đăng xuất
+  @UseGuards(JwtGuard)
+  @Post('logout')
+  logout(@Req() req: any, @Res({ passthrough: true }) res: Response) {
+    return this.authService.logout(req.user.id, res);
   }
 }

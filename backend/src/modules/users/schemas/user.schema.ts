@@ -27,9 +27,14 @@ export class User {
   @Prop({ required: true, select: false })
   password: string;
 
-  // lưu HASH refresh token
   @Prop({ type: String, select: false, default: null })
   refreshToken: string | null;
+
+  @Prop({ type: String, select: false })
+  otpHash?: string;
+
+  @Prop({ type: Date, select: false })
+  otpExpires?: Date;
 }
 
 export const UserSchema = SchemaFactory.createForClass(User);

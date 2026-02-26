@@ -13,6 +13,7 @@ import { CategoriesModule } from './modules/categories/categories.module';
 import { BrandsModule } from './modules/brands/brands.module';
 import { PaymentsModule } from './modules/payments/payments.module';
 import { CartModule } from './modules/cart/cart.module';
+import { MailerModule } from '@nestjs-modules/mailer';
 
 @Module({
   imports: [
@@ -22,6 +23,11 @@ import { CartModule } from './modules/cart/cart.module';
     OrdersModule,
     SearchModule,
     ConfigModule.forRoot({ isGlobal: true }),
+    CategoriesModule,
+    BrandsModule,
+    PaymentsModule,
+    CartModule,
+    //config DB
     MongooseModule.forRootAsync({
       imports: [ConfigModule],
       useFactory: (configService: ConfigService) => ({
@@ -29,10 +35,22 @@ import { CartModule } from './modules/cart/cart.module';
       }),
       inject: [ConfigService],
     }),
-    CategoriesModule,
-    BrandsModule,
-    PaymentsModule,
-    CartModule,
+    //config Email
+    MailerModule.forRootAsync({
+      inject: [ConfigService],
+      useFactory: (configService: ConfigService) => ({
+        transport: {
+          host: configService.get<string>('MAIL_HOST'),
+          auth: {
+            user: configService.get<string>('MAIL_USER'),
+            pass: configService.get<string>('MAIL_PASSWORD'),
+          },
+        },
+        defaults: {
+          from: `"No Reply" <${configService.get<string>('MAIL_FROM')}>`,
+        },
+      }),
+    }),
   ],
   controllers: [AppController],
   providers: [AppService],
