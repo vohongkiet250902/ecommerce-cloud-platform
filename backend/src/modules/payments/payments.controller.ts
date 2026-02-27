@@ -10,7 +10,7 @@ import {
 } from '@nestjs/common';
 import { PaymentsService } from './payments.service';
 import { JwtGuard } from '../../common/guards/jwt.guard';
-import type { Response } from 'express';
+import type { Response, Request } from 'express';
 
 @Controller('payments')
 export class PaymentsController {
@@ -18,36 +18,39 @@ export class PaymentsController {
 
   @Post('vnpay/create')
   @UseGuards(JwtGuard)
-  create(@Body('orderId') orderId: string, @Req() req) {
-    return this.paymentsService.createVNPayUrl(orderId, req.user.id);
+  create(
+    @Body('orderId') orderId: string,
+    @Req() req: Request & { user: any },
+  ) {
+    // Lấy IP trực tiếp từ request, fallback về localhost nếu không có
+    const ipAddr = req.ip || '127.0.0.1';
+    return this.paymentsService.createVNPayUrl(orderId, req.user.id, ipAddr);
   }
 
   @Get('vnpay/return')
   async vnpayReturn(@Query() query: any, @Res() res: Response) {
-    const secureHash = query.vnp_SecureHash;
-    delete query.vnp_SecureHash;
-    delete query.vnp_SecureHashType;
+    // MẸO LOCAL TEST: Ép server tự chạy hàm IPN để update Database ngay tại đây
+    // (Vì VNPAY không thể tự gọi ngầm vào localhost được)
+    await this.paymentsService.handleVnPayIpn(query);
 
-    const sorted = this.paymentsService['sortObject'](query);
-    const signData = require('qs').stringify(sorted, { encode: false });
+    // Sau khi DB đã được update, chạy hàm check để lấy kết quả hiển thị cho Frontend
+    const result = await this.paymentsService.checkReturnUrl(query);
 
-    const hmac = require('crypto').createHmac(
-      'sha512',
-      process.env.VNP_HASHSECRET,
-    );
-    const checkHash = hmac.update(signData).digest('hex');
-
-    if (secureHash !== checkHash) {
-      return res.status(400).send('Invalid signature');
-    }
-
-    if (query.vnp_ResponseCode === '00') {
-      await this.paymentsService['orderModel'].findByIdAndUpdate(
-        query.vnp_TxnRef,
-        { status: 'paid', paymentMethod: 'vnpay' },
+    if (result.success) {
+      return res.redirect(
+        `http://localhost:3000/payment-result?status=success&orderId=${result.orderId}`,
+      );
+    } else {
+      return res.redirect(
+        `http://localhost:3000/payment-result?status=failed&message=${result.message}`,
       );
     }
+  }
 
-    return res.redirect('http://localhost:3000/payment-result');
+  // Endpoint 2: VNPay gọi ngầm để update Database (IPN)
+  @Get('vnpay/ipn')
+  async vnpayIpn(@Query() query: any, @Res() res: Response) {
+    const result = await this.paymentsService.handleVnPayIpn(query);
+    return res.status(200).json(result);
   }
 }

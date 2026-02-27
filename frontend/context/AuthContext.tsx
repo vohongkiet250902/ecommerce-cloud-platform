@@ -25,6 +25,11 @@ interface AuthContextType {
   signUp: (email: string, password: string, fullName: string) => Promise<{ error?: AuthError | null }>;
   signOut: () => Promise<void>;
   refreshUser: () => Promise<void>;
+  verifyAccount: (email: string, otp: string) => Promise<{ error?: AuthError | null }>;
+  resendActivation: (email: string) => Promise<{ error?: AuthError | null }>;
+  forgotPassword: (email: string) => Promise<{ error?: AuthError | null }>;
+  verifyResetOtp: (email: string, otp: string) => Promise<{ error?: AuthError | null }>;
+  resetPassword: (data: any) => Promise<{ error?: AuthError | null }>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -57,27 +62,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     async (email: string, password: string): Promise<{ error?: AuthError | null }> => {
       try {
         await authApi.login(email, password);
-        // After login, fetch the user details to update state
         await fetchUser();
         return { error: null };
       } catch (error) {
         const axiosError = error as AxiosError;
-        let errorMessage = 'Đăng nhập thất bại';
-
-        if (axiosError.response?.data) {
-          const responseData = axiosError.response.data as Record<string, unknown>;
-          if (typeof responseData.message === 'string') {
-             errorMessage = responseData.message;
-          } else if (axiosError.response?.status === 401) {
-            errorMessage = 'Invalid login credentials';
-          } else if (axiosError.response?.status === 403) {
-            errorMessage = 'Email not confirmed';
-          }
-        } else if (axiosError.message) {
-           errorMessage = axiosError.message;
-        }
-
-        return { error: { message: errorMessage } };
+        return { 
+          error: { 
+            message: (axiosError.response?.data as any)?.message || 'Đăng nhập thất bại' 
+          },
+          status: axiosError.response?.status
+        } as any;
       }
     },
     [fetchUser]
@@ -90,24 +84,81 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return { error: null };
       } catch (error) {
         const axiosError = error as AxiosError;
-        let errorMessage = 'Đăng ký thất bại. Email đã tồn tại.';
-
-        if (axiosError.response?.data) {
-           const responseData = axiosError.response.data as Record<string, unknown>;
-           if (typeof responseData.message === 'string') {
-              errorMessage = responseData.message;
-           } else if (axiosError.response?.status === 409) {
-             errorMessage = 'User already registered';
-           }
-        } else if (axiosError.message) {
-            errorMessage = axiosError.message;
-        }
-
-        return { error: { message: errorMessage } };
+        return { 
+          error: { 
+            message: (axiosError.response?.data as any)?.message || 'Đăng ký thất bại' 
+          },
+          status: axiosError.response?.status
+        } as any;
       }
     },
     []
   );
+
+  const verifyAccount = useCallback(async (email: string, otp: string) => {
+    try {
+      await authApi.verifyAccount(email, otp);
+      return { error: null };
+    } catch (error) {
+      const axiosError = error as AxiosError;
+      return { 
+        error: { message: (axiosError.response?.data as any)?.message || 'Xác thực thất bại' },
+        status: axiosError.response?.status
+      } as any;
+    }
+  }, []);
+
+  const resendActivation = useCallback(async (email: string) => {
+    try {
+      await authApi.resendActivation(email);
+      return { error: null };
+    } catch (error) {
+      const axiosError = error as AxiosError;
+      return { 
+        error: { message: (axiosError.response?.data as any)?.message || 'Gửi lại mã thất bại' },
+        status: axiosError.response?.status
+      } as any;
+    }
+  }, []);
+
+  const forgotPassword = useCallback(async (email: string) => {
+    try {
+      await authApi.forgotPassword(email);
+      return { error: null };
+    } catch (error) {
+      const axiosError = error as AxiosError;
+      return { 
+        error: { message: (axiosError.response?.data as any)?.message || 'Yêu cầu thất bại' },
+        status: axiosError.response?.status
+      } as any;
+    }
+  }, []);
+
+  const verifyResetOtp = useCallback(async (email: string, otp: string) => {
+    try {
+      await authApi.verifyResetOtp(email, otp);
+      return { error: null };
+    } catch (error) {
+      const axiosError = error as AxiosError;
+      return { 
+        error: { message: (axiosError.response?.data as any)?.message || 'Xác thực mã OTP thất bại' },
+        status: axiosError.response?.status
+      } as any;
+    }
+  }, []);
+
+  const resetPassword = useCallback(async (data: any) => {
+    try {
+      await authApi.resetPassword(data);
+      return { error: null };
+    } catch (error) {
+      const axiosError = error as AxiosError;
+      return { 
+        error: { message: (axiosError.response?.data as any)?.message || 'Đặt lại mật khẩu thất bại' },
+        status: axiosError.response?.status
+      } as any;
+    }
+  }, []);
 
   const signOut = useCallback(async () => {
     try {
@@ -129,6 +180,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         signUp,
         signOut,
         refreshUser: fetchUser,
+        verifyAccount,
+        resendActivation,
+        forgotPassword,
+        verifyResetOtp,
+        resetPassword,
       }}
     >
       {children}

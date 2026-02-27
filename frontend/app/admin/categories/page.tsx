@@ -10,8 +10,9 @@ import {
   ChevronRight,
   Loader2,
   AlertTriangle,
-  Eye,
-  EyeOff,
+  Search,
+  ArrowUpDown,
+  Filter,
 } from "lucide-react";
 import { useDispatch, useSelector } from "react-redux";
 import { useForm } from "react-hook-form";
@@ -49,7 +50,7 @@ import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 
 import { RootState, AppDispatch } from "@/store";
-import { fetchCategoriesThunk } from "@/store/categories/categories.slice";
+import { fetchAdminCategoriesThunk } from "@/store/categories/categories.slice";
 import { categoryApi } from "@/services/api";
 
 /* ===================== TYPES ===================== */
@@ -227,11 +228,14 @@ export default function CategoriesPage() {
   const dispatch = useDispatch<AppDispatch>();
   const { toast } = useToast();
 
-  const [categories, setCategories] = useState<Category[]>([]);
-  const [loading, setLoading] = useState(false);
-
+  const { data: reduxCategories, loading } = useSelector((state: RootState) => state.categories);
   const [initialized, setInitialized] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  // Search & Sort & Filter states
+  const [searchQuery, setSearchQuery] = useState("");
+  const [sortBy, setSortBy] = useState<"name" | "products">("name");
+  const [statusFilter, setStatusFilter] = useState<"all" | "active" | "inactive">("all");
 
   // Modal states
   const [isDialogOpen, setIsDialogOpen] = useState(false);
@@ -248,6 +252,10 @@ export default function CategoriesPage() {
     null,
   );
 
+  // Status toggle confirm state
+  const [statusConfirmOpen, setStatusConfirmOpen] = useState(false);
+  const [statusToToggle, setStatusToToggle] = useState<{ cat: Category; status: boolean } | null>(null);
+
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
     defaultValues: {
@@ -261,16 +269,13 @@ export default function CategoriesPage() {
 
   const fetchAdminCategories = useCallback(async () => {
     try {
-      setLoading(true);
-      const res = await categoryApi.getAdminCategories();
-      setCategories(res.data.data || res.data);
+      await dispatch(fetchAdminCategoriesThunk()).unwrap();
     } catch (error) {
       console.error(error);
     } finally {
-      setLoading(false);
       setInitialized(true);
     }
-  }, []);
+  }, [dispatch]);
 
   useEffect(() => {
     fetchAdminCategories();
@@ -289,25 +294,65 @@ export default function CategoriesPage() {
     form.setValue("slug", slug, { shouldValidate: true });
   }, [watchedName, form]);
 
-  /* ===================== STATS ===================== */
-  const { totalCategories, totalProducts } = useMemo(() => {
-    const count = (list: Category[]): { cats: number; prods: number } => {
-      return list.reduce(
-        (acc, cat) => {
-          const childrenCount = cat.children
-            ? count(cat.children)
-            : { cats: 0, prods: 0 };
-          return {
-            cats: acc.cats + 1 + childrenCount.cats,
-            prods: acc.prods + (cat.productCount || 0) + childrenCount.prods,
-          };
-        },
-        { cats: 0, prods: 0 },
-      );
+  /* ===================== DERIVED DATA ===================== */
+  const categories = useMemo(() => {
+    // 1. Filtering logic
+    const filterTree = (list: Category[]): Category[] => {
+      return list
+        .map((cat) => ({
+          ...cat,
+          children: cat.children ? filterTree(cat.children) : [],
+        }))
+        .filter((cat) => {
+          const matchesSearch = searchQuery === "" || 
+                               cat.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
+                               cat.slug.toLowerCase().includes(searchQuery.toLowerCase());
+          
+          const ownStatusMatches = statusFilter === "all" ? true : 
+                                   statusFilter === "active" ? cat.isActive : !cat.isActive;
+
+          const hasMatchingChildren = cat.children && cat.children.length > 0;
+          
+          // Giữ lại danh mục nếu:
+          // 1. Bản thân nó khớp cả tìm kiếm và trạng thái
+          // 2. HOẶC nó có danh mục con khớp (để giữ được cấu trúc cây)
+          return (matchesSearch && ownStatusMatches) || hasMatchingChildren;
+        });
     };
-    const res = count(categories);
-    return { totalCategories: res.cats, totalProducts: res.prods };
-  }, [categories]);
+
+    let processed = filterTree(reduxCategories);
+
+    // 2. Sorting logic
+    const sortTree = (list: Category[]): Category[] => {
+      return [...list]
+        .sort((a, b) => {
+          if (sortBy === "name") return a.name.localeCompare(b.name);
+          if (sortBy === "products") return (b.productCount || 0) - (a.productCount || 0);
+          return 0;
+        })
+        .map((cat) => ({
+          ...cat,
+          children: cat.children ? sortTree(cat.children) : [],
+        }));
+    };
+
+    return sortTree(processed);
+  }, [reduxCategories, searchQuery, sortBy, statusFilter]);
+
+  const { totalCategories, totalRootCategories, totalProducts } = useMemo(() => {
+    const countTotalCategories = (list: Category[]): number => {
+      return list.reduce((acc, cat) => {
+        const childrenCount = cat.children ? countTotalCategories(cat.children) : 0;
+        return acc + 1 + childrenCount;
+      }, 0);
+    };
+
+    const totalCats = countTotalCategories(reduxCategories);
+    const totalRoots = reduxCategories.length;
+    const totalProds = reduxCategories.reduce((acc: number, cat) => acc + (cat.productCount || 0), 0);
+
+    return { totalCategories: totalCats, totalRootCategories: totalRoots, totalProducts: totalProds };
+  }, [reduxCategories]);
 
   /* ===================== HANDLERS ===================== */
   const handleOpenCreateResponse = () => {
@@ -327,7 +372,7 @@ export default function CategoriesPage() {
   const handleOpenAddChild = (parent: Category) => {
     if (parent.parentId) {
       toast({
-        title: "Không thể tạo danh mục con",
+        title: "❌ Giới hạn cấp bậc",
         description: "Hệ thống hiện tại chỉ hỗ trợ tối đa 2 cấp danh mục.",
         variant: "destructive",
       });
@@ -335,16 +380,16 @@ export default function CategoriesPage() {
     }
     setDialogMode("create_child");
     setSelectedCategory(parent);
-    form.reset({ name: "", slug: "" });
+    form.reset({ name: "", slug: "", isActive: true });
     setIsDialogOpen(true);
   };
 
   const handleOpenDelete = (cat: Category) => {
     if (cat.children && cat.children.length > 0) {
       toast({
-        title: "Không thể xóa",
+        title: "❌ Cảnh báo cấu trúc",
         description:
-          "Danh mục này đang chứa danh mục con. Vui lòng xóa danh mục con trước.",
+          "Danh mục này đang chứa danh mục con. Vui lòng chuyển hoặc xóa danh mục con trước.",
         variant: "destructive",
       });
       return;
@@ -354,6 +399,16 @@ export default function CategoriesPage() {
   };
 
   const handleToggleStatus = async (cat: Category, newStatus: boolean) => {
+    // Luôn yêu cầu xác nhận khi tắt trạng thái (dù là danh mục cha hay con)
+    if (!newStatus) {
+      setStatusToToggle({ cat, status: newStatus });
+      setStatusConfirmOpen(true);
+      return;
+    }
+    await executeToggleStatus(cat, newStatus);
+  };
+
+  const executeToggleStatus = async (cat: Category, newStatus: boolean) => {
     try {
       const idsToUpdate: string[] = [cat._id];
       
@@ -372,20 +427,21 @@ export default function CategoriesPage() {
       await Promise.all(promises);
 
       toast({ 
-        title: "Cập nhật thành công", 
+        title: "✅ Cập nhật thành công", 
         variant: "success",
         description: !newStatus && idsToUpdate.length > 1 
-          ? `Đã tắt "${cat.name}" và ${idsToUpdate.length - 1} danh mục con.` 
-          : `Đã cập nhật trạng thái cho "${cat.name}".`
+          ? `Đã ngừng hoạt động "${cat.name}" và ${idsToUpdate.length - 1} danh mục con liên quan.` 
+          : `Trạng thái của "${cat.name}" đã được cập nhật.`
       });
       
-      dispatch(fetchCategoriesThunk());
-      fetchAdminCategories();
+      dispatch(fetchAdminCategoriesThunk());
+      setStatusConfirmOpen(false);
+      setStatusToToggle(null);
     } catch (error: any) {
       const msg = error?.response?.data?.message || "Không thể cập nhật trạng thái";
       toast({
-        title: "Thất bại",
-        description: typeof msg === "string" ? msg : JSON.stringify(msg),
+        title: "❌ Cập nhật thất bại",
+        description: typeof msg === "string" ? msg : "Đã xảy ra lỗi không xác định khi cập nhật trạng thái.",
         variant: "destructive",
       });
     }
@@ -412,26 +468,25 @@ export default function CategoriesPage() {
           }
         }
         
-        toast({ title: "Cập nhật thành công", variant: "success" });
+        toast({ title: "✅ Cập nhật thành công", variant: "success" });
       } else if (dialogMode === "create") {
         await categoryApi.createCategory({ ...values, parentId: null });
-        toast({ title: "Tạo danh mục gốc thành công", variant: "success" });
+        toast({ title: "✅ Tạo danh mục thành công", variant: "success" });
       } else if (dialogMode === "create_child" && selectedCategory) {
         await categoryApi.createCategory({
           ...values,
           parentId: selectedCategory._id,
         });
-        toast({ title: "Tạo danh mục con thành công", variant: "success" });
+        toast({ title: "✅ Tạo danh mục con thành công", variant: "success" });
       }
 
-      dispatch(fetchCategoriesThunk());
-      fetchAdminCategories();
+      dispatch(fetchAdminCategoriesThunk());
       setIsDialogOpen(false);
     } catch (error: any) {
       const msg = error?.response?.data?.message || "Có lỗi xảy ra";
       toast({
-        title: "Thất bại",
-        description: typeof msg === "string" ? msg : (Array.isArray(msg) ? msg.join(", ") : JSON.stringify(msg)),
+        title: "❌ Tên danh mục đã tồn tại",
+        description: typeof msg === "string" ? msg : "Tên danh mục này đã tồn tại. Vui lòng chọn tên khác.",
         variant: "destructive",
       });
     }
@@ -443,17 +498,16 @@ export default function CategoriesPage() {
     try {
       setDeletingId(categoryToDelete._id);
       await categoryApi.deleteCategory(categoryToDelete._id);
-      toast({ title: "Đã xóa danh mục", variant: "success" });
-      dispatch(fetchCategoriesThunk());
-      fetchAdminCategories();
+      toast({ title: "✅ Đã xóa danh mục", variant: "success" });
+      dispatch(fetchAdminCategoriesThunk());
     } catch (error: any) {
       const msg = error?.response?.data?.message || "Không thể xóa danh mục";
       const description = typeof msg === "string" ? msg : (Array.isArray(msg) ? msg.join(", ") : JSON.stringify(msg));
       
       toast({
-        title: "Không thể xóa",
+        title: "❌ Không thể xóa",
         description: description.includes("tồn kho") 
-          ? "Danh mục này vẫn còn sản phẩm trong kho. Vui lòng chuyển sang trạng thái 'Ngừng hoạt động' thay vì xóa."
+          ? "Danh mục này vẫn còn sản phẩm. Vui lòng chuyển sản phẩm sang danh mục khác hoặc ngừng hoạt động thay vì xóa."
           : description,
         variant: "destructive",
       });
@@ -493,6 +547,7 @@ export default function CategoriesPage() {
         </Button>
       </div>
 
+
       {/* Stats */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="bg-card rounded-xl p-4 border border-border shadow-sm">
@@ -509,7 +564,7 @@ export default function CategoriesPage() {
           </p>
           <div className="flex items-baseline gap-2 mt-2">
             <span className="text-2xl font-bold text-primary">
-              {categories.length}
+              {totalRootCategories}
             </span>
           </div>
         </div>
@@ -526,11 +581,53 @@ export default function CategoriesPage() {
       </div>
 
       <div className="bg-card rounded-xl border border-border/40 shadow-sm overflow-hidden">
-        <div className="p-4 border-b border-border/40 bg-muted/40">
-          <h3 className="font-semibold flex items-center gap-2">
+        <div className="p-4 border-b border-border/40 bg-muted/40 flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <h3 className="font-semibold flex items-center gap-2 shrink-0">
             <FolderTree className="h-4 w-4" />
             Cấu trúc danh mục
           </h3>
+
+          <div className="flex flex-col md:flex-row gap-2 flex-1 md:justify-end">
+             {/* Search */}
+            <div className="relative max-w-sm w-full">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input 
+                placeholder="Tìm kiếm..." 
+                className="pl-8 h-9 text-sm bg-background/50 border-border/40"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+              />
+            </div>
+
+            {/* Status Filter */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="sm" className="gap-2 h-9 border-border/40 bg-background/50">
+                  <Filter className="h-3.5 w-3.5" />
+                  {statusFilter === "all" ? "Tất cả" : statusFilter === "active" ? "Đang hoạt động" : "Ngừng hoạt động"}
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="dropdown-content">
+                <DropdownMenuItem onClick={() => setStatusFilter("all")}>Tất cả trạng thái</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setStatusFilter("active")}>Đang hoạt động</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setStatusFilter("inactive")}>Ngừng hoạt động</DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+
+            {/* Sort */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="sm" className="gap-2 h-9 border-border/40 bg-background/50">
+                  <ArrowUpDown className="h-3.5 w-3.5" />
+                  Sắp xếp
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="dropdown-content">
+                <DropdownMenuItem onClick={() => setSortBy("name")}>Theo tên (A-Z)</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setSortBy("products")}>Theo số sản phẩm</DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
         </div>
 
         {categories.length === 0 ? (
@@ -618,7 +715,7 @@ export default function CategoriesPage() {
                 control={form.control}
                 name="isActive"
                 render={({ field }) => (
-                  <FormItem className="flex items-center justify-between rounded-lg border p-3 shadow-sm">
+                  <FormItem className="flex items-center justify-between rounded-lg border border-border/50 p-3 shadow-sm transition-colors hover:bg-muted/5">
                     <div className="space-y-0.5">
                       <FormLabel>Trạng thái hoạt động</FormLabel>
                       <div className="text-[12px] text-muted-foreground">
@@ -696,6 +793,65 @@ export default function CategoriesPage() {
               ) : (
                 "Xóa danh mục"
               )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      {/* ===================== STATUS TOGGLE CONFIRM DIALOG ===================== */}
+      <Dialog open={statusConfirmOpen} onOpenChange={setStatusConfirmOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-warning">
+              <AlertTriangle className="h-5 w-5" />
+              Xác nhận tắt trạng thái
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="py-4 space-y-3">
+            <p className="text-foreground font-medium">
+              Bạn đang chuẩn bị tắt trạng thái của danh mục{" "}
+              <span className="font-bold text-primary">
+                "{statusToToggle?.cat.name}"
+              </span>
+            </p>
+            <div className="p-4 bg-muted/50 rounded-lg border border-warning/20 text-sm text-muted-foreground">
+              <div className="flex items-start gap-2">
+                <span className="text-warning text-lg leading-none">⚠️</span>
+                <span>
+                  {statusToToggle?.cat.children && statusToToggle.cat.children.length > 0 ? (
+                    <>
+                      Hành động này sẽ <strong>ngừng hoạt động tất cả danh mục con</strong> trực thuộc danh mục này. 
+                      Sản phẩm liên quan sẽ bị ẩn khỏi cửa hàng.
+                    </>
+                  ) : (
+                    <>
+                      Danh mục này sẽ bị ẩn khỏi cửa hàng. Các sản phẩm chỉ thuộc duy nhất danh mục này cũng sẽ không hiển thị cho khách hàng.
+                    </>
+                  )}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setStatusConfirmOpen(false);
+                setStatusToToggle(null);
+              }}
+            >
+              Hủy
+            </Button>
+            <Button
+              variant="default"
+              onClick={() => {
+                if (statusToToggle) {
+                  executeToggleStatus(statusToToggle.cat, statusToToggle.status);
+                }
+              }}
+            >
+              Tiếp tục tắt
             </Button>
           </DialogFooter>
         </DialogContent>

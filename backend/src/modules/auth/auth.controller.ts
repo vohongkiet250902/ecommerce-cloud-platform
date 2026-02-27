@@ -43,6 +43,12 @@ export class AuthController {
     return this.authService.forgotPassword(dto);
   }
 
+  // 5.5. Kiểm tra mã OTP quên mật khẩu
+  @Post('verify-reset-otp')
+  verifyResetOtp(@Body() dto: VerifyAccountDto) {
+    return this.authService.verifyResetOtp(dto);
+  }
+
   // 6. Đặt lại mật khẩu
   @Post('reset-password')
   resetPassword(@Body() dto: ResetPasswordDto) {

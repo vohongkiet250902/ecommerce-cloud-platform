@@ -29,6 +29,14 @@ export const fetchCategoriesThunk = createAsyncThunk(
   },
 );
 
+export const fetchAdminCategoriesThunk = createAsyncThunk(
+  "categories/fetchAdminAll",
+  async () => {
+    const res = await categoryApi.getAdminCategories();
+    return res.data.data || res.data;
+  },
+);
+
 const categoriesSlice = createSlice({
   name: "categories",
   initialState,
@@ -46,6 +54,16 @@ const categoriesSlice = createSlice({
           : [];
       })
       .addCase(fetchCategoriesThunk.rejected, (state) => {
+        state.loading = false;
+      })
+      .addCase(fetchAdminCategoriesThunk.pending, (state) => {
+        state.loading = true;
+      })
+      .addCase(fetchAdminCategoriesThunk.fulfilled, (state, action) => {
+        state.loading = false;
+        state.data = Array.isArray(action.payload) ? action.payload : [];
+      })
+      .addCase(fetchAdminCategoriesThunk.rejected, (state) => {
         state.loading = false;
       });
   },

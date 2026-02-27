@@ -168,6 +168,24 @@ export class AuthService {
     return { message: 'Đã gửi OTP đặt lại mật khẩu vào email.' };
   }
 
+  // 5.5. KIỂM TRA OTP QUÊN MẬT KHẨU (Chỉ check, không reset)
+  async verifyResetOtp(dto: VerifyAccountDto) {
+    const user = await this.usersService.findByEmailInternal(dto.email);
+    if (
+      !user ||
+      !user.otpHash ||
+      !user.otpExpires ||
+      user.otpExpires < new Date()
+    ) {
+      throw new BadRequestException('Mã OTP không hợp lệ hoặc đã hết hạn');
+    }
+
+    const isMatch = await bcrypt.compare(dto.otp, user.otpHash);
+    if (!isMatch) throw new BadRequestException('Mã OTP không chính xác');
+
+    return { message: 'Mã OTP hợp lệ. Tiếp tục đặt lại mật khẩu.' };
+  }
+
   // 6. ĐẶT LẠI MẬT KHẨU (Reset)
   async resetPassword(dto: ResetPasswordDto) {
     const user = await this.usersService.findByEmailInternal(dto.email);
