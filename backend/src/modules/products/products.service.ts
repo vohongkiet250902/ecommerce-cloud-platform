@@ -78,6 +78,7 @@ export class ProductsService {
       minPrice,
       maxPrice,
       sort,
+      isFeatured, // <-- BƯỚC 1: Tách isFeatured ra khỏi query
       ...filterParams
     } = query;
     const filter: any = {};
@@ -90,6 +91,12 @@ export class ProductsService {
       filter['variants.price'] = {};
       if (minPrice) filter['variants.price'].$gte = +minPrice;
       if (maxPrice) filter['variants.price'].$lte = +maxPrice;
+    }
+
+    // <-- BƯỚC 2: Thêm logic xử lý isFeatured
+    if (isFeatured !== undefined) {
+      // Ép kiểu vì query string thường gửi lên dưới dạng text 'true' hoặc 'false'
+      filter.isFeatured = isFeatured === 'true' || isFeatured === true;
     }
 
     const attributeQueries: any[] = [];
