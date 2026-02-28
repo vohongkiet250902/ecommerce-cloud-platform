@@ -161,11 +161,14 @@ export class AuthService {
   // 5. QUÊN MẬT KHẨU (Gửi OTP)
   async forgotPassword(dto: ForgotPasswordDto) {
     const user = await this.usersService.findByEmail(dto.email);
-    // Security: Luôn báo thành công dù email không tồn tại
-    if (!user) return { message: 'Nếu email tồn tại, OTP đã được gửi.' };
 
-    await this.generateAndSendOtp(user, 'Quên mật khẩu', 'Đặt lại mật khẩu');
-    return { message: 'Đã gửi OTP đặt lại mật khẩu vào email.' };
+    // Chỉ gửi mail nếu tìm thấy user và user đã active để tránh lỗi crash hệ thống
+    if (user && user.isActive) {
+      await this.generateAndSendOtp(user, 'Quên mật khẩu', 'Đặt lại mật khẩu');
+    }
+
+    // Luôn trả về câu này dù có email hay không để chống hacker dò quét email trong DB
+    return { message: 'Nếu email tồn tại, OTP đã được gửi.' };
   }
 
   // 5.5. KIỂM TRA OTP QUÊN MẬT KHẨU (Chỉ check, không reset)
@@ -213,35 +216,55 @@ export class AuthService {
     return { message: 'Đổi mật khẩu thành công. Hãy đăng nhập lại.' };
   }
 
+  // 7. LÀM MỚI TOKEN (Refresh)
   async refresh(req: Request, res: Response) {
     const refreshToken = req.cookies?.refreshToken;
-    if (!refreshToken) throw new UnauthorizedException();
+    if (!refreshToken) throw new UnauthorizedException('Không tìm thấy token');
 
-    // verify chữ ký & hạn
     const payload = this.jwtService.verify(refreshToken, {
       secret: process.env.JWT_REFRESH_SECRET,
     });
 
     const userId = payload.sub as string;
 
-    // ✅ check refresh token hash trong DB
     const ok = await this.usersService.isRefreshTokenValid(
       userId,
       refreshToken,
     );
-    if (!ok) throw new UnauthorizedException();
+    if (!ok) {
+      // TỐI ƯU: Nếu token hợp lệ nhưng không có trong DB -> Có thể token cũ đã bị lộ và dùng lại
+      // Thu hồi toàn bộ token của user này ngay lập tức để bảo vệ tài khoản
+      await this.usersService.clearRefreshToken(userId);
+      throw new UnauthorizedException('Token không hợp lệ hoặc đã bị thu hồi');
+    }
 
     const user = await this.usersService.findById(userId);
-    if (!user) throw new UnauthorizedException();
+    if (!user || !user.isActive)
+      throw new UnauthorizedException('Tài khoản không hợp lệ');
 
+    // TỐI ƯU (Refresh Token Rotation): Cấp lại CẢ 2 token mới thay vì chỉ Access Token
     const newAccessToken = this.jwtService.sign(
-      { sub: userId, role: user.role /*, email: user.email */ },
+      { sub: userId, role: user.role },
       { secret: process.env.JWT_ACCESS_SECRET, expiresIn: '15m' },
     );
+
+    const newRefreshToken = this.jwtService.sign(
+      { sub: userId, role: user.role },
+      { secret: process.env.JWT_REFRESH_SECRET, expiresIn: '7d' },
+    );
+
+    // Cập nhật Token mới vào DB
+    await this.usersService.setRefreshToken(userId, newRefreshToken);
 
     const isProd = process.env.NODE_ENV === 'production';
 
     res.cookie('accessToken', newAccessToken, {
+      httpOnly: true,
+      sameSite: 'strict',
+      secure: isProd,
+    });
+
+    res.cookie('refreshToken', newRefreshToken, {
       httpOnly: true,
       sameSite: 'strict',
       secure: isProd,
