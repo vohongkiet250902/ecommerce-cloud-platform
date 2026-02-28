@@ -26,6 +26,9 @@ export class Cart {
 
   @Prop({ type: [CartItemSchema], default: [] })
   items: CartItem[];
+
+  @Prop({ trim: true, uppercase: true })
+  couponCode?: string;
 }
 
 export const CartSchema = SchemaFactory.createForClass(Cart);

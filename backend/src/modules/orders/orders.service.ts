@@ -7,12 +7,14 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { Order } from './schemas/order.schema';
 import { Product } from '../products/schemas/product.schema';
+import { CouponsService } from '../coupons/coupons.service';
 
 @Injectable()
 export class OrdersService {
   constructor(
     @InjectModel(Order.name) private readonly orderModel: Model<Order>,
     @InjectModel(Product.name) private readonly productModel: Model<Product>,
+    private readonly couponsService: CouponsService,
   ) {}
 
   async create(userId: string, dto: any) {
@@ -24,7 +26,7 @@ export class OrdersService {
       if (existingOrder) return existingOrder;
     }
 
-    let totalAmount = 0;
+    let subTotal = 0;
     const orderItems: any[] = [];
     const deductedItems: any[] = []; // Mảng lưu lịch sử để ROLLBACK nếu lỗi
 
@@ -74,7 +76,7 @@ export class OrdersService {
           quantity: item.quantity,
         });
 
-        totalAmount += variant.price * item.quantity;
+        subTotal += variant.price * item.quantity;
         orderItems.push({
           productId: product._id,
           name: product.name,
@@ -85,6 +87,18 @@ export class OrdersService {
         });
       }
 
+      let finalTotal = subTotal;
+      let discountAmount = 0;
+
+      if (dto.couponCode) {
+        const discountResult = await this.couponsService.calculateDiscount({
+          code: dto.couponCode,
+          orderTotal: subTotal,
+        });
+        finalTotal = discountResult.finalTotal;
+        discountAmount = discountResult.discountAmount;
+      }
+
       if (orderItems.length === 0)
         throw new BadRequestException('Đơn hàng rỗng');
 
@@ -92,7 +106,9 @@ export class OrdersService {
       return await this.orderModel.create({
         userId: new Types.ObjectId(userId),
         items: orderItems,
-        totalAmount,
+        totalAmount: finalTotal,
+        couponCode: dto.couponCode,
+        discountAmount: discountAmount,
         paymentMethod: dto.paymentMethod || 'cod',
         idempotencyKey: dto.idempotencyKey,
       });
@@ -114,6 +130,15 @@ export class OrdersService {
       }
       throw error; // Ném lỗi ra cho Controller
     }
+  }
+
+  async hasPurchased(userId: string, productId: string): Promise<boolean> {
+    const order = await this.orderModel.findOne({
+      userId: new Types.ObjectId(userId),
+      status: 'completed',
+      'items.productId': new Types.ObjectId(productId),
+    });
+    return !!order;
   }
 
   // ✅ Phân trang & Tìm kiếm cho Admin

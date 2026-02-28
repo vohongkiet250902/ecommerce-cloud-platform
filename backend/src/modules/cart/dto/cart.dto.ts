@@ -3,6 +3,7 @@ import {
   ArrayMaxSize,
   IsArray,
   IsBoolean,
+  IsIn,
   IsInt,
   IsMongoId,
   IsOptional,
@@ -48,4 +49,15 @@ export class GetCartQueryDto {
   @IsBoolean()
   @Type(() => Boolean)
   expand?: boolean;
+}
+
+export class ApplyCouponCartDto {
+  @IsString()
+  code: string;
+}
+
+export class CheckoutCartDto {
+  @IsOptional()
+  @IsIn(['cod', 'mock', 'vnpay'])
+  paymentMethod?: string;
 }

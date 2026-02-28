@@ -15,6 +15,8 @@ import { PaymentsModule } from './modules/payments/payments.module';
 import { CartModule } from './modules/cart/cart.module';
 import { MailerModule } from '@nestjs-modules/mailer';
 import { UploadModule } from './modules/upload/upload.module';
+import { CouponsModule } from './modules/coupons/coupons.module';
+import { ReviewsModule } from './modules/reviews/reviews.module';
 
 @Module({
   imports: [
@@ -53,6 +55,8 @@ import { UploadModule } from './modules/upload/upload.module';
         },
       }),
     }),
+    CouponsModule,
+    ReviewsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

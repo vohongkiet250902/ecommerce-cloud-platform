@@ -44,6 +44,12 @@ export class Order {
   @Prop({ required: true, min: 0 })
   totalAmount: number;
 
+  @Prop()
+  couponCode?: string;
+
+  @Prop({ default: 0 })
+  discountAmount?: number;
+
   @Prop({
     enum: ['pending', 'paid', 'shipping', 'completed', 'cancelled'],
     default: 'pending',

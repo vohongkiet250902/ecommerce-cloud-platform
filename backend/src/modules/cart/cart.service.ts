@@ -9,6 +9,7 @@ import { Cart } from './schemas/cart.schema';
 import { Product } from '../products/schemas/product.schema';
 import { UpsertCartItemDto, RemoveCartItemDto } from './dto/cart.dto';
 import { OrdersService } from '../orders/orders.service';
+import { CouponsService } from '../coupons/coupons.service'; // <-- Import CouponsService
 
 type ExpandedCartItem = {
   productId: string;
@@ -36,7 +37,6 @@ type ExpandedCartItem = {
 
 @Injectable()
 export class CartService {
-  // guardrails nhỏ để tránh abuse
   private readonly MAX_ITEMS = 50;
   private readonly MAX_QTY_PER_ITEM = 999;
 
@@ -44,6 +44,7 @@ export class CartService {
     @InjectModel(Cart.name) private readonly cartModel: Model<Cart>,
     @InjectModel(Product.name) private readonly productModel: Model<Product>,
     private readonly ordersService: OrdersService,
+    private readonly couponsService: CouponsService, // <-- Inject vào constructor
   ) {}
 
   private toObjectId(id: string, field = 'id') {
@@ -73,7 +74,6 @@ export class CartService {
   private async getOrCreateCartDoc(userId: string) {
     const uid = this.toObjectId(userId, 'userId');
 
-    // 1 cart / 1 user (unique index). Upsert để đảm bảo luôn có cart.
     const cart = await this.cartModel
       .findOneAndUpdate(
         { userId: uid },
@@ -85,10 +85,6 @@ export class CartService {
     return cart;
   }
 
-  /**
-   * Validate product + sku tồn tại, product/variant active.
-   * (Không check stock ở đây - stock check nằm ở OrdersService khi checkout)
-   */
   private async assertValidProductSku(productId: Types.ObjectId, sku: string) {
     const p = await this.productModel
       .findById(productId)
@@ -110,11 +106,6 @@ export class CartService {
     return { product: p, variant: v };
   }
 
-  /**
-   * Get cart của user
-   * - expand=false: trả cart thô (items)
-   * - expand=true : kèm product + variant + tính total
-   */
   async getCart(userId: string, expand = false) {
     const cart = await this.getOrCreateCartDoc(userId);
 
@@ -132,7 +123,6 @@ export class CartService {
 
     if (!expand) return plain;
 
-    // expand: lấy tất cả products 1 lần
     const ids = plain.items.map((i) =>
       this.toObjectId(i.productId, 'productId'),
     );
@@ -190,29 +180,58 @@ export class CartService {
       0,
     );
 
+    let discountAmount = 0;
+    let finalTotal = total;
+    let appliedCoupon = cart.couponCode;
+
+    if (appliedCoupon && total > 0) {
+      try {
+        const discountResult = await this.couponsService.calculateDiscount({
+          code: appliedCoupon,
+          orderTotal: total,
+        });
+        discountAmount = discountResult.discountAmount;
+        finalTotal = discountResult.finalTotal;
+      } catch (error) {
+        cart.couponCode = undefined;
+        await cart.save();
+        appliedCoupon = undefined;
+      }
+    }
+
     return {
       ...plain,
       items: expandedItems,
       total,
+      discountAmount,
+      finalTotal,
+      couponCode: appliedCoupon,
     };
   }
 
-  /**
-   * Upsert item: set quantity
-   * - nếu item đã có -> set quantity
-   * - nếu chưa có -> add item
-   */
+  async applyCoupon(userId: string, code: string) {
+    const cart = await this.getOrCreateCartDoc(userId);
+    cart.couponCode = code.toUpperCase();
+    await cart.save();
+    return this.getCart(userId, true);
+  }
+
+  async removeCoupon(userId: string) {
+    const cart = await this.getOrCreateCartDoc(userId);
+    cart.couponCode = undefined;
+    await cart.save();
+    return this.getCart(userId, true);
+  }
+
   async upsertItem(userId: string, dto: UpsertCartItemDto) {
     const pid = this.toObjectId(dto.productId, 'productId');
     const sku = this.normalizeSku(dto.sku);
     const quantity = this.clampQty(dto.quantity);
 
-    // validate product/sku
     await this.assertValidProductSku(pid, sku);
 
     const cart = await this.getOrCreateCartDoc(userId);
 
-    // guardrail: limit số items
     const items = cart.items || [];
     const key = `${pid.toString()}:${sku}`;
     const idx = items.findIndex(
@@ -257,15 +276,16 @@ export class CartService {
   async clear(userId: string) {
     const cart = await this.getOrCreateCartDoc(userId);
     cart.items = [] as any;
+    cart.couponCode = undefined; // Clear luôn mã giảm giá nếu có
     await cart.save();
     return this.getCart(userId, true);
   }
 
-  /**
-   * Checkout toàn bộ cart -> tạo order pending -> clear cart
-   * - idempotencyKey sẽ được OrdersService validate + enforce uniqueness
-   */
-  async checkout(userId: string, idempotencyKey?: string) {
+  async checkout(
+    userId: string,
+    paymentMethod?: string,
+    idempotencyKey?: string,
+  ) {
     const cart = await this.getOrCreateCartDoc(userId);
     const items = (cart.items || []).map((it: any) => ({
       productId: it.productId?.toString?.() ?? String(it.productId),
@@ -277,8 +297,6 @@ export class CartService {
       throw new BadRequestException('Giỏ hàng trống');
     }
 
-    // Validate nhanh product/sku trước khi gọi OrdersService để lỗi rõ ràng hơn
-    // (stock check sẽ do OrdersService.atomicDeductStock)
     for (const it of items) {
       const pid = this.toObjectId(it.productId, 'productId');
       await this.assertValidProductSku(pid, it.sku);
@@ -286,11 +304,13 @@ export class CartService {
 
     const order = await this.ordersService.create(userId, {
       items,
+      paymentMethod,
+      couponCode: cart.couponCode,
       idempotencyKey,
     });
 
-    // Nếu tạo order thành công (hoặc idempotent trả lại order), clear cart.
     cart.items = [] as any;
+    cart.couponCode = undefined;
     await cart.save();
 
     return order;

@@ -5,6 +5,7 @@ import {
   Get,
   Headers,
   Patch,
+  Post, // Bổ sung Post
   Query,
   Req,
   UseGuards,
@@ -12,6 +13,8 @@ import {
 import { JwtGuard } from 'src/common/guards/jwt.guard';
 import { CartService } from './cart.service';
 import {
+  ApplyCouponCartDto, // Import DTO Coupon
+  CheckoutCartDto, // Import DTO Checkout
   GetCartQueryDto,
   RemoveCartItemDto,
   UpsertCartItemDto,
@@ -25,6 +28,18 @@ export class CartController {
   @Get()
   getCart(@Req() req, @Query() query: GetCartQueryDto) {
     return this.cartService.getCart(req.user.id, !!query.expand);
+  }
+
+  // === BỔ SUNG: API Áp dụng mã giảm giá ===
+  @Post('coupon')
+  applyCoupon(@Req() req, @Body() dto: ApplyCouponCartDto) {
+    return this.cartService.applyCoupon(req.user.id, dto.code);
+  }
+
+  // === BỔ SUNG: API Xóa mã giảm giá khỏi giỏ hàng ===
+  @Delete('coupon')
+  removeCoupon(@Req() req) {
+    return this.cartService.removeCoupon(req.user.id);
   }
 
   /**
@@ -49,7 +64,15 @@ export class CartController {
    * Checkout toàn bộ cart -> tạo order pending -> clear cart
    */
   @Patch('checkout')
-  checkout(@Req() req, @Headers('idempotency-key') idempotencyKey?: string) {
-    return this.cartService.checkout(req.user.id, idempotencyKey);
+  checkout(
+    @Req() req,
+    @Body() dto: CheckoutCartDto, // Bổ sung nhận DTO để lấy phương thức thanh toán
+    @Headers('idempotency-key') idempotencyKey?: string,
+  ) {
+    return this.cartService.checkout(
+      req.user.id,
+      dto.paymentMethod,
+      idempotencyKey,
+    );
   }
 }

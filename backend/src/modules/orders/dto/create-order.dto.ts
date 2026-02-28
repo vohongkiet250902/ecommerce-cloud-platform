@@ -36,4 +36,8 @@ export class CreateOrderDto {
     message: "Phương thức thanh toán chỉ được là: 'cod', 'mock' hoặc 'vnpay'",
   })
   paymentMethod?: string;
+
+  @IsOptional()
+  @IsString()
+  couponCode?: string;
 }

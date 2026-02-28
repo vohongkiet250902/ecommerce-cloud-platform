@@ -9,9 +9,10 @@ import {
   Min,
   ValidateNested,
   IsIn,
+  Max,
+  IsBoolean,
 } from 'class-validator';
 
-// 1. DTO cho Thuộc tính (Key-Value)
 class ProductAttributeDto {
   @IsNotEmpty()
   @IsString()
@@ -21,8 +22,6 @@ class ProductAttributeDto {
   @IsString()
   value: string;
 }
-
-// 2. DTO cho Biến thể (Variant)
 class ProductVariantDto {
   @IsNotEmpty({ message: 'Mã SKU không được để trống' })
   @IsString()
@@ -40,15 +39,20 @@ class ProductVariantDto {
 
   @IsOptional()
   @IsArray()
-  @ValidateNested({ each: true }) // Kích hoạt validate từng phần tử trong mảng
-  @Type(() => ProductAttributeDto) // Báo cho NestJS biết mảng này chứa class nào
+  @ValidateNested({ each: true })
+  @Type(() => ProductAttributeDto)
   attributes?: ProductAttributeDto[];
 
   @IsOptional()
   image?: { url: string; publicId: string };
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(100)
+  discountPercentage?: number;
 }
 
-// 3. DTO chính cho Product
 export class CreateProductDto {
   @IsNotEmpty({ message: 'Tên sản phẩm không được để trống' })
   @IsString()
@@ -91,4 +95,8 @@ export class CreateProductDto {
     message: "Status chỉ được nhận 'active' hoặc 'inactive'",
   })
   status?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  isFeatured?: boolean;
 }

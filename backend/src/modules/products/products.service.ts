@@ -49,11 +49,19 @@ export class ProductsService {
     }
   }
 
+  private calculateVariantPrices(variants: ProductVariant[] = []) {
+    variants.forEach((v: any) => {
+      const discount = v.discountPercentage || 0;
+      v.finalPrice = v.price - v.price * (discount / 100);
+    });
+  }
+
   async create(dto: any) {
     await this.validateCategoryAndBrand(dto.categoryId, dto.brandId);
     if (dto.variants?.length) {
       this.validateUniqueSku(dto.variants);
       dto.totalStock = this.calculateTotalStock(dto.variants);
+      this.calculateVariantPrices(dto.variants);
     }
     const exists = await this.productModel.findOne({ slug: dto.slug });
     if (exists) throw new BadRequestException('Slug already exists');
@@ -126,6 +134,7 @@ export class ProductsService {
     if (dto.variants?.length) {
       this.validateUniqueSku(dto.variants);
       dto.totalStock = this.calculateTotalStock(dto.variants);
+      this.calculateVariantPrices(dto.variants);
     }
 
     return this.productModel.findByIdAndUpdate(id, dto, { new: true });
