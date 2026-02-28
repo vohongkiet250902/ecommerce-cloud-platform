@@ -100,15 +100,12 @@ export class PaymentsService {
 
   // 2. Cập nhật hàm handleVnPayIpn (Luồng Update DB)
   async handleVnPayIpn(query: any) {
-    // Tương tự, clone object
     let vnp_Params = { ...query };
-
     const secureHash = vnp_Params['vnp_SecureHash'];
     delete vnp_Params['vnp_SecureHash'];
     delete vnp_Params['vnp_SecureHashType'];
 
     const sorted = this.sortObject(vnp_Params);
-
     const secretKey = process.env.VNP_HASHSECRET as string;
     if (!secretKey) return { RspCode: '99', Message: 'Missing configuration' };
 
@@ -123,20 +120,22 @@ export class PaymentsService {
       const order = await this.orderModel.findById(orderId);
       if (!order) return { RspCode: '01', Message: 'Order not found' };
 
-      if (order.status !== 'pending') {
+      if (order.status !== 'pending' && order.paymentStatus === 'paid') {
         return { RspCode: '02', Message: 'Order already confirmed' };
       }
 
       if (responseCode === '00') {
         await this.orderModel.findByIdAndUpdate(orderId, {
-          status: 'paid', // Cập nhật trạng thái tổng thể
-          paymentStatus: 'paid', // BỔ SUNG: Cập nhật trạng thái thanh toán
+          status: 'paid',
+          paymentStatus: 'paid',
           paymentMethod: 'vnpay',
         });
       } else {
+        // TỐI ƯU CỰC KỲ QUAN TRỌNG:
+        // Nếu user thanh toán lỗi (thẻ hết tiền) hoặc bấm hủy, chỉ cập nhật trạng thái thanh toán.
+        // KHÔNG hủy đơn hàng (status: 'cancelled') để họ có thể bấm "Thanh toán lại" trên FE.
         await this.orderModel.findByIdAndUpdate(orderId, {
-          status: 'cancelled', // Thất bại thì nên chuyển thành cancelled hoặc tuỳ logic của bạn
-          paymentStatus: 'pending',
+          paymentStatus: 'pending', // Hoặc bạn có thể dùng 'failed' nếu OrderSchema có hỗ trợ
         });
       }
 

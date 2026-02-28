@@ -40,33 +40,35 @@ export class ReviewsService {
   }
 
   async create(userId: string, dto: CreateReviewDto) {
-    // 1. Kiểm tra đã mua hàng và đơn hàng đã hoàn thành chưa
     const hasPurchased = await this.ordersService.hasPurchased(
       userId,
       dto.productId,
     );
     if (!hasPurchased) {
       throw new BadRequestException(
-        'Bạn cần mua và nhận hàng thành công trước khi đánh giá.',
+        'Bạn cần mua hàng thành công trước khi đánh giá.',
       );
     }
 
-    // 2. Kiểm tra user đã đánh giá chưa (mỗi user 1 đánh giá / 1 sản phẩm)
-    const existingReview = await this.reviewModel.findOne({
+    const existing = await this.reviewModel.findOne({
       userId: new Types.ObjectId(userId),
       productId: new Types.ObjectId(dto.productId),
     });
 
-    if (existingReview) {
+    if (existing) {
       throw new BadRequestException('Bạn đã đánh giá sản phẩm này rồi.');
     }
 
+    // TỐI ƯU CỰC KỲ QUAN TRỌNG:
+    // Ghi đè lại dto.productId thành Types.ObjectId để đảm bảo DB lưu đúng kiểu
     const review = await this.reviewModel.create({
       ...dto,
+      productId: new Types.ObjectId(dto.productId), // <-- Ép kiểu ở đây
       userId: new Types.ObjectId(userId),
     });
 
     await this.updateProductAverageRating(dto.productId);
+
     return review;
   }
 
