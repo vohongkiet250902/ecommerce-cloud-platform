@@ -398,7 +398,7 @@ export default function BrandsPage() {
                   onClick={() => handleOpenDelete(brand)}
                 >
                   <Trash2 className="mr-2 h-4 w-4" />
-                  Xóa
+                  Xóa thương hiệu
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -464,20 +464,6 @@ export default function BrandsPage() {
         pageSize={10}
         filterNode={
           <div className="flex items-center gap-2">
-            {/* Sort Dropdown */}
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="sm" className="h-10 gap-2 border-dashed bg-background/50 border-border/40">
-                  <ArrowUpDown className="h-4 w-4" />
-                  <span>Sắp xếp: {sortBy === "name" ? "Tên A-Z" : "Nhiều sản phẩm nhất"}</span>
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="dropdown-content">
-                <DropdownMenuItem onClick={() => setSortBy("name")}>Tên A-Z</DropdownMenuItem>
-                <DropdownMenuItem onClick={() => setSortBy("products")}>Nhiều sản phẩm nhất</DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-
             {/* Status Filter */}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -490,6 +476,20 @@ export default function BrandsPage() {
                 <DropdownMenuItem onClick={() => setStatusFilter("all")}>Tất cả trạng thái</DropdownMenuItem>
                 <DropdownMenuItem onClick={() => setStatusFilter("active")}>Đang hoạt động</DropdownMenuItem>
                 <DropdownMenuItem onClick={() => setStatusFilter("inactive")}>Ngừng hoạt động</DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+
+            {/* Sort Dropdown */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="sm" className="h-10 gap-2 border-dashed bg-background/50 border-border/40">
+                  <ArrowUpDown className="h-4 w-4" />
+                  <span>Sắp xếp: {sortBy === "name" ? "Tên A-Z" : "Nhiều sản phẩm nhất"}</span>
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="dropdown-content">
+                <DropdownMenuItem onClick={() => setSortBy("name")}>Tên A-Z</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setSortBy("products")}>Nhiều sản phẩm nhất</DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
@@ -625,7 +625,7 @@ export default function BrandsPage() {
 
               <DialogFooter className="pt-4">
                 <DialogClose asChild>
-                  <Button type="button" variant="outline">
+                  <Button type="button" variant="outline" className="border-dashed bg-background/50 border-border/40">
                     Hủy
                   </Button>
                 </DialogClose>
@@ -664,6 +664,7 @@ export default function BrandsPage() {
               variant="outline"
               onClick={() => setDeleteConfirmOpen(false)}
               disabled={isDeleting}
+              className="border-dashed bg-background/50 border-border/40"
             >
               Hủy
             </Button>
@@ -715,6 +716,7 @@ export default function BrandsPage() {
                 setStatusConfirmOpen(false);
                 setStatusToToggle(null);
               }}
+              className="border-dashed bg-background/50 border-border/40"
             >
               Hủy
             </Button>

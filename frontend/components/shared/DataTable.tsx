@@ -48,13 +48,30 @@ export function DataTable<T extends object>({
   const [currentPage, setCurrentPage] = useState(1);
 
   /* ===== Filter ===== */
-  const filteredData = searchKey
-    ? data.filter((item: any) => {
-        const value = item[searchKey];
-        if (typeof value !== "string") return false;
-        return value.toLowerCase().includes(search.toLowerCase());
-      })
-    : data;
+  const filteredData = data.filter((item: any) => {
+    if (!search) return true;
+    const searchLower = search.toLowerCase();
+
+    if (searchKey) {
+      const value = item[searchKey];
+      return String(value ?? "").toLowerCase().includes(searchLower);
+    }
+
+    // Global search: check all properties
+    return Object.values(item).some((val) => {
+      if (typeof val === "string" || typeof val === "number") {
+        return String(val).toLowerCase().includes(searchLower);
+      }
+      // Handle nested objects (like userId object)
+      if (typeof val === "object" && val !== null) {
+        return Object.values(val).some((nestedVal) =>
+          (typeof nestedVal === "string" || typeof nestedVal === "number") &&
+          String(nestedVal).toLowerCase().includes(searchLower)
+        );
+      }
+      return false;
+    });
+  });
 
   /* ===== Pagination ===== */
   const totalPages = Math.ceil(filteredData.length / pageSize);

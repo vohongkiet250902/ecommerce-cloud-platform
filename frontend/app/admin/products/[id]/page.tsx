@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Image from "next/image";
 import Link from "next/link";
@@ -23,6 +23,7 @@ import {
   DollarSign,
   ShoppingCart,
   Clock,
+  ChevronLeft,
   ChevronRight,
   ExternalLink,
 } from "lucide-react";
@@ -46,6 +47,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { Skeleton } from "@/components/ui/skeleton";
 
 import { productApi, categoryApi, brandApi } from "@/services/api";
 import { useToast } from "@/hooks/use-toast";
@@ -71,12 +73,14 @@ interface Product {
   variants: {
     sku: string;
     price: number;
+    discountPercentage: number;
+    finalPrice: number;
     stock: number;
     attributes: {
       key: string;
       value: string;
     }[];
-    image: string | null;
+    image: { url: string; publicId: string } | null;
     status: string;
   }[];
   specs: {
@@ -85,6 +89,7 @@ interface Product {
   }[];
   totalStock: number;
   status: string;
+  isFeatured: boolean;
   createdAt: string;
   updatedAt: string;
   __v: number;
@@ -110,8 +115,19 @@ export default function ProductDetailPage() {
   const [loading, setLoading] = useState(true);
   const [activeImage, setActiveImage] = useState(0);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
 
   const productId = params.id as string;
+
+  const scrollGallery = (direction: 'left' | 'right') => {
+    if (scrollContainerRef.current) {
+        const scrollAmount = 300;
+        scrollContainerRef.current.scrollBy({
+            left: direction === 'left' ? -scrollAmount : scrollAmount,
+            behavior: 'smooth'
+        });
+    }
+  };
 
   /* ================= FETCH DATA ================= */
   /* ================= FETCH DATA ================= */
@@ -204,14 +220,26 @@ export default function ProductDetailPage() {
       await Promise.allSettled([getCategoryInfo(), getBrandInfo()]);
 
     } catch (error) {
-      console.error("Error fetching product detail:", error);
+      console.error("Failed to fetch product", error);
       toast({
         variant: "destructive",
-        title: "❌ Lỗi",
-        description: "Không thể tải thông tin sản phẩm",
+        title: "Lỗi tải dữ liệu",
+        description: "Không thể lấy thông tin sản phẩm. Vui lòng kiểm tra lại kết nối.",
       });
     } finally {
       setLoading(false);
+    }
+  };
+
+  const nextImage = () => {
+    if (product?.images?.length) {
+      setActiveImage((prev) => (prev + 1) % product.images.length);
+    }
+  };
+
+  const prevImage = () => {
+    if (product?.images?.length) {
+      setActiveImage((prev) => (prev - 1 + product.images.length) % product.images.length);
     }
   };
 
@@ -256,15 +284,46 @@ export default function ProductDetailPage() {
   /* ================= RENDER ================= */
   if (loading) {
     return (
-      <div className="flex h-[80vh] items-center justify-center">
-        <div className="flex flex-col items-center gap-4">
-            <div className="relative">
-                <Loader2 className="h-12 w-12 animate-spin text-primary" />
-                <div className="absolute inset-0 flex items-center justify-center">
-                    <div className="h-6 w-6 rounded-full bg-background" />
-                </div>
+      <div className="max-w-7xl mx-auto space-y-8 pb-20 px-4 sm:px-6 lg:px-8 mt-10">
+        <div className="flex justify-between items-center">
+          <Skeleton className="h-10 w-32 rounded-full" />
+          <div className="flex gap-3">
+            <Skeleton className="h-10 w-24 rounded-lg" />
+            <Skeleton className="h-10 w-24 rounded-lg" />
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+          <div className="lg:col-span-6 space-y-4">
+            <Skeleton className="aspect-square w-full rounded-2xl" />
+            <div className="grid grid-cols-4 gap-4">
+              {[1, 2, 3, 4].map((i) => (
+                <Skeleton key={i} className="aspect-square rounded-xl" />
+              ))}
             </div>
-            <p className="text-muted-foreground animate-pulse font-medium">Đang tải dữ liệu...</p>
+          </div>
+          <div className="lg:col-span-6 space-y-6">
+            <div className="space-y-2">
+              <Skeleton className="h-10 w-3/4" />
+              <Skeleton className="h-6 w-1/2" />
+            </div>
+            <div className="flex gap-8">
+              <div className="space-y-2">
+                <Skeleton className="h-4 w-20" />
+                <Skeleton className="h-8 w-32" />
+              </div>
+              <div className="space-y-2">
+                <Skeleton className="h-4 w-20" />
+                <Skeleton className="h-8 w-24" />
+              </div>
+            </div>
+            <Skeleton className="h-px w-full" />
+            <div className="space-y-4">
+              {[1, 2, 3].map((i) => (
+                <Skeleton key={i} className="h-12 w-full rounded-xl" />
+              ))}
+            </div>
+          </div>
         </div>
       </div>
     );
@@ -299,6 +358,13 @@ export default function ProductDetailPage() {
     ? Math.max(...product.variants.map(v => v.price)) 
     : 0;
 
+  const finalPrices = product.variants && product.variants.length > 0
+    ? product.variants.map(v => v.price * (1 - (v.discountPercentage || 0) / 100))
+    : [0];
+  const minFinal = Math.min(...finalPrices);
+  const maxFinal = Math.max(...finalPrices);
+  const hasDiscount = product.variants?.some(v => (v.discountPercentage || 0) > 0);
+
   return (
     <div className="max-w-7xl mx-auto space-y-8 pb-20 px-4 sm:px-6 lg:px-8">
       {/* Breadcrumbs & Header Actions */}
@@ -320,12 +386,16 @@ export default function ProductDetailPage() {
             <TooltipProvider>
                 <Tooltip>
                     <TooltipTrigger asChild>
-                         <Button variant="outline" size="sm" className="rounded-full h-9 px-4 gap-2 border-border/60 hover:bg-muted" onClick={() => router.push("/admin/products")}>
-                            <ArrowLeft className="h-4 w-4" />
+                         <Button 
+                            variant="outline" 
+                            size="sm" 
+                            className="rounded-full h-9 px-4 gap-2 border-border/60 transition-all hover:border-primary hover:text-primary hover:bg-primary/5 group/back" 
+                            onClick={() => router.push("/admin/products")}
+                        >
+                            <ArrowLeft className="h-4 w-4 transition-transform group-hover/back:-translate-x-1" />
                             Quay lại
                         </Button>
                     </TooltipTrigger>
-                    <TooltipContent>Về danh sách</TooltipContent>
                 </Tooltip>
             </TooltipProvider>
 
@@ -343,15 +413,15 @@ export default function ProductDetailPage() {
             initial={{ opacity: 0, x: -20 }}
             animate={{ opacity: 1, x: 0 }}
             transition={{ duration: 0.5 }}
-            className="lg:col-span-5 space-y-6"
+            className="lg:col-span-6 space-y-6"
         >
-            <div className="relative aspect-[4/5] w-full overflow-hidden rounded-[2rem] border border-border/60 bg-white shadow-xl shadow-muted/20 group">
+            <div className="relative aspect-video w-full overflow-hidden rounded-[2.5rem] border border-border/60 bg-white shadow-xl shadow-muted/10 group">
                 {product.images?.[activeImage] ? (
                     <Image
                         src={product.images[activeImage].url}
                         alt={product.name}
                         fill
-                        className="object-contain p-8 group-hover:scale-105 transition-transform duration-700 ease-out"
+                        className="object-contain p-12 group-hover:scale-105 transition-transform duration-700 ease-out"
                         priority
                     />
                 ) : (
@@ -360,43 +430,109 @@ export default function ProductDetailPage() {
                     </div>
                 )}
                 
+                {/* Navigation Buttons */}
+                {product.images && product.images.length > 1 && (
+                    <>
+                        <button
+                            onClick={(e) => { e.preventDefault(); prevImage(); }}
+                            className="absolute left-4 top-1/2 -translate-y-1/2 flex h-12 w-12 items-center justify-center rounded-full bg-black/10 text-white backdrop-blur-md transition-all hover:bg-black/20 opacity-0 group-hover:opacity-100 z-10"
+                        >
+                            <ChevronLeft className="h-6 w-6" />
+                        </button>
+                        <button
+                            onClick={(e) => { e.preventDefault(); nextImage(); }}
+                            className="absolute right-4 top-1/2 -translate-y-1/2 flex h-12 w-12 items-center justify-center rounded-full bg-black/10 text-white backdrop-blur-md transition-all hover:bg-black/20 opacity-0 group-hover:opacity-100 z-10"
+                        >
+                            <ChevronRight className="h-6 w-6" />
+                        </button>
+                    </>
+                )}
+                
                 {/* Image overlay decorations */}
-                <div className="absolute top-6 right-6">
+                <div className="absolute top-3 right-3 z-20 flex flex-row items-center gap-2">
+                    {product.isFeatured && (
+                      <Badge className="bg-amber-500/10 text-amber-600 hover:bg-amber-500/20 border-amber-500/20 gap-1 px-3 py-1">
+                        <Tag className="h-3.5 w-3.5" />
+                        Nổi bật
+                      </Badge>
+                    )}
                     {getStatusBadge(product.status)}
                 </div>
             </div>
 
             {product.images && product.images.length > 1 && (
-                <div className="grid grid-cols-4 gap-4 p-2">
+                <div className="relative group/gallery px-1 py-4">
+                  <div 
+                    ref={scrollContainerRef}
+                    className="flex overflow-x-auto gap-3 py-1 scroll-smooth no-scrollbar"
+                    style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
+                  >
                     {product.images.map((img, idx) => (
                         <button
                             key={idx}
                             onClick={() => setActiveImage(idx)}
                             className={cn(
-                                "relative aspect-square overflow-hidden rounded-2xl border-2 transition-all duration-300",
+                                "relative min-w-[110px] aspect-square overflow-hidden rounded-2xl border-2 transition-all duration-300 shrink-0",
                                 activeImage === idx 
                                     ? "border-primary shadow-lg ring-4 ring-primary/10" 
-                                    : "border-transparent bg-muted/20 hover:border-border hover:bg-muted/40"
+                                    : "border-border/40 bg-white hover:border-primary/40"
                             )}
                         >
                             <Image
                                 src={img.url}
                                 alt={`${product.name} - ${idx + 1}`}
                                 fill
-                                className="object-cover"
+                                className="object-cover p-2"
                             />
                         </button>
                     ))}
+                  </div>
+                  
+                  <div className="absolute top-1/2 -translate-y-1/2 -left-2 -right-2 flex justify-between pointer-events-none">
+                    <button 
+                        onClick={(e) => { e.preventDefault(); scrollGallery('left'); }}
+                        className="p-2 rounded-full bg-white shadow-xl border border-border/40 text-foreground pointer-events-auto hover:bg-primary hover:text-white transition-all opacity-0 group-hover/gallery:opacity-100 -translate-x-2"
+                    >
+                        <ChevronLeft className="w-5 h-5" />
+                    </button>
+                    <button 
+                        onClick={(e) => { e.preventDefault(); scrollGallery('right'); }}
+                        className="p-2 rounded-full bg-white shadow-xl border border-border/40 text-foreground pointer-events-auto hover:bg-primary hover:text-white transition-all opacity-0 group-hover/gallery:opacity-100 translate-x-2"
+                    >
+                        <ChevronRight className="w-5 h-5" />
+                    </button>
+                  </div>
                 </div>
             )}
+
+            {/* Quick Stats moved from right column */}
+            <div className="grid grid-cols-3 gap-3">
+                <div className="flex flex-col items-center justify-center p-3 rounded-[1.5rem] bg-indigo-50/30 border border-indigo-100/50 text-indigo-700 shadow-sm">
+                    <Calendar className="h-4 w-4 mb-1.5 opacity-60" />
+                    <span className="text-[8px] font-bold uppercase tracking-wider opacity-60 text-center">Khởi tạo</span>
+                    <span className="text-[10px] font-semibold mt-0.5 whitespace-nowrap">
+                        {product.createdAt ? format(new Date(product.createdAt), "dd/MM/yyyy") : "---"}
+                    </span>
+                </div>
+                <div className="flex flex-col items-center justify-center p-3 rounded-[1.5rem] bg-emerald-50/30 border border-emerald-100/50 text-emerald-700 shadow-sm overflow-hidden">
+                    <Tag className="h-4 w-4 mb-1.5 opacity-60" />
+                    <span className="text-[8px] font-bold uppercase tracking-wider opacity-60 text-center">Danh mục</span>
+                    <span className="text-[10px] font-semibold mt-0.5 truncate w-full text-center px-1">{category?.name || "N/A"}</span>
+                </div>
+                <div className="flex flex-col items-center justify-center p-3 rounded-[1.5rem] bg-amber-50/30 border border-amber-100/50 text-amber-700 shadow-sm overflow-hidden">
+                    <Box className="h-4 w-4 mb-1.5 opacity-60" />
+                    <span className="text-[8px] font-bold uppercase tracking-wider opacity-60 text-center">Thương hiệu</span>
+                    <span className="text-[10px] font-semibold mt-0.5 truncate w-full text-center px-1">{brand?.name || "N/A"}</span>
+                </div>
+            </div>
         </motion.div>
 
-        {/* Right: Info - lg:span-7 */}
+        {/* Right: Info - lg:span-6 */}
         <motion.div 
             initial={{ opacity: 0, x: 20 }}
             animate={{ opacity: 1, x: 0 }}
             transition={{ duration: 0.5, delay: 0.1 }}
-            className="lg:col-span-7 space-y-8"
+            className="lg:col-span-6 space-y-8"
         >
             <div className="space-y-2">
                 <h1 className="text-3xl sm:text-4xl font-bold tracking-tight text-foreground leading-tight">
@@ -407,10 +543,15 @@ export default function ProductDetailPage() {
             <div className="flex flex-wrap items-center gap-x-8 gap-y-4 pt-1">
                 <div className="space-y-1">
                     <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Giá sản phẩm</p>
-                    <div className="flex items-baseline gap-1">
+                    <div className="flex flex-col">
                         <span className="text-2xl font-bold text-primary">
-                            {minPrice === maxPrice ? formatPrice(minPrice) : `${formatPrice(minPrice)} - ${formatPrice(maxPrice)}`}
+                            {minFinal === maxFinal ? formatPrice(minFinal) : `${formatPrice(minFinal)} - ${formatPrice(maxFinal)}`}
                         </span>
+                        {hasDiscount && (
+                            <span className="text-sm text-muted-foreground line-through opacity-70">
+                                {minPrice === maxPrice ? formatPrice(minPrice) : `${formatPrice(minPrice)} - ${formatPrice(maxPrice)}`}
+                            </span>
+                        )}
                     </div>
                 </div>
                 
@@ -442,35 +583,56 @@ export default function ProductDetailPage() {
                                 <Layers className="h-4 w-4 mr-2" />
                                 Biến thể
                             </TabsTrigger>
-                            <TabsTrigger value="specs" className="relative h-full px-0 bg-transparent data-[state=active]:bg-transparent data-[state=active]:text-primary data-[state=active]:shadow-none rounded-none border-b-2 border-transparent data-[state=active]:border-primary transition-all font-semibold">
-                                <Box className="h-4 w-4 mr-2" />
-                                Thông số
+                            <TabsTrigger value="history" className="relative h-full px-0 bg-transparent data-[state=active]:bg-transparent data-[state=active]:text-primary data-[state=active]:shadow-none rounded-none border-b-2 border-transparent data-[state=active]:border-primary transition-all font-semibold">
+                                <Clock className="h-4 w-4 mr-2" />
+                                Lịch sử thay đổi
                             </TabsTrigger>
                         </TabsList>
                         
                         <div className="p-6">
                             <TabsContent value="details" className="mt-0 focus-visible:ring-0">
                                 <div className="space-y-6">
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                        <div className="space-y-1 p-3 rounded-xl bg-muted/20 border border-border/50">
-                                            <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">SKU Gốc</p>
-                                            <p className="font-mono text-sm">{product.variants?.[0]?.sku || "N/A"}</p>
+                                    {/* Specs section integrated into overview */}
+                                    {product.specs && product.specs.length > 0 && (
+                                        <div className="space-y-3">
+                                            <h4 className="text-sm font-semibold uppercase tracking-wider text-foreground flex items-center gap-2">
+                                                <div className="h-1.5 w-1.5 rounded-full bg-primary" />
+                                                Thông số kỹ thuật
+                                            </h4>
+                                            <div className="rounded-2xl border border-border/40 overflow-hidden bg-white">
+                                                <Table>
+                                                    <TableHeader className="bg-muted/30">
+                                                        <TableRow className="border-border/40 hover:bg-muted/30">
+                                                            <TableHead className="text-[10px] font-bold uppercase tracking-wider h-10 w-1/3">Thông số</TableHead>
+                                                            <TableHead className="text-[10px] font-bold uppercase tracking-wider h-10">Giá trị</TableHead>
+                                                        </TableRow>
+                                                    </TableHeader>
+                                                    <TableBody>
+                                                        {product.specs.map((spec, i) => (
+                                                            <TableRow key={i} className="border-border/40 hover:bg-muted/10 transition-colors">
+                                                                <TableCell className="text-xs font-semibold text-muted-foreground">{spec.key}</TableCell>
+                                                                <TableCell className="text-xs font-medium text-foreground">{spec.value}</TableCell>
+                                                            </TableRow>
+                                                        ))}
+                                                    </TableBody>
+                                                </Table>
+                                            </div>
                                         </div>
-                                        <div className="space-y-1 p-3 rounded-xl bg-muted/20 border border-border/50">
-                                            <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Đường dẫn (Slug)</p>
-                                            <p className="text-sm truncate font-medium text-muted-foreground">{product.slug}</p>
-                                        </div>
-                                    </div>
-                                    
+                                    )}
+
                                     <div className="space-y-3">
-                                        <h4 className="text-sm font-semibold uppercase tracking-wider text-foreground flex items-center gap-2">
+                                    <div className="space-y-4">
+                                        <h4 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2 px-1">
                                             <div className="h-1.5 w-1.5 rounded-full bg-primary" />
                                             Mô tả chi tiết
                                         </h4>
-                                        <div 
-                                            className="prose prose-sm max-w-none text-muted-foreground leading-relaxed bg-white/50 p-5 rounded-2xl border border-border/40"
-                                            dangerouslySetInnerHTML={{ __html: product.description || "Chưa có mô tả chi tiết cho sản phẩm này." }}
-                                        />
+                                        <div className="p-6 rounded-[2rem] border border-border/60 bg-white/30 backdrop-blur-sm shadow-inner shadow-muted/5 w-full overflow-hidden">
+                                            <div 
+                                                className="prose prose-sm max-w-none text-muted-foreground leading-relaxed break-words [word-break:break-word] hyphens-auto"
+                                                dangerouslySetInnerHTML={{ __html: product.description || "Chưa có mô tả chi tiết cho sản phẩm này." }}
+                                            />
+                                        </div>
+                                    </div>
                                     </div>
                                 </div>
                             </TabsContent>
@@ -480,6 +642,7 @@ export default function ProductDetailPage() {
                                     <Table>
                                         <TableHeader className="bg-muted/30">
                                             <TableRow className="border-border/40 hover:bg-muted/30">
+                                                <TableHead className="text-[10px] font-bold uppercase tracking-wider h-10 w-[60px]">Ảnh</TableHead>
                                                 <TableHead className="text-[10px] font-bold uppercase tracking-wider h-10">SKU</TableHead>
                                                 <TableHead className="text-[10px] font-bold uppercase tracking-wider h-10">Phân loại</TableHead>
                                                 <TableHead className="text-[10px] font-bold uppercase tracking-wider h-10 text-right">Giá</TableHead>
@@ -489,6 +652,20 @@ export default function ProductDetailPage() {
                                         <TableBody>
                                             {product.variants.map((v, i) => (
                                                 <TableRow key={i} className="border-border/40 hover:bg-muted/10 transition-colors">
+                                                    <TableCell>
+                                                        <div className="h-10 w-10 relative rounded-md overflow-hidden bg-muted border border-border">
+                                                            {v.image?.url ? (
+                                                                <Image 
+                                                                    src={v.image.url} 
+                                                                    alt={v.sku} 
+                                                                    fill 
+                                                                    className="object-cover" 
+                                                                />
+                                                            ) : (
+                                                                <div className="flex items-center justify-center h-full text-[10px] text-muted-foreground uppercase opacity-50">N/A</div>
+                                                            )}
+                                                        </div>
+                                                    </TableCell>
                                                     <TableCell className="font-mono text-xs">{v.sku}</TableCell>
                                                     <TableCell>
                                                         <div className="flex flex-wrap gap-1">
@@ -499,8 +676,26 @@ export default function ProductDetailPage() {
                                                             ))}
                                                         </div>
                                                     </TableCell>
-                                                    <TableCell className="text-right font-bold text-primary text-sm">
-                                                        {formatPrice(v.price)}
+                                                    <TableCell className="text-right font-medium text-sm">
+                                                        <div className="flex flex-col items-end">
+                                                            {v.discountPercentage > 0 ? (
+                                                                <>
+                                                                    <span className="text-xs text-muted-foreground line-through opacity-70">
+                                                                        {formatPrice(v.price)}
+                                                                    </span>
+                                                                    <span className="font-bold text-primary">
+                                                                        {formatPrice(v.price * (1 - v.discountPercentage / 100))}
+                                                                    </span>
+                                                                    <Badge variant="outline" className="text-[10px] h-4 px-1 bg-red-50 text-red-600 border-red-100 mt-1">
+                                                                        -{v.discountPercentage}%
+                                                                    </Badge>
+                                                                </>
+                                                            ) : (
+                                                                <span className="font-bold text-primary">
+                                                                    {formatPrice(v.price)}
+                                                                </span>
+                                                            )}
+                                                        </div>
                                                     </TableCell>
                                                     <TableCell className="text-right">
                                                         <span className={cn(
@@ -517,48 +712,54 @@ export default function ProductDetailPage() {
                                 </div>
                             </TabsContent>
 
-                            <TabsContent value="specs" className="mt-0 focus-visible:ring-0">
-                                {product.specs && product.specs.length > 0 ? (
-                                    <div className="grid grid-cols-1 gap-1">
-                                        {product.specs.map((spec, i) => (
-                                            <div key={i} className="flex justify-between items-center p-3 rounded-xl hover:bg-muted/30 transition-colors border-b border-border/20 last:border-0 group">
-                                                <span className="text-sm font-semibold text-muted-foreground group-hover:text-foreground transition-colors">{spec.key}</span>
-                                                <span className="text-sm font-medium text-foreground">{spec.value}</span>
-                                            </div>
-                                        ))}
+                            <TabsContent value="history" className="mt-0 focus-visible:ring-0">
+                                <div className="space-y-6">
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                        <Card className="bg-muted/30 border-none shadow-none">
+                                            <CardContent className="pt-6">
+                                                <div className="flex items-center gap-4">
+                                                    <div className="h-12 w-12 rounded-2xl bg-primary/10 flex items-center justify-center text-primary">
+                                                        <Calendar className="h-6 w-6" />
+                                                    </div>
+                                                    <div>
+                                                        <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest">Ngày tạo</p>
+                                                        <p className="text-lg font-bold text-foreground">
+                                                            {product.createdAt ? format(new Date(product.createdAt), "dd/MM/yyyy", { locale: vi }) : "N/A"}
+                                                        </p>
+                                                        <p className="text-xs text-muted-foreground">
+                                                            {product.createdAt ? format(new Date(product.createdAt), "HH:mm:ss", { locale: vi }) : ""}
+                                                        </p>
+                                                    </div>
+                                                </div>
+                                            </CardContent>
+                                        </Card>
+
+                                        <Card className="bg-muted/30 border-none shadow-none">
+                                            <CardContent className="pt-6">
+                                                <div className="flex items-center gap-4">
+                                                    <div className="h-12 w-12 rounded-2xl bg-amber-500/10 flex items-center justify-center text-amber-500">
+                                                        <Clock className="h-6 w-6" />
+                                                    </div>
+                                                    <div>
+                                                        <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest">Cập nhật cuối</p>
+                                                        <p className="text-lg font-bold text-foreground">
+                                                            {product.updatedAt ? format(new Date(product.updatedAt), "dd/MM/yyyy", { locale: vi }) : "N/A"}
+                                                        </p>
+                                                        <p className="text-xs text-muted-foreground">
+                                                            {product.updatedAt ? format(new Date(product.updatedAt), "HH:mm:ss", { locale: vi }) : ""}
+                                                        </p>
+                                                    </div>
+                                                </div>
+                                            </CardContent>
+                                        </Card>
                                     </div>
-                                ) : (
-                                    <div className="flex flex-col items-center justify-center py-10 opacity-40">
-                                        <AlertTriangle className="h-10 w-10 mb-2" />
-                                        <p className="text-sm font-medium">Chưa có thông số kỹ thuật</p>
-                                    </div>
-                                )}
+                                </div>
                             </TabsContent>
                         </div>
                     </Tabs>
                 </CardContent>
             </Card>
 
-            {/* Quick Stats Grid */}
-            <div className="grid grid-cols-3 gap-4">
-                <div className="flex flex-col items-center justify-center p-4 rounded-[1.5rem] bg-indigo-50/50 border border-indigo-100/50 text-indigo-700 shadow-sm">
-                    <Calendar className="h-5 w-5 mb-2 opacity-60" />
-                    <span className="text-[9px] font-bold uppercase tracking-wider opacity-60">Khởi tạo</span>
-                    <span className="text-[11px] font-semibold mt-1">
-                        {product.createdAt ? format(new Date(product.createdAt), "dd/MM/yyyy") : "---"}
-                    </span>
-                </div>
-                <div className="flex flex-col items-center justify-center p-4 rounded-[1.5rem] bg-emerald-50/50 border border-emerald-100/50 text-emerald-700 shadow-sm">
-                    <Tag className="h-5 w-5 mb-2 opacity-60" />
-                    <span className="text-[9px] font-bold uppercase tracking-wider opacity-60">Danh mục</span>
-                    <span className="text-[11px] font-semibold mt-1 truncate max-w-full text-center">{category?.name || "N/A"}</span>
-                </div>
-                <div className="flex flex-col items-center justify-center p-4 rounded-[1.5rem] bg-amber-50/50 border border-amber-100/50 text-amber-700 shadow-sm">
-                    <Box className="h-5 w-5 mb-2 opacity-60" />
-                    <span className="text-[9px] font-bold uppercase tracking-wider opacity-60">Thương hiệu</span>
-                    <span className="text-[11px] font-semibold mt-1 truncate max-w-full text-center">{brand?.name || "N/A"}</span>
-                </div>
-            </div>
         </motion.div>
       </div>
 

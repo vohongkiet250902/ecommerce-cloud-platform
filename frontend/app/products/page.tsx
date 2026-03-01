@@ -69,6 +69,24 @@ export default function ProductsPage() {
       .map(b => ({ id: b._id, name: b.name })), 
   [brandsData]);
 
+  // Find active category path
+  const categoryPath = useMemo(() => {
+    if (selectedCategory === "all") return [];
+    
+    const findPath = (id: string, list: any[], path: any[] = []): any[] | null => {
+      for (const item of list) {
+        if (item._id === id) return [...path, item];
+        if (item.children && item.children.length > 0) {
+          const found = findPath(id, item.children, [...path, item]);
+          if (found) return found;
+        }
+      }
+      return null;
+    };
+
+    return findPath(selectedCategory, categoriesData) || [];
+  }, [selectedCategory, categoriesData]);
+
   // Helper to find category and its children
   const getCategoryIds = useCallback((rootId: string, allCategories: any[]) => {
       const findNode = (id: string, list: any[]): any => {
@@ -254,7 +272,7 @@ export default function ProductsPage() {
       <main className="container mx-auto px-4 py-8">
         {/* Page Header */}
         <div className="mb-8">
-          <h1 className="text-3xl lg:text-4xl font-bold text-foreground mb-2">
+          <h1 className="text-2xl font-bold text-foreground mb-2">
             Sản phẩm
           </h1>
           <p className="text-muted-foreground">
@@ -262,22 +280,75 @@ export default function ProductsPage() {
           </p>
         </div>
 
-        {/* Category Tabs */}
-        <div className="flex gap-2 overflow-x-auto pb-4 mb-6 scrollbar-hide">
-          {categories.map((cat) => (
-            <Button
-              key={cat.value}
-              variant={selectedCategory === cat.value ? "default" : "outline"}
-              className={`rounded-full whitespace-nowrap ${
-                selectedCategory === cat.value
-                  ? "bg-primary text-primary-foreground"
-                  : ""
-              }`}
-              onClick={() => setSelectedCategory(cat.value)}
-            >
-              {cat.label}
-            </Button>
-          ))}
+        {/* Category Navigation */}
+        <div className="space-y-4 mb-10">
+          {/* Root Level */}
+          <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
+            {categories.map((cat) => {
+              const isActive = selectedCategory === cat.value || (categoryPath.length > 0 && categoryPath[0]._id === cat.value);
+              return (
+                <Button
+                  key={cat.value}
+                  variant={isActive ? "default" : "outline"}
+                  className={`rounded-full whitespace-nowrap px-6 transition-all duration-300 font-bold ${
+                    isActive 
+                      ? "bg-primary text-primary-foreground shadow-sm shadow-primary/20" 
+                      : "hover:border-primary/50"
+                  }`}
+                  onClick={() => setSelectedCategory(cat.value)}
+                >
+                  {cat.label}
+                </Button>
+              );
+            })}
+          </div>
+
+          {/* Sub Levels Container with fixed height management to prevent jump */}
+          <div className="min-h-0">
+            <AnimatePresence initial={false}>
+              {categoryPath.map((node, index) => {
+                if (!node.children || node.children.length === 0) return null;
+                
+                const activeChildren = node.children.filter((c: any) => c.isActive);
+                if (activeChildren.length === 0) return null;
+
+                return (
+                  <motion.div 
+                    key={node._id}
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: "auto" }}
+                    exit={{ opacity: 0, height: 0 }}
+                    transition={{ duration: 0.2, ease: "easeOut" }}
+                    className="overflow-hidden"
+                  >
+                    <div className="flex items-center gap-2 overflow-x-auto py-2 scrollbar-hide pl-4 border-l-2 border-primary/20 ml-2">
+                      <span className="text-[10px] font-black uppercase tracking-widest text-muted-foreground mr-2 whitespace-nowrap">
+                        {node.name}
+                      </span>
+                      {activeChildren.map((child: any) => {
+                        const isChildActive = selectedCategory === child._id || (categoryPath.length > index + 1 && categoryPath[index+1]._id === child._id);
+                        return (
+                          <Button
+                            key={child._id}
+                            variant={isChildActive ? "secondary" : "ghost"}
+                            size="sm"
+                            className={`rounded-full whitespace-nowrap px-4 h-8 text-xs ${
+                              isChildActive 
+                                ? "bg-secondary text-secondary-foreground font-bold shadow-sm" 
+                                : "text-muted-foreground hover:text-foreground hover:bg-muted"
+                            }`}
+                            onClick={() => setSelectedCategory(child._id)}
+                          >
+                            {child.name}
+                          </Button>
+                        );
+                      })}
+                    </div>
+                  </motion.div>
+                );
+              })}
+            </AnimatePresence>
+          </div>
         </div>
 
         <div className="flex gap-8">
@@ -396,50 +467,52 @@ export default function ProductsPage() {
               )}
             </AnimatePresence>
 
-            {/* Products */}
-            {paginatedProducts.length > 0 ? (
-              <motion.div
-                layout
-                className="grid gap-6 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
-              >
-                <AnimatePresence mode="popLayout">
-                  {paginatedProducts.map((product, index) => (
-                    <motion.div
-                      key={product._id || index}
-                      layout
-                      initial={{ opacity: 0, y: 20 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, scale: 0.9 }}
-                      transition={{ delay: index * 0.02 }}
-                    >
-                      <ProductCard 
-                        id={product.slug}
-                        productId={product._id}
-                        name={product.name}
-                        brandName={typeof product.brandId === 'object' ? product.brandId?.name : (brands.find(b => b.id === product.brandId)?.name || "")}
-                        price={product.variants?.[0]?.price || product.price || 0}
-                        originalPrice={product.originalPrice}
-                        image={product.images?.[0]?.url || ""}
-                        rating={product.rating || 5}
-                        reviewCount={product.numReviews || 0}
-                        sku={product.variants?.[0]?.sku}
-                        badge={product.totalStock < 10 ? "hot" : undefined}
-                        variants={product.variants}
-                      />
-                    </motion.div>
-                  ))}
-                </AnimatePresence>
-              </motion.div>
-            ) : (
-              <div className="text-center py-16">
-                <p className="text-muted-foreground text-lg mb-4">
-                  Không tìm thấy sản phẩm phù hợp
-                </p>
-                <Button variant="outline" onClick={clearFilters}>
-                  Xóa bộ lọc
-                </Button>
-              </div>
-            )}
+            {/* Products Container with min-height */}
+            <div className="min-h-[600px]">
+              {paginatedProducts.length > 0 ? (
+                <motion.div
+                  layout
+                  className="grid gap-6 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
+                >
+                  <AnimatePresence mode="popLayout">
+                    {paginatedProducts.map((product, index) => (
+                      <motion.div
+                        key={product._id || index}
+                        layout
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        transition={{ duration: 0.2 }}
+                      >
+                        <ProductCard 
+                          id={product.slug}
+                          productId={product._id}
+                          name={product.name}
+                          brandName={typeof product.brandId === 'object' ? product.brandId?.name : (brands.find(b => b.id === product.brandId)?.name || "")}
+                          price={product.variants?.[0]?.price || product.price || 0}
+                          originalPrice={product.originalPrice}
+                          image={product.images?.[0]?.url || ""}
+                          rating={product.rating || 5}
+                          reviewCount={product.numReviews || 0}
+                          sku={product.variants?.[0]?.sku}
+                          badge={product.totalStock < 10 ? "hot" : undefined}
+                          variants={product.variants}
+                        />
+                      </motion.div>
+                    ))}
+                  </AnimatePresence>
+                </motion.div>
+              ) : (
+                <div className="text-center py-32">
+                  <p className="text-muted-foreground text-lg mb-4">
+                    Không tìm thấy sản phẩm phù hợp
+                  </p>
+                  <Button variant="outline" onClick={clearFilters}>
+                    Xóa bộ lọc
+                  </Button>
+                </div>
+              )}
+            </div>
 
             {/* Pagination */}
             {totalPages > 1 && (

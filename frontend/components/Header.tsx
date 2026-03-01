@@ -124,6 +124,7 @@ export default function Header({
               <Input
                 type="text"
                 placeholder="Tìm kiếm sản phẩm..."
+                suppressHydrationWarning
                 className="search-input pl-10 pr-4 w-full rounded-full"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}

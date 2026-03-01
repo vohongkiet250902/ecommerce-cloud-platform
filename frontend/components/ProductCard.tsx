@@ -1,10 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { ShoppingCart, Heart, Star } from "lucide-react";
+import { Heart, Star } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { motion } from "framer-motion";
-import { useCart } from "@/hooks/useCart";
 
 interface ProductCardProps {
   id: string; // This is the slug for routing
@@ -35,7 +34,6 @@ export function ProductCard({
   variants,
   brandName,
 }: ProductCardProps) {
-  const { addItem } = useCart();
   const discountPercent = originalPrice
     ? Math.round(((originalPrice - price) / originalPrice) * 100)
     : 0;
@@ -54,21 +52,6 @@ export function ProductCard({
 
   const hasPriceRange = minPrice !== maxPrice;
 
-  const handleAddToCart = (e: React.MouseEvent) => {
-    e.preventDefault();
-    const effectiveSku = sku && sku !== "N/A" ? sku : (productId || id).toString();
-    const cartId = `${productId || id}-${effectiveSku}`;
-    
-    addItem({
-      id: cartId,
-      productId: (productId || id).toString(),
-      name,
-      sku: effectiveSku,
-      price,
-      quantity: 1,
-      image,
-    });
-  };
 
   return (
     <Link href={`/products/${id}`} className="block h-full">
@@ -109,16 +92,6 @@ export function ProductCard({
 
 
 
-          {/* Quick Add Button */}
-          <div className="absolute bottom-0 left-0 right-0 p-4 translate-y-full group-hover:translate-y-0 transition-transform duration-300">
-            <Button
-              className="btn-primary w-full rounded-full"
-              onClick={handleAddToCart}
-            >
-              <ShoppingCart className="w-4 h-4 mr-2" />
-              Thêm vào giỏ
-            </Button>
-          </div>
         </div>
 
         {/* Content */}

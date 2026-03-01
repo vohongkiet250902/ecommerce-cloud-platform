@@ -158,12 +158,20 @@ export const brandApi = {
 export const usersApi = {
   getUsers: (params?: Record<string, unknown>) =>
     apiClient.get('admin/users', { params }),
-  getUser: (id: string) => apiClient.get(`/users/${id}`),
+  getUser: (id: string) => apiClient.get(`/admin/users/${id}`),
   updateUser: (id: string, data: Record<string, unknown>) =>
     apiClient.put(`/users/${id}`, data),
   toggleUserStatus: (id: string, isActive: boolean) =>
     apiClient.patch(`/admin/users/${id}/status`, { isActive }),
 };
+
+export const couponApi = {
+  getAdminCoupons: () => apiClient.get('/admin/coupons'),
+  createCoupon: (data: Record<string, unknown>) => apiClient.post('/admin/coupons', data),
+  toggleCouponStatus: (id: string) => apiClient.patch(`/admin/coupons/${id}/toggle`),
+  deleteCoupon: (id: string) => apiClient.delete(`/admin/coupons/${id}`),
+};
+
 
 export const orderApi = {
   getOrders: (params?: { page?: number; limit?: number; status?: string; userId?: string }) =>
@@ -190,6 +198,15 @@ export const uploadApi = {
     apiClient.post('/upload/multiple', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
     }),
+};
+
+export const reviewApi = {
+  getAdminReviews: (params?: any) => apiClient.get("/admin/reviews", { params }),
+  deleteReview: (id: string) => apiClient.delete(`/admin/reviews/${id}`),
+  getReviewsByProduct: (productId: string, params?: { page?: number; limit?: number; rating?: number; sortOrder?: string }) =>
+    apiClient.get(`/reviews/product/${productId}`, { params }),
+  createReview: (data: { productId: string; rating: number; comment: string }) =>
+    apiClient.post('/reviews', data),
 };
 
 export default apiClient;

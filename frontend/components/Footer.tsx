@@ -77,9 +77,13 @@ export default function Footer() {
               <Input
                 type="email"
                 placeholder="Nhập email của bạn"
+                suppressHydrationWarning
                 className="bg-background/10 border-background/20 text-background placeholder:text-background/50 rounded-full"
               />
-              <Button className="btn-primary rounded-full px-6 whitespace-nowrap">
+              <Button 
+                className="btn-primary rounded-full px-6 whitespace-nowrap"
+                suppressHydrationWarning
+              >
                 Đăng ký
               </Button>
             </div>

@@ -9,13 +9,24 @@ import {
     RefreshCw, 
     Loader2,
     Save,
-    Search
+    Search,
+    Plus,
+    Minus,
+    Layers,
+    Box,
+    Filter
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { DataTable } from "@/components/shared/DataTable";
 import { Progress } from "@/components/ui/progress";
 import { Input } from "@/components/ui/input";
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
     Dialog,
     DialogContent,
@@ -55,6 +66,7 @@ export default function InventoryPage() {
   const [selectedItem, setSelectedItem] = useState<InventoryItem | null>(null);
   const [importQuantity, setImportQuantity] = useState<number>(0);
   const [updating, setUpdating] = useState(false);
+  const [statusFilter, setStatusFilter] = useState<"all" | "out_of_stock" | "low_stock" | "in_stock">("all");
 
   const fetchInventory = async () => {
     try {
@@ -160,6 +172,17 @@ export default function InventoryPage() {
       }
   }
 
+  // Filtered Data
+  const filteredInventory = useMemo(() => {
+      return inventory.filter(item => {
+          if (statusFilter === "all") return true;
+          if (statusFilter === "out_of_stock") return item.stock === 0;
+          if (statusFilter === "low_stock") return item.stock > 0 && item.stock <= LOW_STOCK_THRESHOLD;
+          if (statusFilter === "in_stock") return item.stock > LOW_STOCK_THRESHOLD;
+          return true;
+      });
+  }, [inventory, statusFilter]);
+
   // Stats
   const stats = useMemo(() => {
       const totalSKUs = inventory.length;
@@ -183,7 +206,7 @@ export default function InventoryPage() {
              )}
           </div>
           <div>
-            <p className="font-medium text-sm text-foreground line-clamp-1" title={item.productName}>{item.productName}</p>
+            <p className="font-semibold text-sm text-foreground" title={item.productName}>{item.productName}</p>
             <div className="flex items-center gap-2 text-xs text-muted-foreground font-mono mt-0.5">
                <Badge variant="secondary" className="px-1 py-0 text-[10px] h-4 font-normal">{item.sku}</Badge>
                {item.attributes && <span className="line-clamp-1 text-[10px]">{item.attributes}</span>}
@@ -250,14 +273,6 @@ export default function InventoryPage() {
     },
   ];
 
-  if (loading) {
-      return (
-          <div className="h-[80vh] flex items-center justify-center">
-              <Loader2 className="h-8 w-8 animate-spin text-primary" />
-          </div>
-      )
-  }
-
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -268,14 +283,14 @@ export default function InventoryPage() {
             Quản lý tồn kho chi tiết theo từng biến thể sản phẩm
           </p>
         </div>
-        <Button variant="outline" onClick={fetchInventory}>
+        <Button variant="outline" onClick={fetchInventory} className="border-dashed bg-background/50 border-border/40">
           <RefreshCw className="h-4 w-4 mr-2" />
           Đồng bộ kho
         </Button>
       </div>
 
       {/* Alert */}
-      {(stats.outOfStock > 0 || stats.lowStock > 0) && (
+      {!loading && (stats.outOfStock > 0 || stats.lowStock > 0) && (
         <div className="bg-orange-50/50 dark:bg-orange-950/10 border border-orange-200 dark:border-orange-900 rounded-xl p-4 flex items-center gap-4 animate-in fade-in slide-in-from-left-4 duration-500">
           <div className="p-2 rounded-lg bg-orange-100 dark:bg-orange-900/30">
             <AlertTriangle className="h-5 w-5 text-orange-600 dark:text-orange-500" />
@@ -283,7 +298,18 @@ export default function InventoryPage() {
           <div>
             <p className="font-medium text-foreground">Cần chú ý</p>
             <p className="text-sm text-muted-foreground">
-              Có <span className="font-bold text-destructive">{stats.outOfStock}</span> Sản phẩm hết hàng và <span className="font-bold text-warning">{stats.lowStock}</span> Sản phẩm sắp hết hàng cần bổ sung.
+              {stats.outOfStock > 0 && (
+                <>
+                  Có <span className="font-bold text-destructive">{stats.outOfStock}</span> sản phẩm hết hàng
+                </>
+              )}
+              {stats.outOfStock > 0 && stats.lowStock > 0 && " và "}
+              {stats.lowStock > 0 && (
+                <>
+                  Có <span className="font-bold text-warning">{stats.lowStock}</span> sản phẩm sắp hết hàng
+                </>
+              )}
+              {" cần bổ sung ngay."}
             </p>
           </div>
         </div>
@@ -346,68 +372,160 @@ export default function InventoryPage() {
       </div>
 
       {/* Table */}
-      <DataTable<InventoryItem>
-        data={inventory}
-        columns={columns}
-        searchPlaceholder="Tìm kiếm tên sản phẩm..."
-        searchKey="productName"
-      />
+      {loading ? (
+        <div className="flex items-center justify-center py-20 bg-card/50 rounded-xl border border-dashed border-border/40">
+          <div className="flex flex-col items-center gap-2">
+            <Loader2 className="h-8 w-8 animate-spin text-primary" />
+            <p className="text-xs text-muted-foreground animate-pulse">Đang tải kho hàng...</p>
+          </div>
+        </div>
+      ) : (
+        <DataTable<InventoryItem>
+          data={filteredInventory}
+          columns={columns}
+          searchPlaceholder="Tìm kiếm tên hoặc mã SKU..."
+          pageSize={10}
+          filterNode={
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="sm" className="h-10 gap-2 bg-background/50 border-border/40">
+                  <Filter className="h-4 w-4" />
+                  <span>
+                    {statusFilter === "all" ? "Tất cả trạng thái" : 
+                     statusFilter === "out_of_stock" ? "Hết hàng" : 
+                     statusFilter === "low_stock" ? "Sắp hết hàng" : "Còn hàng"}
+                  </span>
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="dropdown-content">
+                <DropdownMenuItem onClick={() => setStatusFilter("all")}>Tất cả trạng thái</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setStatusFilter("out_of_stock")}>Hết hàng</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setStatusFilter("low_stock")}>Sắp hết hàng</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setStatusFilter("in_stock")}>Còn hàng</DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          }
+        />
+      )}
 
-      {/* Status Update Dialog */}
+      {/* Premium Stock Update Dialog */}
       <Dialog open={isUpdateOpen} onOpenChange={setIsUpdateOpen}>
-          <DialogContent className="sm:max-w-sm">
-              <DialogHeader>
+          <DialogContent className="sm:max-w-md p-0 overflow-hidden border-none shadow-2xl rounded-2xl">
+              <DialogHeader className="sr-only">
                   <DialogTitle>Cập nhật tồn kho</DialogTitle>
-                  <DialogDescription>
-                      Cập nhật số lượng tồn kho cho Sản phẩm <span className="font-mono font-bold text-foreground">{selectedItem?.productName}</span>
-                  </DialogDescription>
               </DialogHeader>
-              <div className="space-y-4 py-4">
-                  <div className="space-y-2">
-                      <Label>Sản phẩm</Label>
-                      <Input value={selectedItem?.productName} disabled className="bg-muted" />
+
+              <div className="flex flex-col">
+                  <div className="bg-gradient-to-r from-primary/20 to-primary/5 p-6 flex items-center gap-5 border-b border-border/50">
+                      <div className="h-20 w-20 relative rounded-2xl overflow-hidden bg-background border-4 border-background shadow-xl shrink-0">
+                          {selectedItem?.image ? (
+                              <Image src={selectedItem.image} alt={selectedItem.productName} fill className="object-cover" />
+                          ) : (
+                              <div className="flex items-center justify-center h-full bg-muted text-muted-foreground">
+                                  <Box className="h-8 w-8" />
+                              </div>
+                          )}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                          <h3 className="font-bold text-xl text-foreground leading-tight">{selectedItem?.productName}</h3>
+                          <div className="flex flex-wrap items-center gap-2 mt-2">
+                             <Badge variant="secondary" className="px-1.5 py-0 text-[10px] h-5 font-bold uppercase tracking-wider bg-primary/10 text-primary border-none">
+                                {selectedItem?.sku}
+                             </Badge>
+                             <p className="text-[10px] text-muted-foreground font-bold flex items-center gap-1.5 uppercase tracking-widest">
+                                <Layers className="h-3 w-3" />
+                                {selectedItem?.attributes || "Mặc định"}
+                             </p>
+                          </div>
+                      </div>
                   </div>
-                   <div className="space-y-2">
-                      <Label>Biến thể</Label>
-                      <Input value={selectedItem?.attributes} disabled className="bg-muted" />
-                  </div>
-                  <div className="space-y-2">
-                      <Label>Tồn kho hiện tại</Label>
-                      <Input 
-                            type="number" 
-                            value={selectedItem?.stock || 0}
-                            disabled
-                            className="bg-muted font-bold"
-                        />
-                  </div>
-                  <div className="space-y-2">
-                       <Label>Số lượng nhập thêm</Label>
-                       <Input 
-                            type="number" 
-                            min={0} 
-                            value={importQuantity} 
-                            onChange={(e) => setImportQuantity(Number(e.target.value))} 
-                            className="text-lg font-bold"
-                            autoFocus
-                        />
-                  </div>
-                  <div className="space-y-2">
-                       <Label>Tồn kho sau cập nhật</Label>
-                       <Input 
-                            type="number" 
-                            value={(selectedItem?.stock || 0) + importQuantity}
-                            disabled
-                            className="bg-muted font-bold text-lg"
-                        />
+
+                  <div className="p-6 space-y-6">
+                      {/* Stock Comparison Cards */}
+                      <div className="grid grid-cols-2 gap-4">
+                          <div className="p-4 rounded-xl bg-muted/50 border border-border/50 text-center">
+                              <p className="text-xs font-semibold text-muted-foreground mb-1">Hiện tại</p>
+                              <p className="text-xl font-bold text-foreground">{selectedItem?.stock || 0}</p>
+                          </div>
+                          <div className="p-4 rounded-xl bg-primary/5 border border-primary/20 text-center relative overflow-hidden">
+                              <div className="absolute top-0 right-0 p-1 opacity-10">
+                                  <TrendingDown className="h-8 w-8 rotate-180" />
+                              </div>
+                              <p className="text-xs font-semibold text-primary mb-1">Dự kiến</p>
+                              <p className="text-xl font-bold text-primary">{(selectedItem?.stock || 0) + importQuantity}</p>
+                          </div>
+                      </div>
+
+                      {/* Input Section */}
+                      <div className="space-y-3">
+                          <Label className="text-sm font-semibold ml-1">Số lượng nhập thêm</Label>
+                          <div className="relative group">
+                              <Button 
+                                  variant="ghost" 
+                                  size="icon" 
+                                  className="absolute left-1 top-1 h-10 w-10 rounded-lg hover:bg-primary/10 hover:text-primary transition-colors"
+                                  onClick={() => setImportQuantity(prev => Math.max(0, prev - 1))}
+                              >
+                                  <Minus className="h-4 w-4" />
+                              </Button>
+                              <Input 
+                                  type="number" 
+                                  min={0} 
+                                  value={importQuantity} 
+                                  onChange={(e) => setImportQuantity(Number(e.target.value))} 
+                                  className="h-12 text-center text-xl font-bold bg-muted/30 border-border/60 rounded-xl focus-visible:ring-primary focus-visible:border-primary px-12 transition-all group-hover:bg-muted/50"
+                              />
+                              <Button 
+                                  variant="ghost" 
+                                  size="icon" 
+                                  className="absolute right-1 top-1 h-10 w-10 rounded-lg hover:bg-primary/10 hover:text-primary transition-colors"
+                                  onClick={() => setImportQuantity(prev => prev + 1)}
+                              >
+                                  <Plus className="h-4 w-4" />
+                              </Button>
+                          </div>
+
+                          {/* Quick Select Buttons */}
+                          <div className="flex gap-2">
+                              {[5, 10, 50, 100].map(val => (
+                                  <Button 
+                                      key={val} 
+                                      variant="outline" 
+                                      size="sm" 
+                                      className="flex-1 text-[10px] font-bold rounded-lg border-dashed bg-background/50 border-border/40 hover:bg-primary/5 hover:border-primary/30 hover:text-primary transition-all"
+                                      onClick={() => setImportQuantity(prev => prev + val)}
+                                  >
+                                      +{val}
+                                  </Button>
+                              ))}
+                          </div>
+                      </div>
+
+                      <div className="flex items-center justify-end gap-3 pt-2">
+                          <Button 
+                              variant="outline" 
+                              className="border-border/60"
+                              onClick={() => setIsUpdateOpen(false)}
+                          >
+                              Hủy
+                          </Button>
+                          <Button 
+                              className="font-bold"
+                              onClick={handleUpdateStock} 
+                              disabled={updating}
+                          >
+                              {updating ? (
+                                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                              ) : (
+                                  <>
+                                      <Save className="w-4 h-4 mr-2" />
+                                      Cập nhật
+                                  </>
+                              )}
+                          </Button>
+                      </div>
                   </div>
               </div>
-              <DialogFooter>
-                  <Button variant="outline" onClick={() => setIsUpdateOpen(false)}>Hủy</Button>
-                  <Button onClick={handleUpdateStock} disabled={updating}>
-                      {updating && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
-                      Lưu thay đổi
-                  </Button>
-              </DialogFooter>
           </DialogContent>
       </Dialog>
     </div>

@@ -155,7 +155,10 @@ function AuthContent() {
 
   useEffect(() => {
     setError(null);
-  }, [authState]);
+    loginForm.clearErrors();
+    signupForm.clearErrors();
+    otpForm.clearErrors();
+  }, [authState, loginForm, signupForm, otpForm]);
 
   // Clear error when user types
   useEffect(() => {

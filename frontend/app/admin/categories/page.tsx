@@ -168,7 +168,10 @@ const CategoryItem = ({
               </DropdownMenuItem>
 
               {!category.parentId && (
-                <DropdownMenuItem onClick={() => onAddChild(category)}>
+                <DropdownMenuItem 
+                  onClick={() => onAddChild(category)}
+                  disabled={!category.isActive}
+                >
                   <Plus className="mr-2 h-4 w-4" />
                   Thêm danh mục con
                 </DropdownMenuItem>
@@ -236,6 +239,7 @@ export default function CategoriesPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [sortBy, setSortBy] = useState<"name" | "products">("name");
   const [statusFilter, setStatusFilter] = useState<"all" | "active" | "inactive">("all");
+  const [levelFilter, setLevelFilter] = useState<"all" | "root" | "child">("all");
 
   // Modal states
   const [isDialogOpen, setIsDialogOpen] = useState(false);
@@ -311,12 +315,15 @@ export default function CategoriesPage() {
           const ownStatusMatches = statusFilter === "all" ? true : 
                                    statusFilter === "active" ? cat.isActive : !cat.isActive;
 
+          const ownLevelMatches = levelFilter === "all" ? true :
+                                  levelFilter === "root" ? !cat.parentId : cat.parentId;
+
           const hasMatchingChildren = cat.children && cat.children.length > 0;
           
           // Giữ lại danh mục nếu:
-          // 1. Bản thân nó khớp cả tìm kiếm và trạng thái
-          // 2. HOẶC nó có danh mục con khớp (để giữ được cấu trúc cây)
-          return (matchesSearch && ownStatusMatches) || hasMatchingChildren;
+          // 1. Bản thân nó khớp tất cả các bộ lọc (search, status, level)
+          // 2. HOẶC nó có danh mục con khớp (để giữ được cấu trúc cây khi search hoặc lọc)
+          return (matchesSearch && ownStatusMatches && ownLevelMatches) || hasMatchingChildren;
         });
     };
 
@@ -337,7 +344,7 @@ export default function CategoriesPage() {
     };
 
     return sortTree(processed);
-  }, [reduxCategories, searchQuery, sortBy, statusFilter]);
+  }, [reduxCategories, searchQuery, sortBy, statusFilter, levelFilter]);
 
   const { totalCategories, totalRootCategories, totalProducts } = useMemo(() => {
     const countTotalCategories = (list: Category[]): number => {
@@ -378,6 +385,14 @@ export default function CategoriesPage() {
       });
       return;
     }
+    if (!parent.isActive) {
+      toast({
+        title: "❌ Danh mục đã tắt",
+        description: "Không thể thêm danh mục con vào danh mục đang ngừng hoạt động.",
+        variant: "destructive",
+      });
+      return;
+    }
     setDialogMode("create_child");
     setSelectedCategory(parent);
     form.reset({ name: "", slug: "", isActive: true });
@@ -385,15 +400,6 @@ export default function CategoriesPage() {
   };
 
   const handleOpenDelete = (cat: Category) => {
-    if (cat.children && cat.children.length > 0) {
-      toast({
-        title: "❌ Cảnh báo cấu trúc",
-        description:
-          "Danh mục này đang chứa danh mục con. Vui lòng chuyển hoặc xóa danh mục con trước.",
-        variant: "destructive",
-      });
-      return;
-    }
     setCategoryToDelete(cat);
     setDeleteConfirmOpen(true);
   };
@@ -496,11 +502,25 @@ export default function CategoriesPage() {
     if (!categoryToDelete) return;
 
     try {
+      // Check for children
+      if (categoryToDelete.children && categoryToDelete.children.length > 0) {
+        setDeleteConfirmOpen(false);
+        toast({
+          title: "❌ Không thể xóa",
+          description: "Danh mục này đang chứa danh mục con. Vui lòng chuyển hoặc xóa danh mục con trước.",
+          variant: "destructive",
+        });
+        return;
+      }
+
       setDeletingId(categoryToDelete._id);
       await categoryApi.deleteCategory(categoryToDelete._id);
+      setDeleteConfirmOpen(false);
+      
       toast({ title: "✅ Đã xóa danh mục", variant: "success" });
       dispatch(fetchAdminCategoriesThunk());
     } catch (error: any) {
+      setDeleteConfirmOpen(false);
       const msg = error?.response?.data?.message || "Không thể xóa danh mục";
       const description = typeof msg === "string" ? msg : (Array.isArray(msg) ? msg.join(", ") : JSON.stringify(msg));
       
@@ -514,7 +534,6 @@ export default function CategoriesPage() {
     } finally {
       setDeletingId(null);
       setCategoryToDelete(null);
-      setDeleteConfirmOpen(false);
     }
   };
 
@@ -592,19 +611,23 @@ export default function CategoriesPage() {
             <div className="relative max-w-sm w-full">
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input 
-                placeholder="Tìm kiếm..." 
-                className="pl-8 h-9 text-sm bg-background/50 border-border/40"
+                placeholder="Tìm kiếm danh mục..." 
+                className="pl-8 h-10 text-sm bg-background/50 border-border/40 focus-visible:ring-primary"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
               />
             </div>
 
+
+
             {/* Status Filter */}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="sm" className="gap-2 h-9 border-border/40 bg-background/50">
-                  <Filter className="h-3.5 w-3.5" />
-                  {statusFilter === "all" ? "Tất cả" : statusFilter === "active" ? "Đang hoạt động" : "Ngừng hoạt động"}
+                <Button variant="outline" size="sm" className="h-10 gap-2 border-dashed bg-background/50 border-border/40">
+                  <Filter className="h-4 w-4" />
+                  <span>
+                    {statusFilter === "all" ? "Tất cả trạng thái" : statusFilter === "active" ? "Đang hoạt động" : "Ngừng hoạt động"}
+                  </span>
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="dropdown-content">
@@ -617,9 +640,9 @@ export default function CategoriesPage() {
             {/* Sort */}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="sm" className="gap-2 h-9 border-border/40 bg-background/50">
-                  <ArrowUpDown className="h-3.5 w-3.5" />
-                  Sắp xếp
+                <Button variant="outline" size="sm" className="h-10 gap-2 border-dashed bg-background/50 border-border/40">
+                  <ArrowUpDown className="h-4 w-4" />
+                  <span>Sắp xếp: {sortBy === "name" ? "Tên (A-Z)" : "Số sản phẩm"}</span>
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="dropdown-content">
@@ -736,7 +759,7 @@ export default function CategoriesPage() {
 
               <DialogFooter className="pt-4">
                 <DialogClose asChild>
-                  <Button type="button" variant="outline">
+                  <Button type="button" variant="outline" className="border-dashed bg-background/50 border-border/40">
                     Hủy
                   </Button>
                 </DialogClose>
@@ -762,11 +785,11 @@ export default function CategoriesPage() {
             </DialogTitle>
           </DialogHeader>
 
-          <div className="py-4">
+          <div className="py-4 space-y-3">
             <p className="text-muted-foreground">
               Bạn có chắc chắn muốn xóa danh mục{" "}
               <span className="font-bold text-foreground">
-                {categoryToDelete?.name}
+                "{categoryToDelete?.name}"
               </span>
               ?
             </p>
@@ -777,6 +800,7 @@ export default function CategoriesPage() {
               variant="outline"
               onClick={() => setDeleteConfirmOpen(false)}
               disabled={deletingId !== null}
+              className="border-dashed bg-background/50 border-border/40"
             >
               Hủy
             </Button>
@@ -840,6 +864,7 @@ export default function CategoriesPage() {
                 setStatusConfirmOpen(false);
                 setStatusToToggle(null);
               }}
+              className="border-dashed bg-background/50 border-border/40"
             >
               Hủy
             </Button>
