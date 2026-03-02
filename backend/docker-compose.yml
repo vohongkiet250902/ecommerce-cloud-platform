@@ -1,0 +1,28 @@
+version: '3.8'
+
+services:
+  # 1. Container cho Redis Caching (Lưu bộ nhớ đệm)
+  redis_cache:
+    image: redis:7-alpine
+    container_name: ecommerce_redis
+    restart: always
+    ports:
+      - '6379:6379'
+    volumes:
+      - redis_data:/data
+
+  # 2. Container cho Meilisearch (Search Engine)
+  meilisearch:
+    image: getmeili/meilisearch:v1.7
+    container_name: ecommerce_meilisearch
+    restart: always
+    ports:
+      - '7700:7700'
+    environment:
+      - MEILI_MASTER_KEY=EcommerceSearchKey_2026_SecretString
+    volumes:
+      - meili_data:/meili_data
+
+volumes:
+  redis_data:
+  meili_data:

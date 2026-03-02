@@ -10,10 +10,12 @@ import {
   CategorySchema,
 } from '../categories/schemas/category.schema';
 import { Brand, BrandSchema } from '../brands/schemas/brand.schema';
+import { SearchModule } from '../search/search.module';
 
 @Module({
   imports: [
     UploadModule,
+    SearchModule,
     MongooseModule.forFeature([
       { name: Product.name, schema: ProductSchema },
       { name: Category.name, schema: CategorySchema },
