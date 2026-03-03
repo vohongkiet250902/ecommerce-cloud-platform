@@ -132,11 +132,20 @@ export class OrdersService {
     }
   }
 
-  async hasPurchased(userId: string, productId: string): Promise<boolean> {
+  async hasPurchased(
+    userId: string,
+    productId: string,
+    sku: string,
+  ): Promise<boolean> {
     const order = await this.orderModel.findOne({
       userId: new Types.ObjectId(userId),
       status: 'completed',
-      'items.productId': new Types.ObjectId(productId),
+      items: {
+        $elemMatch: {
+          productId: new Types.ObjectId(productId),
+          sku: sku,
+        },
+      },
     });
     return !!order;
   }

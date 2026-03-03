@@ -9,6 +9,9 @@ export class Review extends Document {
   @Prop({ type: Types.ObjectId, ref: 'Product', required: true })
   productId: Types.ObjectId;
 
+  @Prop({ required: true })
+  sku: string;
+
   @Prop({ required: true, min: 1, max: 5 })
   rating: number;
 
@@ -18,5 +21,4 @@ export class Review extends Document {
 
 export const ReviewSchema = SchemaFactory.createForClass(Review);
 
-// Tạo index để truy vấn danh sách review của 1 sản phẩm nhanh hơn
-ReviewSchema.index({ productId: 1, createdAt: -1 });
+ReviewSchema.index({ productId: 1, sku: 1, createdAt: -1 });

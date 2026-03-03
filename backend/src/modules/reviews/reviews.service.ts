@@ -40,31 +40,35 @@ export class ReviewsService {
   }
 
   async create(userId: string, dto: CreateReviewDto) {
+    // 1. Gửi thêm sku sang hàm hasPurchased để check chính xác biến thể
     const hasPurchased = await this.ordersService.hasPurchased(
       userId,
       dto.productId,
+      dto.sku, // <-- TRUYỀN THÊM SKU VÀO ĐÂY
     );
     if (!hasPurchased) {
       throw new BadRequestException(
-        'Bạn cần mua hàng thành công trước khi đánh giá.',
+        'Bạn cần mua sản phẩm này thành công trước khi đánh giá.',
       );
     }
 
+    // 2. Kiểm tra trùng lặp theo cả productId VÀ sku
     const existing = await this.reviewModel.findOne({
       userId: new Types.ObjectId(userId),
       productId: new Types.ObjectId(dto.productId),
+      sku: dto.sku, // <-- CHECK THÊM SKU
     });
 
     if (existing) {
-      throw new BadRequestException('Bạn đã đánh giá sản phẩm này rồi.');
+      throw new BadRequestException('Bạn đã đánh giá phân loại này rồi.');
     }
 
-    // TỐI ƯU CỰC KỲ QUAN TRỌNG:
-    // Ghi đè lại dto.productId thành Types.ObjectId để đảm bảo DB lưu đúng kiểu
+    // 3. Tạo review mới có lưu kèm sku
     const review = await this.reviewModel.create({
       ...dto,
-      productId: new Types.ObjectId(dto.productId), // <-- Ép kiểu ở đây
+      productId: new Types.ObjectId(dto.productId),
       userId: new Types.ObjectId(userId),
+      sku: dto.sku,
     });
 
     await this.updateProductAverageRating(dto.productId);
