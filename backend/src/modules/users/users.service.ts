@@ -1,4 +1,3 @@
-// /mnt/data/users.service.ts
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
@@ -105,13 +104,12 @@ export class UsersService {
     return this.userModel.updateOne({ _id: userId }, { otpHash, otpExpires });
   }
 
-  // SỬA LỖI 1: Thêm hàm này vào (bạn đang thiếu hàm này)
   async activateUser(userId: string) {
     return this.userModel.updateOne(
       { _id: userId },
       {
         isActive: true,
-        $unset: { otpHash: 1, otpExpires: 1 }, // Xoá OTP sau khi kích hoạt xong
+        $unset: { otpHash: 1, otpExpires: 1 },
       },
     );
   }
@@ -121,5 +119,75 @@ export class UsersService {
       { _id: userId },
       { $unset: { otpHash: 1, otpExpires: 1 } },
     );
+  }
+
+  async updateProfile(userId: string, dto: any): Promise<UserDocument> {
+    const updatedUser = await this.userModel
+      .findByIdAndUpdate(userId, dto, {
+        new: true,
+      })
+      .exec();
+    if (!updatedUser) throw new NotFoundException('User not found');
+    return updatedUser;
+  }
+
+  async addAddress(userId: string, dto: any) {
+    const user = await this.userModel.findById(userId);
+    if (!user) throw new NotFoundException('User not found');
+
+    if (user.addresses.length === 0) {
+      dto.isDefault = true;
+    }
+    if (dto.isDefault) {
+      user.addresses.forEach((addr) => (addr.isDefault = false));
+    }
+
+    user.addresses.push(dto);
+    return user.save();
+  }
+
+  async updateAddress(userId: string, addressId: string, dto: any) {
+    const user = await this.userModel.findById(userId);
+    if (!user) throw new NotFoundException('User not found');
+
+    const address = user.addresses.id(addressId);
+    if (!address) throw new NotFoundException('Address not found');
+
+    if (dto.isDefault) {
+      user.addresses.forEach((addr) => (addr.isDefault = false));
+    }
+
+    Object.assign(address, dto);
+    return user.save();
+  }
+
+  async deleteAddress(userId: string, addressId: string) {
+    const user = await this.userModel.findById(userId);
+    if (!user) throw new NotFoundException('User not found');
+
+    const address = user.addresses.id(addressId);
+    if (!address) throw new NotFoundException('Address not found');
+
+    const wasDefault = address.isDefault;
+    user.addresses.pull({ _id: addressId });
+
+    if (wasDefault && user.addresses.length > 0) {
+      user.addresses[0].isDefault = true;
+    }
+
+    return user.save();
+  }
+
+  async setDefaultAddress(userId: string, addressId: string) {
+    const user = await this.userModel.findById(userId);
+    if (!user) throw new NotFoundException('User not found');
+
+    const address = user.addresses.id(addressId);
+    if (!address) throw new NotFoundException('Address not found');
+
+    user.addresses.forEach((addr) => (addr.isDefault = false));
+    address.isDefault = true;
+
+    return user.save();
   }
 }

@@ -18,7 +18,6 @@ export class OrdersService {
   ) {}
 
   async create(userId: string, dto: any) {
-    // 1. Chống spam click (Idempotency)
     if (dto.idempotencyKey) {
       const existingOrder = await this.orderModel.findOne({
         idempotencyKey: dto.idempotencyKey,
@@ -106,6 +105,7 @@ export class OrdersService {
       return await this.orderModel.create({
         userId: new Types.ObjectId(userId),
         items: orderItems,
+        shippingInfo: dto.shippingInfo,
         totalAmount: finalTotal,
         couponCode: dto.couponCode,
         discountAmount: discountAmount,
@@ -128,7 +128,7 @@ export class OrdersService {
         }));
         await this.productModel.bulkWrite(rollbackOps);
       }
-      throw error; // Ném lỗi ra cho Controller
+      throw error;
     }
   }
 
@@ -141,7 +141,6 @@ export class OrdersService {
     return !!order;
   }
 
-  // ✅ Phân trang & Tìm kiếm cho Admin
   async findAll(query: {
     page: number;
     limit: number;
@@ -204,7 +203,6 @@ export class OrdersService {
     return order;
   }
 
-  // User tự hủy đơn
   async cancelOrder(orderId: string, userId: string) {
     const order = await this.orderModel.findOne({
       _id: orderId,
@@ -233,7 +231,6 @@ export class OrdersService {
     return order;
   }
 
-  // Cập nhật hàm findByUser để nhận thêm tham số query phân trang
   async findByUser(
     userId: string,
     query?: { page: number; limit: number; status?: string },
@@ -273,11 +270,8 @@ export class OrdersService {
     return order;
   }
 
-  // BỔ SUNG 1: Hàm xử lý khi khách hàng hủy thanh toán hoặc VNPay báo lỗi
   async handlePaymentFailed(orderId: string) {
     const order = await this.orderModel.findById(orderId);
-
-    // Nếu không tìm thấy đơn hoặc đơn đã xử lý thì bỏ qua
     if (!order) throw new NotFoundException('Không tìm thấy đơn hàng');
     if (
       order.status === 'cancelled' ||

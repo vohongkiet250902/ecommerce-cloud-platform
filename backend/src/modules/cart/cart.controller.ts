@@ -71,6 +71,7 @@ export class CartController {
   ) {
     return this.cartService.checkout(
       req.user.id,
+      dto.shippingInfo,
       dto.paymentMethod,
       idempotencyKey,
     );

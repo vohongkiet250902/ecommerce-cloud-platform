@@ -283,6 +283,7 @@ export class CartService {
 
   async checkout(
     userId: string,
+    shippingInfo: any,
     paymentMethod?: string,
     idempotencyKey?: string,
   ) {
@@ -304,6 +305,7 @@ export class CartService {
 
     const order = await this.ordersService.create(userId, {
       items,
+      shippingInfo,
       paymentMethod,
       couponCode: cart.couponCode,
       idempotencyKey,
