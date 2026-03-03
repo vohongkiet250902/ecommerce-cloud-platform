@@ -10,28 +10,29 @@ import {
   ResponsiveContainer,
 } from "recharts";
 
-const data = [
-  { name: "T1", revenue: 4000, orders: 240 },
-  { name: "T2", revenue: 3000, orders: 198 },
-  { name: "T3", revenue: 5000, orders: 300 },
-  { name: "T4", revenue: 4500, orders: 280 },
-  { name: "T5", revenue: 6000, orders: 350 },
-  { name: "T6", revenue: 5500, orders: 320 },
-  { name: "T7", revenue: 7000, orders: 420 },
-  { name: "T8", revenue: 6500, orders: 380 },
-  { name: "T9", revenue: 8000, orders: 450 },
-  { name: "T10", revenue: 7500, orders: 420 },
-  { name: "T11", revenue: 9000, orders: 500 },
-  { name: "T12", revenue: 8500, orders: 480 },
-];
+interface RevenueData {
+  name: string;
+  revenue: number;
+  orders: number;
+}
 
-export default function RevenueChart() {
+interface RevenueChartProps {
+  data?: RevenueData[];
+  title?: string;
+}
+
+export default function RevenueChart({ data = [], title = "Doanh thu" }: RevenueChartProps) {
+  const formatYAxis = (value: number) => {
+    if (value >= 1000000) return `${(value / 1000000).toFixed(1)}M`;
+    if (value >= 1000) return `${(value / 1000).toFixed(0)}k`;
+    return value.toString();
+  };
   return (
     <div className="bg-card rounded-xl p-6 card-shadow animate-slide-up">
       <div className="flex items-center justify-between mb-6">
         <div>
           <h3 className="text-lg font-semibold text-card-foreground">
-            Doanh thu
+            {title}
           </h3>
           <p className="text-sm text-muted-foreground">
             Thống kê doanh thu theo tháng
@@ -92,11 +93,25 @@ export default function RevenueChart() {
             />
 
             <YAxis
+              yAxisId="revenue"
               stroke="hsl(var(--muted-foreground))"
               fontSize={12}
               tickLine={false}
               axisLine={false}
-              tickFormatter={(value) => `${value / 1000}k`}
+              tickFormatter={formatYAxis}
+              width={60}
+            />
+
+            <YAxis
+              yAxisId="orders"
+              orientation="right"
+              stroke="hsl(var(--muted-foreground))"
+              fontSize={12}
+              tickLine={false}
+              axisLine={false}
+              tickFormatter={(value) => Math.round(value).toString()}
+              width={40}
+              domain={[0, (dataMax: number) => Math.max(dataMax * 2, 50)]} // Giữ đường đơn hàng ở tầm trung-thấp
             />
 
             <Tooltip
@@ -115,21 +130,25 @@ export default function RevenueChart() {
             />
 
             <Area
+              yAxisId="revenue"
               type="monotone"
               dataKey="revenue"
               stroke="hsl(var(--primary))"
-              strokeWidth={2}
-              fillOpacity={1}
+              strokeWidth={3}
+              fillOpacity={0.6}
               fill="url(#colorRevenue)"
+              animationDuration={1500}
             />
 
             <Area
+              yAxisId="orders"
               type="monotone"
               dataKey="orders"
               stroke="hsl(var(--success))"
-              strokeWidth={2}
-              fillOpacity={1}
+              strokeWidth={3}
+              fillOpacity={0.3} // Làm mờ bớt phần fill để không bị rối mắt
               fill="url(#colorOrders)"
+              animationDuration={1500}
             />
           </AreaChart>
         </ResponsiveContainer>

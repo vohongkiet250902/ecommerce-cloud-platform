@@ -272,4 +272,55 @@ export class OrdersService {
     if (!order) throw new BadRequestException('Order not found');
     return order;
   }
+
+  // BỔ SUNG 1: Hàm xử lý khi khách hàng hủy thanh toán hoặc VNPay báo lỗi
+  async handlePaymentFailed(orderId: string) {
+    const order = await this.orderModel.findById(orderId);
+
+    // Nếu không tìm thấy đơn hoặc đơn đã xử lý thì bỏ qua
+    if (!order) throw new NotFoundException('Không tìm thấy đơn hàng');
+    if (
+      order.status === 'cancelled' ||
+      order.status === 'completed' ||
+      order.status === 'paid'
+    ) {
+      return order;
+    }
+
+    // KHÔNG HỦY ĐƠN VÀ KHÔNG HOÀN KHO NGAY
+    // Chỉ cập nhật trạng thái thanh toán để User có thể thấy nút "Thanh toán lại"
+    order.paymentStatus = 'pending';
+    await order.save();
+
+    console.log(
+      `[Order Service] Đơn hàng ${orderId} thanh toán VNPay thất bại. Đang chờ khách thanh toán lại.`,
+    );
+    return order;
+  }
+
+  //Hàm tạo lại link thanh toán cho đơn hàng Pending
+  async retryPayment(orderId: string, userId: string) {
+    const order = await this.orderModel.findOne({
+      _id: orderId,
+      userId: new Types.ObjectId(userId),
+    });
+
+    if (!order) throw new NotFoundException('Không tìm thấy đơn hàng');
+
+    // Chỉ cho phép thanh toán lại nếu đơn hàng đang ở trạng thái pending và chưa thanh toán
+    if (order.status !== 'pending' || order.paymentStatus !== 'pending') {
+      throw new BadRequestException(
+        'Chỉ có thể thanh toán lại đơn hàng đang chờ thanh toán',
+      );
+    }
+
+    // Đảm bảo đơn hàng này lúc đầu chọn thanh toán bằng VNPay
+    if (order.paymentMethod !== 'vnpay') {
+      throw new BadRequestException(
+        'Đơn hàng này không sử dụng phương thức thanh toán VNPay',
+      );
+    }
+
+    return order;
+  }
 }

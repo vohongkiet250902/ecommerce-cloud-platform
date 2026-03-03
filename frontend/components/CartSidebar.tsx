@@ -17,6 +17,9 @@ interface CartItem {
   price: number;
   quantity: number;
   image: string;
+  attributes?: { key: string; value: string }[];
+  originalPrice?: number;
+  discountPercentage?: number;
 }
 
 interface CartSidebarProps {
@@ -126,7 +129,13 @@ export function CartSidebar({
                 <p className="text-muted-foreground mb-8 max-w-[250px]">
                   Hãy thêm sản phẩm vào giỏ hàng để tiếp tục mua sắm
                 </p>
-                <Button onClick={() => onOpenChange(false)} className="rounded-full px-8">
+                <Button 
+                  onClick={() => {
+                    onOpenChange(false);
+                    router.push('/products');
+                  }} 
+                  className="rounded-full px-8"
+                >
                   Tiếp tục mua sắm
                 </Button>
               </motion.div>
@@ -163,9 +172,32 @@ export function CartSidebar({
                             <h4 className="font-semibold text-sm line-clamp-1 mb-1">
                               {item.name}
                             </h4>
-                            <p className="text-primary font-bold text-base">
-                              {formatPrice(item.price)}
-                            </p>
+                            {item.attributes && item.attributes.length > 0 && (
+                              <div className="flex flex-wrap gap-1 mb-1">
+                                {item.attributes.map((attr, idx) => (
+                                  <span key={idx} className="text-[10px] bg-secondary text-secondary-foreground px-1.5 py-0.5 rounded-sm whitespace-nowrap">
+                                    {attr.key}: {attr.value}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                            <div className="flex items-center gap-2">
+                              <p className="text-primary font-bold text-base">
+                                {formatPrice(item.price)}
+                              </p>
+                              {item.originalPrice && item.originalPrice > item.price && (
+                                <div className="flex items-center gap-1.5">
+                                  <p className="text-xs text-muted-foreground line-through">
+                                    {formatPrice(item.originalPrice)}
+                                  </p>
+                                  {item.discountPercentage && item.discountPercentage > 0 && (
+                                    <span className="text-[10px] font-bold text-destructive bg-destructive/10 px-1 rounded-sm">
+                                      -{item.discountPercentage}%
+                                    </span>
+                                  )}
+                                </div>
+                              )}
+                            </div>
                           </div>
                           <div className="flex items-center justify-between">
                             <div className="flex items-center bg-background rounded-full border border-border p-1">
@@ -262,7 +294,10 @@ export function CartSidebar({
                     <Button
                       variant="ghost"
                       className="w-full h-12 text-muted-foreground hover:text-foreground font-medium"
-                      onClick={() => onOpenChange(false)}
+                      onClick={() => {
+                        onOpenChange(false);
+                        router.push('/products');
+                      }}
                     >
                       Tiếp tục mua hàng
                     </Button>

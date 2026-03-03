@@ -1,5 +1,6 @@
 "use client";
 
+import { useState, useEffect } from "react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Slider } from "@/components/ui/slider";
 import { Button } from "@/components/ui/button";
@@ -27,6 +28,12 @@ export default function ProductFilters({
   onPriceRangeChange,
   onClearFilters,
 }: ProductFiltersProps) {
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
   const formatPrice = (value: number) => {
     return new Intl.NumberFormat("vi-VN", {
       style: "currency",
@@ -42,6 +49,8 @@ export default function ProductFilters({
       onBrandsChange([...selectedBrands, brandId]);
     }
   };
+
+  if (!mounted) return null;
 
   return (
     <div className="space-y-6">

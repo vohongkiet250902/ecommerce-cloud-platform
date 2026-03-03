@@ -19,7 +19,8 @@ import {
   Star,
   MessageSquare,
   X,
-  CheckCircle
+  CheckCircle,
+  CreditCard
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { format } from "date-fns";
@@ -42,6 +43,8 @@ import {
   DialogDescription,
   DialogFooter,
 } from "@/components/ui/dialog";
+import { cn } from "@/lib/utils";
+import { Label } from "@/components/ui/label";
 
 import {
   Pagination,
@@ -53,7 +56,7 @@ import {
   PaginationPrevious,
 } from "@/components/ui/pagination";
 
-type OrderStatus = 'pending' | 'paid' | 'shipping' | 'completed' | 'cancelled';
+type OrderStatus = 'pending' | 'paid' | 'shipping' | 'completed' | 'cancelled' | 'failed';
 
 export default function MyOrdersPage() {
   const [orders, setOrders] = useState<any[]>([]);
@@ -64,6 +67,29 @@ export default function MyOrdersPage() {
   const [statusFilter, setStatusFilter] = useState<string>("");
   const [isFirstLoad, setIsFirstLoad] = useState(true);
 
+  const getErrorMessage = (error: any, defaultMsg: string) => {
+    const msg = error?.response?.data?.message || error?.response?.data || error?.message;
+    if (typeof msg === 'string') return msg;
+    if (Array.isArray(msg)) return msg.join(', ');
+    if (typeof msg === 'object') return JSON.stringify(msg);
+    return defaultMsg;
+  };
+
+  const formatSkuValuesOnly = (sku: string) => {
+    if (!sku || sku === "N/A" || sku === "DEFAULT") return "";
+    if (sku.includes(":")) {
+      return sku
+        .split(/[,|\-]/)
+        .map(part => {
+          const splitPart = part.split(":");
+          return splitPart.length > 1 ? splitPart[1].trim() : part.trim();
+        })
+        .filter(Boolean)
+        .join(" - ");
+    }
+    return sku;
+  };
+
   // Review state
   const [isReviewModalOpen, setIsReviewModalOpen] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<any>(null);
@@ -71,23 +97,30 @@ export default function MyOrdersPage() {
   const [reviewComment, setReviewComment] = useState("");
   const [isSubmittingReview, setIsSubmittingReview] = useState(false);
   const [reviewedItems, setReviewedItems] = useState<Record<string, number>>({});
-  const { isAuthenticated, loading: authLoading } = useAuth();
+  const { user, isAuthenticated, loading: authLoading } = useAuth();
   const router = useRouter();
   const { toast } = useToast();
+
+  useEffect(() => {
+    if (user) {
+      const userId = user.id || "guest";
+      const savedReviews = localStorage.getItem(`reviewed_items_${userId}`);
+      if (savedReviews) {
+        try {
+          setReviewedItems(JSON.parse(savedReviews));
+        } catch (e) {
+          console.error("Failed to parse reviewed items", e);
+        }
+      }
+    } else {
+      setReviewedItems({});
+    }
+  }, [user]);
 
   useEffect(() => {
     const savedTheme = localStorage.getItem("theme");
     const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
     
-    // Khôi phục trạng thái đánh giá từ localStorage
-    const savedReviews = localStorage.getItem("reviewed_items");
-    if (savedReviews) {
-      try {
-        setReviewedItems(JSON.parse(savedReviews));
-      } catch (e) {
-        console.error("Failed to parse reviewed items", e);
-      }
-    }
     if (savedTheme === "dark" || (!savedTheme && prefersDark)) {
       setIsDarkMode(true);
       document.documentElement.classList.add("dark");
@@ -151,7 +184,7 @@ export default function MyOrdersPage() {
     } catch (error: any) {
       toast({
         title: "Lỗi",
-        description: error.response?.data?.message || "Không thể hủy đơn hàng",
+        description: getErrorMessage(error, "Không thể hủy đơn hàng"),
         variant: "destructive"
       });
     }
@@ -163,6 +196,28 @@ export default function MyOrdersPage() {
     shipping: { label: "Đang giao", color: "bg-primary/10 text-primary border-primary/20", icon: Truck },
     completed: { label: "Hoàn tất", color: "bg-success text-success-foreground", icon: CheckCircle2 },
     cancelled: { label: "Đã hủy", color: "bg-destructive/10 text-destructive border-destructive/20", icon: XCircle },
+    failed: { label: "Thanh toán lỗi", color: "bg-destructive/10 text-destructive border-destructive/20", icon: AlertCircle },
+  };
+
+  const handleRetryPayment = async (orderId: string) => {
+    try {
+      setLoading(true);
+      const res = await orderApi.retryPayment(orderId);
+      const paymentUrl = res.data?.paymentUrl || res.data?.data?.paymentUrl;
+
+      if (paymentUrl) {
+        window.location.href = paymentUrl;
+      } else {
+        throw new Error("Không lấy được liên kết thanh toán");
+      }
+    } catch (error: any) {
+      toast({
+        title: "Lỗi",
+        description: getErrorMessage(error, "Không thể khởi tạo lại thanh toán"),
+        variant: "destructive"
+      });
+      setLoading(false);
+    }
   };
 
   const handleOpenReviewModal = (product: any) => {
@@ -177,18 +232,22 @@ export default function MyOrdersPage() {
 
     try {
       setIsSubmittingReview(true);
+      const variantText = formatSkuValuesOnly(selectedProduct.sku);
       await reviewApi.createReview({
         productId: selectedProduct.productId,
         rating: reviewRating,
-        comment: reviewComment,
+        comment: `[Biến thể: ${selectedProduct.sku}${variantText ? ` - ${variantText}` : ""}] ` + reviewComment,
       });
+
+      const userId = user?.id || "guest";
+      const itemKey = `${selectedProduct.productId}-${selectedProduct.sku}`;
 
       const updatedReviewedItems = {
         ...reviewedItems,
-        [selectedProduct.productId]: reviewRating
+        [itemKey]: reviewRating
       };
       setReviewedItems(updatedReviewedItems);
-      localStorage.setItem("reviewed_items", JSON.stringify(updatedReviewedItems));
+      localStorage.setItem(`reviewed_items_${userId}`, JSON.stringify(updatedReviewedItems));
 
       toast({
         variant: "success",
@@ -197,10 +256,28 @@ export default function MyOrdersPage() {
       });
       setIsReviewModalOpen(false);
     } catch (error: any) {
+      let errorMsg = getErrorMessage(error, "Không thể gửi đánh giá.");
+
+      // Sửa lại hiển thị lỗi toast bằng mess bên FE tạo
+      if (errorMsg === "Bạn đã đánh giá sản phẩm này rồi.") {
+        errorMsg = "Mỗi sản phẩm chỉ được đánh giá 1 lần (dùng chung cho các biến thể). Bạn đã hoàn tất đánh giá cho sản phẩm này!";
+
+        // Đánh dấu biến thể này là đã đánh giá luôn để ẩn nút
+        const userId = user?.id || "guest";
+        const itemKey = `${selectedProduct.productId}-${selectedProduct.sku}`;
+        const updatedReviewedItems = {
+          ...reviewedItems,
+          [itemKey]: 5
+        };
+        setReviewedItems(updatedReviewedItems);
+        localStorage.setItem(`reviewed_items_${userId}`, JSON.stringify(updatedReviewedItems));
+        setIsReviewModalOpen(false);
+      }
+
       toast({
         variant: "destructive",
-        title: "Lỗi",
-        description: error.response?.data?.message || "Không thể gửi đánh giá. Có thể bạn đã đánh giá sản phẩm này rồi.",
+        title: "Thông báo",
+        description: errorMsg,
       });
     } finally {
       setIsSubmittingReview(false);
@@ -237,14 +314,14 @@ export default function MyOrdersPage() {
       <main className="flex-1 container mx-auto px-4 py-8 lg:py-12">
         <div className="max-w-5xl mx-auto space-y-8">
           <div className="flex flex-col gap-4">
-            <motion.div 
+            <motion.div
                initial={{ opacity: 0, y: -10 }}
                animate={{ opacity: 1, y: 0 }}
                className="flex items-center gap-2"
             >
-              <Button 
-                  variant="ghost" 
-                  size="sm" 
+              <Button
+                  variant="ghost"
+                  size="sm"
                   className="rounded-full h-10 w-10 p-0 hover:bg-primary/10 hover:text-primary transition-all duration-300 active:scale-95"
                   onClick={() => router.push("/")}
                 >
@@ -252,17 +329,17 @@ export default function MyOrdersPage() {
               </Button>
               <span className="text-sm font-bold text-muted-foreground">Về trang chủ</span>
             </motion.div>
-            
+
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
               <div>
-                <motion.h1 
+                <motion.h1
                   initial={{ opacity: 0, x: -20 }}
                   animate={{ opacity: 1, x: 0 }}
                   className="text-4xl lg:text-5xl font-black tracking-tighter"
                 >
                   Đơn hàng của tôi
                 </motion.h1>
-                <motion.p 
+                <motion.p
                   initial={{ opacity: 0, x: -20 }}
                   animate={{ opacity: 1, x: 0 }}
                   transition={{ delay: 0.1 }}
@@ -331,7 +408,7 @@ export default function MyOrdersPage() {
                   <p className="text-muted-foreground mt-2 max-w-xs mx-auto">
                     Bạn chưa có đơn hàng nào trong mục này. Bắt đầu mua sắm ngay thôi!
                   </p>
-                  <Button 
+                  <Button
                     className="mt-8 rounded-full px-10 h-12 font-bold gradient-hero shadow-lg"
                     onClick={() => router.push("/products")}
                   >
@@ -350,11 +427,11 @@ export default function MyOrdersPage() {
                       initial={{ opacity: 0, y: 30 }}
                       animate={{ opacity: 1, y: 0 }}
                       exit={{ opacity: 0, scale: 0.95 }}
-                      transition={{ 
+                      transition={{
                         type: "spring",
                         stiffness: 260,
                         damping: 20,
-                        delay: idx * 0.05 
+                        delay: idx * 0.05
                       }}
                     >
                       <Card className="rounded-3xl border-none shadow-sm hover:shadow-xl transition-all duration-500 overflow-hidden bg-card/80 backdrop-blur-sm group border border-transparent hover:border-primary/20">
@@ -396,19 +473,21 @@ export default function MyOrdersPage() {
                                 </div>
                                 <div className="flex-1 min-w-0 flex flex-col justify-center">
                                   <h4 className="font-extrabold text-lg truncate group-hover:text-primary transition-colors duration-300">{item.name}</h4>
-                                  <p className="text-sm text-muted-foreground mt-1 flex items-center gap-2">
-                                     <span className="w-1.5 h-1.5 rounded-full bg-primary/40"></span>
-                                     Phiên bản: <span className="font-bold text-foreground/80">{item.sku}</span>
-                                  </p>
+                                  {item.sku && item.sku !== 'DEFAULT' && item.sku !== 'N/A' && (
+                                    <p className="text-sm text-muted-foreground mt-1 flex items-center gap-2">
+                                       <span className="w-1.5 h-1.5 rounded-full bg-primary/40"></span>
+                                       Biến thể: <span className="font-bold text-foreground/80 whitespace-nowrap overflow-hidden text-ellipsis max-w-[200px] sm:max-w-xs">{formatSkuValuesOnly(item.sku)}</span>
+                                    </p>
+                                  )}
                                   <div className="flex items-center justify-between mt-3">
                                     <p className="text-sm font-medium bg-secondary/50 px-3 py-1 rounded-full">Số lượng: <span className="font-black">x{item.quantity}</span></p>
                                     <div className="flex items-center gap-4">
                                       {order.status === 'completed' && (
-                                        reviewedItems[item.productId] ? (
+                                        reviewedItems[`${item.productId}-${item.sku}`] ? (
                                           <div className="flex items-center gap-1.5 bg-warning/10 px-3 py-1.5 rounded-full border border-warning/20">
                                             <span className="text-[10px] font-black text-warning uppercase">Đã đánh giá</span>
                                             <div className="flex gap-0.5 ml-1">
-                                              {[...Array(reviewedItems[item.productId])].map((_, i) => (
+                                              {[...Array(reviewedItems[`${item.productId}-${item.sku}`])].map((_, i) => (
                                                 <Star key={i} className="w-2.5 h-2.5 fill-warning text-warning" />
                                               ))}
                                             </div>
@@ -447,18 +526,31 @@ export default function MyOrdersPage() {
                                 </p>
                             </div>
                           </div>
-                          
+
                           <div className="flex items-center gap-6 w-full sm:w-auto">
                             <div className="text-right">
                               <p className="text-[10px] font-black text-muted-foreground uppercase tracking-[0.2em]">Tổng giá trị</p>
                               <p className="text-2xl font-black text-primary leading-tight drop-shadow-sm">{formatPrice(order.totalAmount)}</p>
                             </div>
-                            
+
                             <div className="flex gap-2">
+                              {/* Retry Payment Button */}
+                              {(order.paymentStatus === 'failed' || (order.paymentMethod?.toLowerCase() === 'vnpay' && order.paymentStatus !== 'paid' && order.status !== 'cancelled')) && (
+                                <Button
+                                  variant="default"
+                                  size="default"
+                                  className="rounded-2xl bg-primary hover:bg-primary/90 text-primary-foreground font-bold px-8 h-11 transition-all duration-300 active:scale-95 shadow-lg shadow-primary/20 flex items-center gap-2"
+                                  onClick={() => handleRetryPayment(order._id)}
+                                >
+                                  <CreditCard className="h-4 w-4" />
+                                  Thanh toán lại
+                                </Button>
+                              )}
+
                               {order.status === 'pending' && (
-                                <Button 
-                                  variant="outline" 
-                                  size="default" 
+                                <Button
+                                  variant="outline"
+                                  size="default"
                                   className="rounded-2xl border-destructive/20 text-destructive hover:bg-destructive hover:text-destructive-foreground font-bold px-6 h-11 transition-all duration-300 active:scale-95"
                                   onClick={() => handleCancelOrder(order._id)}
                                 >
@@ -483,18 +575,18 @@ export default function MyOrdersPage() {
               <Pagination>
                 <PaginationContent>
                   <PaginationItem>
-                    <PaginationPrevious 
-                      href="#" 
+                    <PaginationPrevious
+                      href="#"
                       onClick={(e: any) => { e.preventDefault(); if(currentPage > 1) setCurrentPage(currentPage - 1); }}
                       className={currentPage === 1 ? "pointer-events-none opacity-50" : "cursor-pointer"}
                       size="default"
                     />
                   </PaginationItem>
-                  
+
                   {[...Array(totalPages)].map((_, i) => (
                     <PaginationItem key={i}>
-                      <PaginationLink 
-                        href="#" 
+                      <PaginationLink
+                        href="#"
                         isActive={currentPage === i + 1}
                         onClick={(e: any) => { e.preventDefault(); setCurrentPage(i + 1); }}
                         className="cursor-pointer"
@@ -506,8 +598,8 @@ export default function MyOrdersPage() {
                   ))}
 
                   <PaginationItem>
-                    <PaginationNext 
-                      href="#" 
+                    <PaginationNext
+                      href="#"
                       onClick={(e: any) => { e.preventDefault(); if(currentPage < totalPages) setCurrentPage(currentPage + 1); }}
                       className={currentPage === totalPages ? "pointer-events-none opacity-50" : "cursor-pointer"}
                       size="default"
@@ -524,32 +616,32 @@ export default function MyOrdersPage() {
       <Dialog open={isReviewModalOpen} onOpenChange={setIsReviewModalOpen}>
         <DialogContent className="sm:max-w-[900px] p-0 overflow-hidden border-none shadow-[0_32px_128px_-20px_rgba(0,0,0,0.5)] bg-[#0f172a] rounded-3xl group">
           <div className="flex flex-col md:flex-row h-full min-h-[550px]">
-            
+
             {/* Left Column: Visual Brand & Product */}
             <div className="md:w-[42%] relative overflow-hidden flex flex-col justify-between p-10 md:p-12 text-white border-r border-white/5">
               {/* Dynamic Background Gradients */}
               <div className="absolute inset-0 bg-gradient-to-br from-indigo-600 via-primary to-blue-900 z-0"></div>
               <div className="absolute top-[-20%] right-[-20%] w-[80%] h-[80%] bg-white/10 blur-[120px] rounded-full z-0 animate-pulse"></div>
               <div className="absolute bottom-[-10%] left-[-10%] w-[60%] h-[60%] bg-black/20 blur-[100px] rounded-full z-0"></div>
-              
+
               <div className="relative z-10">
-                <motion.div 
+                <motion.div
                   initial={{ opacity: 0, x: -20 }}
                   animate={{ opacity: 1, x: 0 }}
                   className="w-16 h-1.5 bg-white/40 rounded-full mb-10"
                 ></motion.div>
                 <DialogHeader className="p-0 text-left">
-                  <DialogTitle className="text-3xl md:text-4xl font-black tracking-tighter leading-tight mb-3 drop-shadow-lg">
+                  <DialogTitle className="text-3xl md:text-4xl font-bold tracking-tight leading-tight mb-3 drop-shadow-lg">
                     Gửi <br /> Đánh Giá
                   </DialogTitle>
-                  <DialogDescription className="text-white/70 font-bold text-base leading-snug max-w-[220px]">
+                  <DialogDescription className="text-white/70 font-medium text-base leading-snug max-w-[220px]">
                     Câu chuyện của bạn giúp chúng tôi hoàn thiện hơn.
                   </DialogDescription>
                 </DialogHeader>
               </div>
 
               {selectedProduct && (
-                <motion.div 
+                <motion.div
                   initial={{ opacity: 0, scale: 0.9, y: 30 }}
                   animate={{ opacity: 1, scale: 1, y: 0 }}
                   className="relative z-10"
@@ -560,9 +652,9 @@ export default function MyOrdersPage() {
                         <img src={selectedProduct.imageUrl} alt={selectedProduct.name} className="w-full h-full object-cover" />
                       </div>
                       <div className="space-y-1">
-                        <p className="text-[10px] font-black uppercase tracking-[0.3em] text-white/40">Sản phẩm đang chọn</p>
-                        <h4 className="font-extrabold text-white text-lg md:text-xl leading-tight line-clamp-2">{selectedProduct.name}</h4>
-                        <Badge variant="outline" className="text-[8px] font-bold px-2 py-0 h-4 border-white/20 text-white/50 bg-white/5 uppercase tracking-wider">SKU: {selectedProduct.sku}</Badge>
+                        <p className="text-xs font-medium text-white/60">Sản phẩm đang chọn</p>
+                        <h4 className="font-semibold text-white text-lg md:text-xl leading-tight line-clamp-2">{selectedProduct.name}</h4>
+                        <Badge variant="outline" className="text-xs font-normal px-2 py-0 border-white/20 text-white/70 bg-white/5">Biến thể: {formatSkuValuesOnly(selectedProduct.sku)}</Badge>
                       </div>
                     </div>
                   </div>
@@ -573,16 +665,16 @@ export default function MyOrdersPage() {
             {/* Right Column: Interaction & Feedback */}
             <div className="flex-1 bg-background flex flex-col relative">
               <div className="flex-1 p-10 md:p-14 space-y-12">
-                
+
                 {/* Status & Rating Selector */}
                 <div className="space-y-8">
                   <div className="flex items-center justify-between">
                      <AnimatePresence mode="wait">
-                      <motion.h3 
+                      <motion.h3
                         key={reviewRating}
                         initial={{ opacity: 0, x: 20 }}
                         animate={{ opacity: 1, x: 0 }}
-                        className="text-xl md:text-2xl font-black text-foreground tracking-tight"
+                        className="text-xl md:text-2xl font-bold text-foreground tracking-tight font-sans"
                       >
                         {reviewRating === 5 && "Hài lòng tuyệt vời! 😍"}
                         {reviewRating === 4 && "Rất tốt! 😊"}
@@ -593,9 +685,9 @@ export default function MyOrdersPage() {
                     </AnimatePresence>
                   </div>
 
-                  <div className="space-y-4">
-                    <p className="text-[11px] font-black uppercase tracking-[0.35em] text-muted-foreground/60">Trải nghiệm của bạn (1 - 5 sao)</p>
-                    <div className="flex gap-4">
+                  <div className="space-y-6">
+                    <p className="text-sm font-medium text-muted-foreground font-sans text-center">Trải nghiệm của bạn (1 - 5 sao)</p>
+                    <div className="flex justify-center gap-4">
                       {[1, 2, 3, 4, 5].map((star) => (
                         <motion.button
                           key={star}
@@ -605,11 +697,12 @@ export default function MyOrdersPage() {
                           className="group/star focus:outline-none relative"
                         >
                           <Star
-                            className={`w-12 h-12 transition-all duration-500 ${
+                            className={cn(
+                              "w-12 h-12 transition-all duration-500",
                               star <= reviewRating
                                 ? "fill-warning text-warning drop-shadow-[0_0_15px_rgba(234,179,8,0.7)] scale-110"
                                 : "text-muted/10 group-hover/star:text-warning/20"
-                            }`}
+                            )}
                           />
                           {star === reviewRating && (
                              <motion.div 
@@ -624,19 +717,20 @@ export default function MyOrdersPage() {
                 </div>
 
                 {/* Comment Area */}
-                <div className="space-y-5">
+                <div className="space-y-5 font-sans">
                   <div className="flex items-center justify-between">
-                    <label className="text-[11px] font-black uppercase tracking-[0.25em] text-muted-foreground flex items-center gap-2">
-                       <MessageSquare className="w-3.5 h-3.5" />
-                       Nhận xét chi tiết
-                    </label>
-                    <span className="text-[10px] font-black tracking-widest text-primary bg-primary/5 px-3 py-1 rounded-full border border-primary/10">
-                       {reviewComment.length} KÝ TỰ
+                    <Label htmlFor="review" className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+                       <MessageSquare className="w-4 h-4" />
+                       Nhận xét của bạn
+                    </Label>
+                    <span className="text-xs font-medium text-primary bg-primary/5 px-3 py-1 rounded-full border border-primary/10">
+                       {reviewComment.length} ký tự
                     </span>
                   </div>
                   <div className="relative group/input">
                     <textarea
-                      className="w-full min-h-[160px] p-6 rounded-2xl border-2 border-border/40 bg-secondary/5 focus:outline-none focus:ring-4 focus:ring-primary/5 focus:border-primary transition-all text-base font-medium resize-none shadow-inner leading-relaxed placeholder:text-muted-foreground/30"
+                      id="review"
+                      className="w-full min-h-[160px] p-6 rounded-2xl border-2 border-border/40 bg-secondary/5 focus:outline-none focus:ring-4 focus:ring-primary/5 focus:border-primary transition-all text-base font-medium resize-none shadow-inner leading-relaxed placeholder:text-muted-foreground/30 font-sans"
                       placeholder="Chúng tôi luôn lắng nghe những chia sẻ thực tế từ bạn..."
                       value={reviewComment}
                       onChange={(e) => setReviewComment(e.target.value)}
@@ -650,13 +744,13 @@ export default function MyOrdersPage() {
               <div className="p-10 md:px-14 md:pb-14 pt-0 flex items-center gap-6">
                 <Button 
                   variant="ghost" 
-                  className="rounded-2xl h-16 px-10 font-black uppercase tracking-widest text-xs hover:bg-secondary/50 transition-all text-muted-foreground hover:text-foreground"
+                  className="rounded-xl h-12 px-8 font-medium hover:bg-secondary/50 transition-all text-muted-foreground hover:text-foreground"
                   onClick={() => setIsReviewModalOpen(false)}
                 >
                   Để sau
                 </Button>
                 <Button 
-                  className="flex-1 rounded-2xl h-14 font-black uppercase tracking-[0.2em] text-[10px] gradient-hero shadow-[0_20px_50px_-10px_rgba(var(--primary),0.5)] hover:shadow-[0_25px_60px_-12px_rgba(var(--primary),0.6)] transition-all active:scale-[0.98] disabled:opacity-30 group/btn relative overflow-hidden"
+                  className="flex-1 rounded-xl h-12 font-bold gradient-hero shadow-md transition-all active:scale-[0.98] disabled:opacity-30 group/btn relative overflow-hidden"
                   onClick={handleSubmitReview}
                   disabled={isSubmittingReview || !reviewComment.trim()}
                 >
@@ -664,11 +758,11 @@ export default function MyOrdersPage() {
                     {isSubmittingReview ? (
                       <>
                         <Loader2 className="w-5 h-5 animate-spin" />
-                        ĐANG XỬ LÝ
+                        Đang xử lý
                       </>
                     ) : (
                       <>
-                        XÁC NHẬN ĐÁNH GIÁ
+                        Xác nhận đánh giá
                         <motion.span 
                           animate={{ x: [0, 5, 0] }} 
                           transition={{ repeat: Infinity, duration: 2 }}

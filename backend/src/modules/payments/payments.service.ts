@@ -1,10 +1,16 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  forwardRef,
+  Inject,
+  Injectable,
+} from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { Order } from '../orders/schemas/order.schema';
 import * as crypto from 'crypto';
 import * as qs from 'qs';
 import { ConfigService } from '@nestjs/config';
+import { OrdersService } from '../orders/orders.service';
 
 @Injectable()
 export class PaymentsService {
@@ -12,6 +18,8 @@ export class PaymentsService {
     @InjectModel(Order.name)
     private readonly orderModel: Model<Order>,
     private configService: ConfigService,
+    @Inject(forwardRef(() => OrdersService))
+    private readonly ordersService: OrdersService,
   ) {}
 
   async createVNPayUrl(orderId: string, userId: string, ipAddr: string) {
@@ -98,7 +106,7 @@ export class PaymentsService {
     return { success: false, message: 'Invalid Signature' };
   }
 
-  // 2. Cập nhật hàm handleVnPayIpn (Luồng Update DB)
+  // 2. Cập nhật hàm handleVnPayIpn
   async handleVnPayIpn(query: any) {
     let vnp_Params = { ...query };
     const secureHash = vnp_Params['vnp_SecureHash'];
@@ -125,18 +133,15 @@ export class PaymentsService {
       }
 
       if (responseCode === '00') {
-        await this.orderModel.findByIdAndUpdate(orderId, {
+        // Thanh toán thành công
+        await this.ordersService.updateStatus(orderId, {
           status: 'paid',
           paymentStatus: 'paid',
-          paymentMethod: 'vnpay',
         });
       } else {
-        // TỐI ƯU CỰC KỲ QUAN TRỌNG:
-        // Nếu user thanh toán lỗi (thẻ hết tiền) hoặc bấm hủy, chỉ cập nhật trạng thái thanh toán.
-        // KHÔNG hủy đơn hàng (status: 'cancelled') để họ có thể bấm "Thanh toán lại" trên FE.
-        await this.orderModel.findByIdAndUpdate(orderId, {
-          paymentStatus: 'pending', // Hoặc bạn có thể dùng 'failed' nếu OrderSchema có hỗ trợ
-        });
+        // Thanh toán thất bại hoặc khách hủy
+        // CHUẨN XÁC: Gọi hàm handlePaymentFailed để cập nhật trạng thái chờ
+        await this.ordersService.handlePaymentFailed(orderId);
       }
 
       return { RspCode: '00', Message: 'Confirm Success' };

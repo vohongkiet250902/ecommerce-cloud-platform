@@ -6,8 +6,6 @@ import { LucideIcon } from "lucide-react";
 interface StatCardProps {
   title: string;
   value: string;
-  change?: string;
-  changeType?: "positive" | "negative" | "neutral";
   icon: LucideIcon;
   iconColor?: string;
   iconBg?: string;
@@ -16,46 +14,27 @@ interface StatCardProps {
 export default function StatCard({
   title,
   value,
-  change,
-  changeType = "neutral",
   icon: Icon,
   iconColor = "text-primary",
   iconBg = "bg-primary/10",
 }: StatCardProps) {
   return (
-    <div className="bg-card rounded-xl p-6 card-shadow hover:card-shadow-md transition-shadow duration-200 animate-fade-in">
+    <div className="bg-card rounded-xl p-6 card-shadow hover:card-shadow-md transition-shadow duration-200 animate-fade-in group">
       <div className="flex items-start justify-between">
-        <div className="space-y-2">
-          <p className="text-sm font-medium text-muted-foreground">
+        <div className="space-y-1">
+          <p className="text-xs font-semibold text-muted-foreground uppercase group-hover:text-primary transition-colors">
             {title}
           </p>
 
           <p className="text-3xl font-bold text-card-foreground">
             {value}
           </p>
-
-          {change && (
-            <div className="flex items-center gap-1">
-              <span
-                className={cn(
-                  "text-sm font-medium",
-                  changeType === "positive" && "text-success",
-                  changeType === "negative" && "text-destructive",
-                  changeType === "neutral" && "text-muted-foreground"
-                )}
-              >
-                {change}
-              </span>
-
-              <span className="text-xs text-muted-foreground">
-                so với tháng trước
-              </span>
-            </div>
-          )}
+          
+          <div className="h-1 w-8 bg-primary/20 rounded-full group-hover:w-12 transition-all duration-300" />
         </div>
 
-        <div className={cn("p-3 rounded-lg", iconBg)}>
-          <Icon className={cn("h-6 w-6", iconColor)} />
+        <div className={cn("p-4 rounded-2xl transition-transform group-hover:scale-110 duration-300", iconBg)}>
+          <Icon className={cn("h-7 w-7", iconColor)} />
         </div>
       </div>
     </div>

@@ -26,7 +26,7 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "@/hooks/use-toast";
-import { productApi, reviewApi } from "@/services/api";
+import { productApi, reviewApi, cartApi } from "@/services/api";
 import { useCart } from "@/hooks/useCart";
 import { useAuth } from "@/hooks/useAuth";
 
@@ -188,11 +188,20 @@ export default function ProductDetailPage() {
   };
 
   const currentVariant = product?.variants?.[selectedVariantIndex];
-  const basePrice = currentVariant?.price || product?.price || 0;
+  const basePrice = currentVariant?.price ?? product?.price ?? 0;
   const currentDiscount = currentVariant?.discountPercentage || 0;
   const currentPrice = basePrice * (1 - currentDiscount / 100);
-  const currentStock = currentVariant?.stock || product?.totalStock || 0;
+  const currentStock = currentVariant !== undefined ? currentVariant.stock : (product?.totalStock || 0);
   const images = product?.images?.map((img) => img.url) || [];
+
+  // Cap quantity when stock changes or exceeds limit
+  useEffect(() => {
+    if (currentStock > 0 && quantity > currentStock) {
+      setQuantity(currentStock);
+    } else if (currentStock === 0) {
+      setQuantity(1);
+    }
+  }, [currentStock, quantity]);
 
   useEffect(() => {
     const variantImg = product?.variants?.[selectedVariantIndex]?.image?.url;
@@ -266,7 +275,7 @@ export default function ProductDetailPage() {
     }
   };
 
-  const handleAddToCart = () => {
+  const handleAddToCart = async () => {
     if (!product) return;
     const effectiveSku = currentVariant?.sku && currentVariant.sku !== "N/A" ? currentVariant.sku : product._id;
     const cartId = `${product._id}-${effectiveSku}`;
@@ -277,9 +286,13 @@ export default function ProductDetailPage() {
       name: product.name,
       sku: effectiveSku,
       price: currentPrice,
+      originalPrice: basePrice,
+      discountPercentage: currentDiscount,
       quantity: quantity,
-      image: images[0] || "",
+      image: currentVariant?.image?.url || images[0] || "",
+      attributes: currentVariant?.attributes || [],
     });
+
     toast({
       variant: "success",
       title: "Đã thêm vào giỏ hàng",
@@ -309,8 +322,11 @@ export default function ProductDetailPage() {
       name: product.name,
       sku: effectiveSku,
       price: currentPrice,
+      originalPrice: basePrice,
+      discountPercentage: currentDiscount,
       quantity: quantity,
-      image: images[0] || "",
+      image: currentVariant?.image?.url || images[0] || "",
+      attributes: currentVariant?.attributes || [],
     };
     sessionStorage.setItem("buyNowItem", JSON.stringify(buyNowItem));
     router.push('/checkout?buyNow=true');

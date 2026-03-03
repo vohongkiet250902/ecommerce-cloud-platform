@@ -58,8 +58,8 @@ import { fetchAdminBrandsThunk, type Brand } from "@/store/brands/brands.slice";
 
 const formSchema = z.object({
   name: z.string().min(1, "Tên thương hiệu không được để trống"),
-  slug: z.string().optional(), // Used as Website URL
-  logo: z.string().optional(),
+  slug: z.string().min(1, "Website không được để trống"), // Used as Website URL
+  logo: z.string().min(1, "Logo thương hiệu không được để trống"),
   isActive: z.boolean(),
 });
 
@@ -97,6 +97,7 @@ export default function BrandsPage() {
   // Form
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
+    mode: "onChange",
     defaultValues: {
       name: "",
       slug: "",
@@ -117,7 +118,7 @@ export default function BrandsPage() {
       const res = await uploadApi.uploadMultiple(formData);
       const imageUrl = res.data.data.images[0].url;
 
-      form.setValue("logo", imageUrl);
+      form.setValue("logo", imageUrl, { shouldValidate: true });
       toast({
         title: "Tải ảnh thành công",
         variant: "success",
@@ -127,7 +128,7 @@ export default function BrandsPage() {
       toast({
         title: "Tải ảnh thất bại",
         variant: "destructive",
-        description: "Vui lòng thử lại sau",
+        description: "Đã có lỗi xảy ra khi tải ảnh lên. Vui lòng kiểm tra lại dung lượng/định dạng ảnh và thử lại.",
       });
     } finally {
       setIsUploading(false);
@@ -193,11 +194,10 @@ export default function BrandsPage() {
       dispatch(fetchAdminBrandsThunk());
       setStatusConfirmOpen(false);
       setStatusToToggle(null);
-    } catch (error: any) {
-      const msg = error?.response?.data?.message || "Không thể cập nhật trạng thái";
+    } catch (error) {
       toast({
         title: "❌ Cập nhật thất bại",
-        description: typeof msg === "string" ? msg : "Đã xảy ra lỗi khi thay đổi trạng thái thương hiệu.",
+        description: "Đã xảy ra lỗi khi thay đổi trạng thái thương hiệu. Vui lòng thử lại sau.",
         variant: "destructive",
       });
     }
@@ -230,11 +230,12 @@ export default function BrandsPage() {
 
       dispatch(fetchAdminBrandsThunk());
       setIsDialogOpen(false);
-    } catch (error: any) {
-      const msg = error?.response?.data?.message || "Không thể lưu thông tin thương hiệu";
+    } catch (error) {
       toast({
         title: "❌ Thao tác thất bại",
-        description: typeof msg === "string" ? msg : "Vui lòng kiểm tra lại thông tin và thử lại.",
+        description: dialogMode === "edit" 
+          ? "Không thể cập nhật thông tin thương hiệu. Vui lòng kiểm tra lại."
+          : "Không thể thêm thương hiệu mới. Vui lòng kiểm tra lại.",
         variant: "destructive",
       });
     }
@@ -247,15 +248,10 @@ export default function BrandsPage() {
       await brandApi.deleteBrand(brandToDelete._id);
       toast({ title: "✅ Đã xóa thương hiệu", variant: "success" });
       dispatch(fetchAdminBrandsThunk());
-    } catch (error: any) {
-      const msg = error?.response?.data?.message || "Không thể xóa thương hiệu";
-      const description = typeof msg === "string" ? msg : (Array.isArray(msg) ? msg.join(", ") : JSON.stringify(msg));
-      
+    } catch (error) {
       toast({
         title: "❌ Không thể xóa",
-        description: description.includes("tồn kho") 
-          ? "Thương hiệu này vẫn còn sản phẩm trong kho. Vui lòng chuyển sang trạng thái 'Ngừng hoạt động' thay vì xóa để đảm bảo toàn vẹn dữ liệu."
-          : description,
+        description: "Đã xảy ra lỗi khi xóa. Thương hiệu này có thể đang liên kết với các sản phẩm, vui lòng thử 'Ngừng hoạt động' thay vì xóa.",
         variant: "destructive",
       });
     } finally {

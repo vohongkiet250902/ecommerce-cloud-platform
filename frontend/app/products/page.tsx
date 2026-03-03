@@ -38,6 +38,7 @@ const sortOptions = [
 const PRODUCTS_PER_PAGE = 20;
 
 export default function ProductsPage() {
+  const [isMounted, setIsMounted] = useState(false);
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [products, setProducts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -139,6 +140,7 @@ export default function ProductsPage() {
       setIsDarkMode(true);
       document.documentElement.classList.add("dark");
     }
+    setIsMounted(true);
   }, []);
 
   const toggleDarkMode = () => {
@@ -284,7 +286,7 @@ export default function ProductsPage() {
         <div className="space-y-4 mb-10">
           {/* Root Level */}
           <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
-            {categories.map((cat) => {
+            {isMounted && categories.map((cat) => {
               const isActive = selectedCategory === cat.value || (categoryPath.length > 0 && categoryPath[0]._id === cat.value);
               return (
                 <Button
@@ -306,7 +308,7 @@ export default function ProductsPage() {
           {/* Sub Levels Container with fixed height management to prevent jump */}
           <div className="min-h-0">
             <AnimatePresence initial={false}>
-              {categoryPath.map((node, index) => {
+              {isMounted && categoryPath.map((node, index) => {
                 if (!node.children || node.children.length === 0) return null;
                 
                 const activeChildren = node.children.filter((c: any) => c.isActive);
@@ -404,18 +406,20 @@ export default function ProductsPage() {
 
               <div className="flex items-center gap-3">
                 {/* Sort */}
-                <Select value={sortBy} onValueChange={setSortBy}>
-                  <SelectTrigger className="w-[180px]">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {sortOptions.map((option) => (
-                      <SelectItem key={option.value} value={option.value}>
-                        {option.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                {isMounted && (
+                  <Select value={sortBy} onValueChange={setSortBy}>
+                    <SelectTrigger className="w-[180px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {sortOptions.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
               </div>
             </div>
 
@@ -507,9 +511,11 @@ export default function ProductsPage() {
                   <p className="text-muted-foreground text-lg mb-4">
                     Không tìm thấy sản phẩm phù hợp
                   </p>
-                  <Button variant="outline" onClick={clearFilters}>
-                    Xóa bộ lọc
-                  </Button>
+                  {isMounted && (
+                    <Button variant="outline" onClick={clearFilters}>
+                      Xóa bộ lọc
+                    </Button>
+                  )}
                 </div>
               )}
             </div>

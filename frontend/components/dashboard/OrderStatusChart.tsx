@@ -9,14 +9,18 @@ import {
   Tooltip,
 } from "recharts";
 
-const data = [
-  { name: "Hoàn thành", value: 540, color: "hsl(var(--success))" },
-  { name: "Đang giao", value: 180, color: "hsl(var(--info))" },
-  { name: "Chờ xử lý", value: 120, color: "hsl(var(--warning))" },
-  { name: "Đã hủy", value: 60, color: "hsl(var(--destructive))" },
+interface OrderStatusChartProps {
+  data?: { name: string; value: number; color: string }[];
+}
+
+const defaultData = [
+  { name: "Hoàn thành", value: 0, color: "hsl(var(--success))" },
+  { name: "Đang giao", value: 0, color: "hsl(var(--info))" },
+  { name: "Chờ xử lý", value: 0, color: "hsl(var(--warning))" },
+  { name: "Đã hủy", value: 0, color: "hsl(var(--destructive))" },
 ];
 
-export default function OrderStatusChart() {
+export default function OrderStatusChart({ data = defaultData }: OrderStatusChartProps) {
   return (
     <div className="bg-card rounded-xl p-6 card-shadow animate-slide-up">
       <div className="mb-6">

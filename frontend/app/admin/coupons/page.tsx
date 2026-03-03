@@ -9,7 +9,6 @@ import {
   Copy,
   Calendar,
   Loader2,
-  Ticket,
   Percent,
   Ban,
   CheckCircle,
@@ -85,6 +84,7 @@ export default function CouponsPage() {
     maxDiscountAmount: 0,
     expiryDate: "",
   });
+  const [formErrors, setFormErrors] = useState<Record<string, string>>({});
 
   const fetchCoupons = async () => {
     try {
@@ -150,6 +150,20 @@ export default function CouponsPage() {
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    // Validate rỗng
+    const errors: Record<string, string> = {};
+    if (!formData.code.trim()) errors.code = "Mã khuyến mãi không được để trống";
+    if (!formData.discountPercentage) errors.discountPercentage = "Vui lòng nhập phần trăm giảm";
+    if (!formData.expiryDate) errors.expiryDate = "Vui lòng chọn ngày hết hạn";
+
+    if (Object.keys(errors).length > 0) {
+      setFormErrors(errors);
+      return;
+    }
+
+    setFormErrors({});
+
     try {
       setCreating(true);
       const payload = {
@@ -169,6 +183,7 @@ export default function CouponsPage() {
         maxDiscountAmount: 0,
         expiryDate: "",
       });
+      setFormErrors({});
       fetchCoupons();
     } catch (error: any) {
       toast({
@@ -385,11 +400,16 @@ export default function CouponsPage() {
       )}
 
       {/* Create Modal */}
-      <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
+      <Dialog open={isCreateOpen} onOpenChange={(open) => {
+        setIsCreateOpen(open);
+        if (!open) {
+          setFormErrors({});
+          setFormData({ code: "", discountPercentage: 1, maxDiscountAmount: 0, expiryDate: "" });
+        }
+      }}>
         <DialogContent className="sm:max-w-md p-0 overflow-hidden border border-border shadow-2xl rounded-2xl" onPointerDownOutside={(e) => e.preventDefault()}>
           <DialogHeader className="px-6 pt-6 pb-0">
             <DialogTitle className="text-xl font-bold flex items-center gap-2">
-              <Ticket className="h-5 w-5 text-primary" />
               Tạo mã giảm giá mới
             </DialogTitle>
           </DialogHeader>
@@ -403,10 +423,13 @@ export default function CouponsPage() {
                 id="code"
                 placeholder="Nhập mã khuyến mãi..." 
                 className="h-11 rounded-xl"
-                required
                 value={formData.code}
-                onChange={e => setFormData({...formData, code: e.target.value.toUpperCase()})}
+                onChange={e => {
+                  setFormData({...formData, code: e.target.value.toUpperCase()});
+                  if (formErrors.code) setFormErrors({...formErrors, code: ""});
+                }}
               />
+              {formErrors.code && <p className="text-xs text-destructive animate-in slide-in-from-top-1">{formErrors.code}</p>}
             </div>
 
             <div className="grid grid-cols-2 gap-5">
@@ -420,10 +443,13 @@ export default function CouponsPage() {
                   min={1} 
                   max={100} 
                   className="h-11 rounded-xl"
-                  required
                   value={formData.discountPercentage}
-                  onChange={e => setFormData({...formData, discountPercentage: Number(e.target.value)})}
+                  onChange={e => {
+                    setFormData({...formData, discountPercentage: Number(e.target.value)});
+                    if (formErrors.discountPercentage) setFormErrors({...formErrors, discountPercentage: ""});
+                  }}
                 />
+                {formErrors.discountPercentage && <p className="text-xs text-destructive animate-in slide-in-from-top-1">{formErrors.discountPercentage}</p>}
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="maxDiscount" className="text-sm font-semibold">
@@ -448,10 +474,13 @@ export default function CouponsPage() {
                 id="expiry"
                 type="date" 
                 className="h-11 rounded-xl"
-                required
                 value={formData.expiryDate}
-                onChange={e => setFormData({...formData, expiryDate: e.target.value})}
+                onChange={e => {
+                  setFormData({...formData, expiryDate: e.target.value});
+                  if (formErrors.expiryDate) setFormErrors({...formErrors, expiryDate: ""});
+                }}
               />
+              {formErrors.expiryDate && <p className="text-xs text-destructive animate-in slide-in-from-top-1">{formErrors.expiryDate}</p>}
             </div>
 
             <div className="flex items-center justify-end gap-3 pt-2">
@@ -459,7 +488,11 @@ export default function CouponsPage() {
                 type="button" 
                 variant="outline" 
                 className="border-border/60" 
-                onClick={() => setIsCreateOpen(false)}
+                onClick={() => {
+                  setIsCreateOpen(false);
+                  setFormErrors({});
+                  setFormData({ code: "", discountPercentage: 1, maxDiscountAmount: 0, expiryDate: "" });
+                }}
               >
                 Hủy
               </Button>

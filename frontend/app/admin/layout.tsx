@@ -20,17 +20,20 @@ import {
   Settings,
   ChevronLeft,
   ChevronRight,
-  Bell,
   User,
   LogOut,
   ChevronDown,
   Zap,
+  ArrowRight,
+  X,
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import apiClient from "@/services/api";
+import Image from "next/image";
 import { Toaster } from "@/components/ui/toaster";
 import {
   Tooltip,
@@ -111,7 +114,7 @@ const navItems = [
   { href: "/admin/inventory", icon: Warehouse, label: "Tồn kho" },
   { href: "/admin/coupons", icon: Ticket, label: "Khuyến mãi" },
   { href: "/admin/reviews", icon: Star, label: "Đánh giá" },
-  { href: "/admin/search", icon: Search, label: "Search" },
+  { href: "/admin/search", icon: Search, label: "Search Engine" },
   { href: "/admin/settings", icon: Settings, label: "Cài đặt" },
 ];
 
@@ -140,6 +143,40 @@ export default function AdminLayout({
     const prefersDark = typeof window !== "undefined" ? window.matchMedia("(prefers-color-scheme: dark)").matches : false;
     return savedTheme === "dark" || (!savedTheme && prefersDark);
   });
+
+  // Search Logic
+  const [searchQuery, setSearchQuery] = useState("");
+  const [isSearching, setIsSearching] = useState(false);
+  const [searchResults, setSearchResults] = useState<any[]>([]);
+  const [showResults, setShowResults] = useState(false);
+
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      if (searchQuery.trim()) {
+        performSearch(searchQuery);
+        setShowResults(true);
+      } else {
+        setSearchResults([]);
+        setShowResults(false);
+      }
+    }, 400);
+
+    return () => clearTimeout(handler);
+  }, [searchQuery]);
+
+  const performSearch = async (query: string) => {
+    try {
+      setIsSearching(true);
+      const res = await apiClient.get("/search/products", {
+        params: { keyword: query, limit: 10 }
+      });
+      setSearchResults(res.data.hits || []);
+    } catch (error) {
+      console.error("Layout search error:", error);
+    } finally {
+      setIsSearching(false);
+    }
+  };
 
   useEffect(() => {
     // Apply theme to DOM
@@ -205,7 +242,7 @@ export default function AdminLayout({
           <div className="h-16 flex items-center justify-between px-4 border-b border-sidebar-border">
             {!collapsed && (
               <Link href="/" className="flex items-center gap-2 group">
-                <div className="w-8 h-8 rounded-lg overflow-hidden flex items-center justify-center group-hover:rotate-6 transition-transform duration-300">
+                <div className="w-8 h-8 rounded-lg overflow-hidden flex items-center justify-center group-hover:scale-110 transition-transform duration-300">
                   <img 
                     src="/assets/img/protechstore.png" 
                     alt="Logo" 
@@ -274,14 +311,86 @@ export default function AdminLayout({
           {/* Header */}
           <header className="h-16 bg-card border-b border-border px-6 flex items-center justify-between sticky top-0 z-30">
             {/* Search */}
-            <div className="flex items-center gap-4 flex-1 max-w-xl">
-              <div className="relative w-full">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <div className="flex items-center gap-4 flex-1 max-w-xl relative">
+              <div className="relative w-full group">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground transition-colors group-focus-within:text-primary" />
                 <Input
-                  placeholder="Tìm kiếm sản phẩm, đơn hàng, khách hàng..."
-                  className="pl-10 bg-secondary border-0 focus-visible:ring-1"
+                  placeholder="Tìm nhanh sản phẩm..."
+                  className="pl-10 h-10 bg-secondary/50 border-0 focus-visible:ring-1 focus-visible:ring-primary/30 rounded-full"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  onFocus={() => searchQuery.trim() && setShowResults(true)}
                 />
+                
+                {searchQuery && (
+                   <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-2">
+                     {isSearching && <Loader2 className="h-3 w-3 animate-spin text-primary" />}
+                     <button 
+                        onClick={() => {
+                          setSearchQuery("");
+                          setSearchResults([]);
+                          setShowResults(false);
+                        }}
+                        className="h-5 w-5 rounded-full hover:bg-muted flex items-center justify-center text-muted-foreground"
+                     >
+                       <X className="h-3 w-3" />
+                     </button>
+                   </div>
+                )}
               </div>
+
+              {/* Search Results Dropdown */}
+              {showResults && (searchQuery.trim()) && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setShowResults(false)} />
+                  <div className="absolute top-[calc(100%+8px)] left-0 right-0 bg-card border border-border rounded-2xl shadow-2xl z-50 overflow-hidden animate-in fade-in slide-in-from-top-2 duration-200">
+                    <div className="p-2 max-h-[400px] overflow-y-auto">
+                      {searchResults.length > 0 ? (
+                        <>
+                          <div className="px-3 py-2 text-[10px] font-bold text-muted-foreground uppercase opacity-60 tracking-widest border-b mb-1">
+                            Sản phẩm ({searchResults.length})
+                          </div>
+                          {searchResults.map((product) => (
+                            <div
+                              key={product.id}
+                              className="flex items-center gap-3 p-2.5 rounded-xl hover:bg-secondary cursor-pointer transition-colors group"
+                              onClick={() => {
+                                router.push(`/admin/products/${product.id}`);
+                                setShowResults(false);
+                                setSearchQuery("");
+                              }}
+                            >
+                              <div className="h-10 w-10 relative rounded-lg overflow-hidden shrink-0 border border-border/50 bg-white">
+                                {product.image ? (
+                                  <Image src={product.image} alt={product.name} fill className="object-cover" />
+                                ) : (
+                                  <div className="w-full h-full flex items-center justify-center text-[10px] uppercase bg-muted text-muted-foreground">No</div>
+                                )}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm font-semibold truncate group-hover:text-primary transition-colors">{product.name}</p>
+                                <p className="text-xs text-muted-foreground">
+                                  {new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(product.price)}
+                                </p>
+                              </div>
+                              <ArrowRight className="h-4 w-4 text-muted-foreground opacity-0 -translate-x-2 group-hover:opacity-100 group-hover:translate-x-0 transition-all" />
+                            </div>
+                          ))}
+                        </>
+                      ) : !isSearching ? (
+                        <div className="p-8 text-center bg-muted/10">
+                          <p className="text-sm font-medium text-muted-foreground">Không tìm thấy sản phẩm nào.</p>
+                        </div>
+                      ) : (
+                        <div className="p-8 text-center">
+                          <Loader2 className="h-6 w-6 animate-spin text-primary mx-auto mb-2 opacity-40" />
+                          <p className="text-xs text-muted-foreground">Đang tìm kiếm...</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
 
             {/* Right Actions */}
@@ -299,85 +408,57 @@ export default function AdminLayout({
                 <Moon className="w-5 h-5" />
               )}
             </Button>
-              {/* Notifications */}
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" size="icon" className="relative">
-                    <Bell className="h-5 w-5" />
-                    <span className="absolute -top-0.5 -right-0.5 h-4 w-4 bg-destructive text-destructive-foreground text-[10px] font-bold rounded-full flex items-center justify-center">
-                      3
-                    </span>
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent
-                  align="end"
-                  className="w-80 dropdown-content"
-                >
-                  <DropdownMenuLabel className="flex items-center justify-between">
-                    Thông báo
-                    <Badge variant="secondary">3 mới</Badge>
-                  </DropdownMenuLabel>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem className="flex flex-col items-start gap-1 py-3">
-                    <span className="font-medium">Đơn hàng mới #12345</span>
-                    <span className="text-xs text-muted-foreground">
-                      2 phút trước
-                    </span>
-                  </DropdownMenuItem>
-                  <DropdownMenuItem className="flex flex-col items-start gap-1 py-3">
-                    <span className="font-medium">Sản phẩm sắp hết hàng</span>
-                    <span className="text-xs text-muted-foreground">
-                      15 phút trước
-                    </span>
-                  </DropdownMenuItem>
-                  <DropdownMenuItem className="flex flex-col items-start gap-1 py-3">
-                    <span className="font-medium">Review mới cần duyệt</span>
-                    <span className="text-xs text-muted-foreground">
-                      1 giờ trước
-                    </span>
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem className="text-center text-primary justify-center font-medium">
-                    Xem tất cả
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-
               {/* User Menu */}
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" className="gap-2 pl-2 pr-3">
-                    <Avatar className="h-8 w-8">
+                  <Button 
+                    variant="ghost" 
+                    className="gap-3 pl-1.5 pr-4 focus-visible:ring-0 h-12 rounded-full hover:bg-primary hover:text-primary-foreground border border-transparent hover:shadow-lg hover:shadow-primary/30 transition-all duration-300 group"
+                  >
+                    <Avatar className="h-9 w-9 border-2 border-background shadow-sm transition-transform group-hover:scale-95">
                       <AvatarImage src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${user.email}`} />
-                      <AvatarFallback>{user.fullName?.substring(0, 2).toUpperCase() || 'AD'}</AvatarFallback>
+                      <AvatarFallback className="bg-primary/10 text-primary font-bold">{user.fullName?.substring(0, 2).toUpperCase() || 'AD'}</AvatarFallback>
                     </Avatar>
-                    <div className="flex flex-col items-start text-left hidden sm:flex">
-                      <span className="text-sm font-medium">{user.fullName}</span>
-                      <span className="text-xs text-muted-foreground">
-                        {user.email}
+                    <div className="flex flex-col items-start text-left hidden sm:flex pr-2">
+                      <span className="text-sm font-medium leading-none mb-1 group-hover:text-white transition-colors">{user.fullName}</span>
+                      <span className="text-[10px] text-muted-foreground group-hover:text-primary-foreground/80 uppercase font-medium opacity-70 transition-colors">
+                        Quản trị viên
                       </span>
                     </div>
-                    <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                    <ChevronDown className="h-4 w-4 text-muted-foreground group-hover:text-primary-foreground transition-all group-data-[state=open]:rotate-180" />
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent
                   align="end"
-                  className="w-56 dropdown-content"
+                  className="w-64 dropdown-content p-2"
                 >
-                  <DropdownMenuLabel>Tài khoản của tôi</DropdownMenuLabel>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem>
-                    <User className="mr-2 h-4 w-4" />
-                    Hồ sơ cá nhân
+                  <div className="px-3 py-4 mb-2 bg-muted/30 rounded-lg">
+                    <p className="text-sm font-semibold truncate leading-none">{user.fullName}</p>
+                    <p className="text-xs text-muted-foreground mt-1 truncate">{user.email}</p>
+                  </div>
+                  
+                  <DropdownMenuSeparator className="opacity-50" />
+                  
+                  <DropdownMenuItem className="py-3 cursor-pointer focus:bg-primary/10 transition-all duration-200 group rounded-md" onClick={() => router.push('/admin/settings')}>
+                    <div className="w-9 h-9 rounded-lg bg-info/10 flex items-center justify-center mr-3 group-focus:scale-95 transition-transform">
+                      <Settings className="h-5 w-5 text-info" />
+                    </div>
+                    <div className="flex flex-col">
+                      <span className="font-bold text-sm group-focus:text-primary transition-colors">Cài đặt</span>
+                      <span className="text-[10px] text-muted-foreground leading-none">Quản lý tài khoản & Hệ thống</span>
+                    </div>
                   </DropdownMenuItem>
-                  <DropdownMenuItem>
-                    <Settings className="mr-2 h-4 w-4" />
-                    Cài đặt
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem onClick={handleLogout} className="text-destructive">
-                    <LogOut className="mr-2 h-4 w-4" />
-                    Đăng xuất
+                  
+                  <DropdownMenuSeparator className="opacity-50" />
+                  
+                  <DropdownMenuItem onClick={handleLogout} className="text-destructive py-2.5 cursor-pointer focus:bg-destructive/10 focus:text-destructive">
+                    <div className="w-8 h-8 rounded-lg bg-destructive/10 flex items-center justify-center mr-3 text-destructive">
+                      <LogOut className="h-4 w-4" />
+                    </div>
+                    <div className="flex flex-col">
+                      <span className="font-bold text-sm">Đăng xuất</span>
+                      <span className="text-[10px] leading-none opacity-60">Thoát phiên làm việc</span>
+                    </div>
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>

@@ -71,7 +71,7 @@ export default function InventoryPage() {
   const fetchInventory = async () => {
     try {
       setLoading(true);
-      const res = await productApi.getProducts({ limit: 1000 }); // Fetch all or paginate
+      const res = await productApi.getAdminProducts({ limit: 1000 }); // Fetch all or paginate
       const products = res.data.data || res.data; // API structure check
       
       const items: InventoryItem[] = [];
@@ -85,7 +85,7 @@ export default function InventoryPage() {
                         productId: p._id,
                         productName: p.name,
                         sku: v.sku,
-                        image: p.images?.[0]?.url || "",
+                        image: v.image?.url || p.images?.[0]?.url || "",
                         stock: v.stock || 0,
                         attributes: v.attributes?.map((a: any) => `${a.key}: ${a.value}`).join(", ") || "",
                         lastUpdated: p.updatedAt,
@@ -94,14 +94,14 @@ export default function InventoryPage() {
                     });
                   });
               } else {
-                  // Fallback for no variants if applicable, but assuming variants exist as per schema
+                  // Mặt hàng đơn giản không có phân loại biến thể, lấy dữ liệu từ top-level của sản phẩm
                   items.push({
                     uniqueId: p._id,
                     productId: p._id,
                     productName: p.name,
-                    sku: "NO-SKU",
+                    sku: p.sku || "N/A",
                     image: p.images?.[0]?.url || "",
-                    stock: 0,
+                    stock: p.stock ?? p.totalStock ?? 0,
                     attributes: "Mặc định",
                     lastUpdated: p.updatedAt,
                     rawProduct: p,
@@ -136,25 +136,28 @@ export default function InventoryPage() {
           
           // Construct update payload
           const product = selectedItem.rawProduct;
-          // Clone variants
-          const updatedVariants = [...product.variants];
-          // Update specific variant - add import quantity to current stock
+          // Clone variants (Safe check if the product has no variants)
+          const updatedVariants = product.variants ? [...product.variants] : [];
+          let updatePayload: any = {};
+
           if (selectedItem.rawVariantIndex >= 0 && updatedVariants[selectedItem.rawVariantIndex]) {
+              // Cập nhật tồn kho cho riêng một biến thể
               const currentStock = Number(updatedVariants[selectedItem.rawVariantIndex].stock) || 0;
               const newTotalStock = currentStock + Number(importQuantity);
               updatedVariants[selectedItem.rawVariantIndex] = {
                   ...updatedVariants[selectedItem.rawVariantIndex],
                   stock: newTotalStock
               };
+
+              const totalStock = updatedVariants.reduce((acc: number, v: any) => acc + (Number(v.stock) || 0), 0);
+              updatePayload = { variants: updatedVariants, totalStock };
+          } else {
+              // Cập nhật tồn kho trực tiếp vào sản phẩm (nếu là mặt hàng đơn giản, không biến thể)
+              const newTotalStock = (Number(product.stock ?? product.totalStock) || 0) + Number(importQuantity);
+              updatePayload = { totalStock: newTotalStock, stock: newTotalStock };
           }
 
-          // Recalculate totalStock if backend doesn't do it automatically (Backend usually should, but let's be safe if we send full variants)
-          const totalStock = updatedVariants.reduce((acc: number, v: any) => acc + (Number(v.stock) || 0), 0);
-
-          await productApi.updateProduct(selectedItem.productId, {
-              variants: updatedVariants,
-              totalStock
-          });
+          await productApi.updateProduct(selectedItem.productId, updatePayload);
 
           toast({ title: "Cập nhật tồn kho thành công", variant: "success" });
           setIsUpdateOpen(false);
@@ -283,10 +286,6 @@ export default function InventoryPage() {
             Quản lý tồn kho chi tiết theo từng biến thể sản phẩm
           </p>
         </div>
-        <Button variant="outline" onClick={fetchInventory} className="border-dashed bg-background/50 border-border/40">
-          <RefreshCw className="h-4 w-4 mr-2" />
-          Đồng bộ kho
-        </Button>
       </div>
 
       {/* Alert */}

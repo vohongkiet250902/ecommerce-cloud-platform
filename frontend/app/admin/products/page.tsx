@@ -830,6 +830,7 @@ export default function ProductsPage() {
               variant="outline"
               onClick={() => setDeleteConfirmOpen(false)}
               disabled={isDeleting}
+              className="border-dashed bg-background/50 border-border/40"
             >
               Hủy
             </Button>
@@ -885,6 +886,7 @@ export default function ProductsPage() {
                 setStatusConfirmOpen(false);
                 setStatusToToggle(null);
               }}
+              className="border-dashed bg-background/50 border-border/40"
             >
               Hủy
             </Button>

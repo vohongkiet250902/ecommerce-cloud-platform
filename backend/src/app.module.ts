@@ -17,6 +17,8 @@ import { MailerModule } from '@nestjs-modules/mailer';
 import { UploadModule } from './modules/upload/upload.module';
 import { CouponsModule } from './modules/coupons/coupons.module';
 import { ReviewsModule } from './modules/reviews/reviews.module';
+import { CacheModule } from '@nestjs/cache-manager';
+import { redisStore } from 'cache-manager-redis-yet';
 
 @Module({
   imports: [
@@ -57,6 +59,15 @@ import { ReviewsModule } from './modules/reviews/reviews.module';
     }),
     CouponsModule,
     ReviewsModule,
+    CacheModule.registerAsync({
+      isGlobal: true,
+      useFactory: async () => ({
+        store: await redisStore({
+          url: 'redis://localhost:6379',
+          ttl: 60 * 1000,
+        }),
+      }),
+    }),
   ],
   controllers: [AppController],
   providers: [AppService],

@@ -9,6 +9,7 @@ import { Product, ProductVariant } from './schemas/product.schema';
 import { Category } from '../categories/schemas/category.schema';
 import { Brand } from '../brands/schemas/brand.schema';
 import { UploadService } from '../upload/upload.service';
+import { SearchService } from '../search/search.service';
 
 @Injectable()
 export class ProductsService {
@@ -17,6 +18,7 @@ export class ProductsService {
     @InjectModel(Category.name) private readonly categoryModel: Model<Category>,
     @InjectModel(Brand.name) private readonly brandModel: Model<Brand>,
     private readonly uploadService: UploadService,
+    private readonly searchService: SearchService,
   ) {}
 
   private validateUniqueSku(variants: ProductVariant[]) {
@@ -65,7 +67,16 @@ export class ProductsService {
     }
     const exists = await this.productModel.findOne({ slug: dto.slug });
     if (exists) throw new BadRequestException('Slug already exists');
-    return this.productModel.create(dto);
+
+    // Lưu vào MongoDB
+    const product = await this.productModel.create(dto);
+
+    // BỔ SUNG: Đồng bộ sang Meilisearch
+    this.searchService
+      .addOrUpdateProduct(product)
+      .catch((err) => console.error('Lỗi đồng bộ tạo mới Meilisearch:', err));
+
+    return product;
   }
 
   async findAll(query: any, forAdmin: boolean = false) {
@@ -78,12 +89,12 @@ export class ProductsService {
       minPrice,
       maxPrice,
       sort,
-      isFeatured, // <-- BƯỚC 1: Tách isFeatured ra khỏi query
+      isFeatured,
       ...filterParams
     } = query;
     const filter: any = {};
 
-    if (!forAdmin) filter.status = 'active'; // User chỉ thấy hàng active
+    if (!forAdmin) filter.status = 'active';
     if (categoryId) filter.categoryId = categoryId;
     if (brandId) filter.brandId = brandId;
     if (keyword) filter.$text = { $search: keyword };
@@ -93,9 +104,7 @@ export class ProductsService {
       if (maxPrice) filter['variants.price'].$lte = +maxPrice;
     }
 
-    // <-- BƯỚC 2: Thêm logic xử lý isFeatured
     if (isFeatured !== undefined) {
-      // Ép kiểu vì query string thường gửi lên dưới dạng text 'true' hoặc 'false'
       filter.isFeatured = isFeatured === 'true' || isFeatured === true;
     }
 
@@ -144,7 +153,20 @@ export class ProductsService {
       this.calculateVariantPrices(dto.variants);
     }
 
-    return this.productModel.findByIdAndUpdate(id, dto, { new: true });
+    const updatedProduct = await this.productModel.findByIdAndUpdate(id, dto, {
+      new: true,
+    });
+
+    // BỔ SUNG: Đồng bộ cập nhật sang Meilisearch
+    if (updatedProduct) {
+      this.searchService
+        .addOrUpdateProduct(updatedProduct)
+        .catch((err) =>
+          console.error('Lỗi đồng bộ cập nhật Meilisearch:', err),
+        );
+    }
+
+    return updatedProduct;
   }
 
   async updateStatus(id: string, status: string) {
@@ -154,11 +176,28 @@ export class ProductsService {
       { new: true },
     );
     if (!product) throw new NotFoundException('Product not found');
+
+    // BỔ SUNG: Đồng bộ trạng thái sang Meilisearch
+    this.searchService
+      .addOrUpdateProduct(product)
+      .catch((err) =>
+        console.error('Lỗi đồng bộ trạng thái Meilisearch:', err),
+      );
+
     return product;
   }
 
   async remove(id: string) {
-    return this.productModel.findByIdAndDelete(id);
+    const deletedProduct = await this.productModel.findByIdAndDelete(id);
+
+    // BỔ SUNG: Xóa khỏi Meilisearch
+    if (deletedProduct) {
+      this.searchService
+        .removeProduct(id)
+        .catch((err) => console.error('Lỗi đồng bộ xóa Meilisearch:', err));
+    }
+
+    return deletedProduct;
   }
 
   async findBySlug(slug: string) {
@@ -177,5 +216,27 @@ export class ProductsService {
       .populate('brandId');
     if (!product) throw new NotFoundException('Product not found');
     return product;
+  }
+
+  // BỔ SUNG: Hàm đồng bộ toàn bộ sản phẩm sang Meilisearch dành cho Admin
+  async syncAllToMeilisearch() {
+    // Lấy toàn bộ sản phẩm trong DB
+    const products = await this.productModel.find({});
+    let successCount = 0;
+
+    for (const product of products) {
+      try {
+        await this.searchService.addOrUpdateProduct(product);
+        successCount++;
+      } catch (error) {
+        console.error(`Lỗi đồng bộ sản phẩm ${product._id}:`, error);
+      }
+    }
+
+    return {
+      message: 'Đồng bộ hoàn tất!',
+      totalProductsInDB: products.length,
+      syncedToMeilisearch: successCount,
+    };
   }
 }

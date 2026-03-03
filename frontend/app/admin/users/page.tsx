@@ -349,7 +349,7 @@ export default function UsersPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Người dùng</h1>
-          <p className="text-muted-foreground">Quản lý tài khoản người dùng và phân quyền</p>
+          <p className="text-muted-foreground">Quản lý tài khoản người dùng</p>
         </div>
       </div>
       

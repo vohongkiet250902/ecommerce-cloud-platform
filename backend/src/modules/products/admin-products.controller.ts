@@ -50,4 +50,10 @@ export class AdminProductsController {
   remove(@Param('id') id: string) {
     return this.productsService.remove(id);
   }
+
+  // BỔ SUNG: API Kích hoạt đồng bộ
+  @Post('sync-search')
+  async syncSearch() {
+    return this.productsService.syncAllToMeilisearch();
+  }
 }

@@ -219,6 +219,7 @@ export default function AddProductModal({ open, onOpenChange, initialData, onSuc
     control,
   } = useForm<ProductFormData>({
     resolver: zodResolver(productSchema),
+    mode: "onChange",
     defaultValues: {
       name: "",
       slug: "",
@@ -459,13 +460,14 @@ export default function AddProductModal({ open, onOpenChange, initialData, onSuc
     // Validate variants content
     const invalidVariants = variants.some(v => 
       v.price <= 0 || 
+      v.stock < 0 || 
       v.attributes.filter((a) => a.key.trim() && a.value.trim()).length === 0
     );
 
     if (invalidVariants) {
       toast({ 
         title: "Lỗi dữ liệu", 
-        description: "Vui lòng nhập đầy đủ thông tin cho các biến thể sản phẩm.", 
+        description: "Vui lòng nhập đầy đủ thông tin (giá > 0, tồn kho >= 0) cho các biến thể.", 
         variant: "destructive" 
       });
       return;
@@ -558,6 +560,14 @@ export default function AddProductModal({ open, onOpenChange, initialData, onSuc
     }
   };
 
+  const onFormError = () => {
+    toast({
+      title: "Thông tin chưa hợp lệ",
+      description: "Vui lòng kiểm tra và điền đầy đủ các thông tin sản phẩm.",
+      variant: "destructive"
+    });
+  };
+
   return (
     <>
       <Dialog open={open} onOpenChange={onDialogChange}>
@@ -569,7 +579,7 @@ export default function AddProductModal({ open, onOpenChange, initialData, onSuc
           </DialogTitle>
         </DialogHeader>
 
-        <form onSubmit={handleSubmit(onSubmit)}>
+        <form onSubmit={handleSubmit(onSubmit, onFormError)}>
           <ScrollArea className="h-[calc(90vh-160px)] px-6">
             <Tabs defaultValue="basic" className="w-full">
               <TabsList className="grid w-full grid-cols-4 mb-6">
@@ -661,7 +671,7 @@ export default function AddProductModal({ open, onOpenChange, initialData, onSuc
                               <DropdownMenuItem 
                                 key={c._id} 
                                 onClick={() => {
-                                  setValue("categoryId", c._id);
+                                  setValue("categoryId", c._id, { shouldValidate: true });
                                   setCatSearch("");
                                 }}
                                 className={cn(
@@ -740,7 +750,7 @@ export default function AddProductModal({ open, onOpenChange, initialData, onSuc
                               <DropdownMenuItem 
                                 key={b._id} 
                                 onClick={() => {
-                                  setValue("brandId", b._id);
+                                  setValue("brandId", b._id, { shouldValidate: true });
                                   setBrandSearch("");
                                 }}
                                 className="flex items-center justify-between"
@@ -776,7 +786,12 @@ export default function AddProductModal({ open, onOpenChange, initialData, onSuc
                           <ReactQuill
                             theme="snow"
                             value={field.value}
-                            onChange={field.onChange}
+                            onChange={(value, delta, source) => {
+                              if (source === 'user') {
+                                const v = value === '<p><br></p>' ? '' : value;
+                                field.onChange(v);
+                              }
+                            }}
                             modules={quillModules}
                             formats={quillFormats}
                             placeholder="Mô tả đầy đủ về sản phẩm, tính năng nổi bật..."
@@ -859,17 +874,18 @@ export default function AddProductModal({ open, onOpenChange, initialData, onSuc
                   </div>
                   <div className="space-y-4">
                     {variants.map((variant, i) => (
-                      <div key={i} className="border border-border rounded-lg p-4 space-y-4">
-                        <div className="flex items-center justify-between pointer-events-none">
-                          <h4 className="font-bold text-base text-primary/90 pointer-events-auto">Biến thể {i + 1}</h4>
+                      <div key={variant.sku} className="border border-border rounded-lg p-4 space-y-4">
+                        <div className="flex items-center justify-between">
+                          <h4 className="font-bold text-base text-primary/90">Biến thể {i + 1}</h4>
                           <Button
                             type="button"
                             variant="ghost"
                             size="sm"
                             onClick={() => removeVariant(i)}
                             disabled={variants.length === 1}
+                            className="hover:text-destructive hover:bg-destructive/10 transition-colors group/delete-var"
                           >
-                            <X className="h-4 w-4 text-muted-foreground" />
+                            <X className="h-4 w-4 text-muted-foreground group-hover/delete-var:text-destructive transition-colors" />
                           </Button>
                         </div>
                         <div className="grid grid-cols-4 gap-4">
@@ -887,7 +903,7 @@ export default function AddProductModal({ open, onOpenChange, initialData, onSuc
                                   <button
                                     type="button"
                                     onClick={() => removeVariantImage(i)}
-                                    className="absolute top-1 right-1 bg-destructive text-white rounded-full p-0.5"
+                                    className="absolute top-1 right-1 bg-destructive/80 hover:bg-destructive text-white rounded-full p-0.5 transition-colors"
                                   >
                                     <X className="h-3 w-3" />
                                   </button>
@@ -935,9 +951,10 @@ export default function AddProductModal({ open, onOpenChange, initialData, onSuc
                               <Input
                                 id={`variant-price-${i}`}
                                 type="number"
+                                min="0"
                                 placeholder="0"
                                 value={variant.price}
-                                onChange={(e) => updateVariant(i, "price", Number(e.target.value))}
+                                onChange={(e) => updateVariant(i, "price", Math.max(0, Number(e.target.value)))}
                                 className="mt-1.5"
                               />
                             </div>
@@ -948,9 +965,16 @@ export default function AddProductModal({ open, onOpenChange, initialData, onSuc
                               <Input
                                 id={`variant-discount-${i}`}
                                 type="number"
+                                min="0"
+                                max="100"
                                 placeholder="0"
                                 value={variant.discountPercentage}
-                                onChange={(e) => updateVariant(i, "discountPercentage", Number(e.target.value))}
+                                onChange={(e) => {
+                                  let val = Number(e.target.value);
+                                  if (val < 0) val = 0;
+                                  if (val > 100) val = 100;
+                                  updateVariant(i, "discountPercentage", val);
+                                }}
                                 className="mt-1.5"
                               />
                             </div>
@@ -961,9 +985,10 @@ export default function AddProductModal({ open, onOpenChange, initialData, onSuc
                               <Input
                                 id={`variant-stock-${i}`}
                                 type="number"
+                                min="0"
                                 placeholder="0"
                                 value={variant.stock}
-                                onChange={(e) => updateVariant(i, "stock", Number(e.target.value))}
+                                onChange={(e) => updateVariant(i, "stock", Math.max(0, Math.floor(Number(e.target.value))))}
                                 className="mt-1.5"
                               />
                             </div>

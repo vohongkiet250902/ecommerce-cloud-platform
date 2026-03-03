@@ -105,34 +105,34 @@ export default function Settings() {
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-6">
               <div className="space-y-2">
-                <Label className="text-xs font-black uppercase tracking-widest text-muted-foreground ml-1">Họ và tên</Label>
+                <Label className="text-sm font-bold">Họ và tên</Label>
                 <div className="flex items-center gap-3 p-3 rounded-xl bg-muted/40 border border-border/40 ring-offset-background focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2 transition-all">
                    <User className="h-4 w-4 text-primary/60" />
-                   <span className="text-sm font-medium text-foreground">{user?.fullName || "Chưa cập nhật"}</span>
+                   <span className="text-sm text-foreground">{user?.fullName || "Chưa cập nhật"}</span>
                 </div>
               </div>
 
               <div className="space-y-2">
-                <Label className="text-xs font-black uppercase tracking-widest text-muted-foreground ml-1">Email</Label>
+                <Label className="text-sm font-bold">Email</Label>
                 <div className="flex items-center gap-3 p-3 rounded-xl bg-muted/40 border border-border/40 transition-all opacity-80">
                    <Mail className="h-4 w-4 text-primary/60" />
-                   <span className="text-sm font-medium text-foreground">{user?.email}</span>
+                   <span className="text-sm text-foreground">{user?.email}</span>
                 </div>
               </div>
 
               <div className="space-y-2">
-                <Label className="text-xs font-black uppercase tracking-widest text-muted-foreground ml-1">Số điện thoại</Label>
+                <Label className="text-sm font-bold">Số điện thoại</Label>
                 <div className="flex items-center gap-3 p-3 rounded-xl bg-muted/40 border border-border/40 transition-all">
                    <Phone className="h-4 w-4 text-primary/60" />
-                   <span className="text-sm font-medium text-foreground">{user?.phone || "Chưa cập nhật"}</span>
+                   <span className="text-sm text-foreground">{user?.phone || "Chưa cập nhật"}</span>
                 </div>
               </div>
 
               <div className="space-y-2">
-                <Label className="text-xs font-black uppercase tracking-widest text-muted-foreground ml-1">Trạng thái</Label>
+                <Label className="text-sm font-bold">Trạng thái</Label>
                 <div className="flex items-center gap-3 p-3 rounded-xl bg-muted/40 border border-border/40 transition-all">
                    <ShieldCheck className="h-4 w-4 text-success/60" />
-                   <span className="text-sm font-bold text-success">{user?.isActive ? "Đang hoạt động" : "Đã khóa"}</span>
+                   <span className="text-sm text-success">{user?.isActive ? "Đang hoạt động" : "Đã khóa"}</span>
                 </div>
               </div>
             </div>

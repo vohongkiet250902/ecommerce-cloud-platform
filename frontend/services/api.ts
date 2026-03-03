@@ -187,6 +187,21 @@ export const orderApi = {
     apiClient.patch(`/admin/orders/${id}/status`, data),
   cancelOrder: (id: string) => apiClient.post(`/admin/orders/${id}/cancel`),
   cancelMyOrder: (id: string) => apiClient.patch(`/orders/${id}/cancel`),
+  retryPayment: (id: string) => apiClient.post(`/orders/${id}/retry-payment`),
+};
+
+export const cartApi = {
+  getCart: (params?: any) => apiClient.get('/cart', { params }),
+  addItem: (data: { productId: string; sku: string; quantity: number }) => 
+    apiClient.patch('/cart/items', data),
+  removeItem: (data: { productId: string; sku: string }) => 
+    apiClient.delete('/cart/items', { data }),
+  clearCart: () => apiClient.delete('/cart'),
+  checkout: (data: { paymentMethod: string; idempotencyKey?: string }) => {
+    const { idempotencyKey, ...checkoutData } = data;
+    const headers = idempotencyKey ? { 'idempotency-key': idempotencyKey } : {};
+    return apiClient.patch('/cart/checkout', checkoutData, { headers });
+  },
 };
 
 export const paymentApi = {

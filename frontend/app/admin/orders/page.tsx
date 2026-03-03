@@ -41,7 +41,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { cn } from "@/lib/utils";
-import { orderApi, usersApi } from "@/services/api";
+import { orderApi, usersApi, productApi } from "@/services/api";
 import { useToast } from "@/hooks/use-toast";
 
 /* ===================== TYPES ===================== */
@@ -274,9 +274,41 @@ export default function OrdersPage() {
     }
   };
 
-  const handleViewDetail = (order: Order) => {
+  const handleViewDetail = async (order: Order) => {
     setSelectedOrder(order);
     setDetailModalOpen(true);
+
+    // Bổ sung: Lấy thông tin thuộc tính (attributes) và ảnh riêng của biến thể
+    try {
+      const enrichedItems = await Promise.all(
+        order.items.map(async (item: any) => {
+          try {
+            const productId = typeof item.productId === 'string' ? item.productId : item.productId?._id;
+            if (!productId) return item;
+
+            const prodRes = await productApi.getProduct(productId);
+            const p = prodRes.data;
+            
+            // Tìm đúng biến thể theo SKU
+            const variant = p.variants?.find((v: any) => v.sku === item.sku);
+            
+            return { 
+              ...item, 
+              // Lấy thuộc tính của biến thể
+              attributes: variant?.attributes || [],
+              // Ưu tiên: Ảnh biến thể > Ảnh snapshot đơn hàng > Ảnh đại diện sản phẩm
+              imageUrl: variant?.image?.url || item.imageUrl || p.thumbnail || p.images?.[0]?.url 
+            };
+          } catch (err) {
+            console.error("Lỗi lấy thông tin biến thể:", err);
+          }
+          return item;
+        })
+      );
+      setSelectedOrder(prev => prev ? { ...prev, items: enrichedItems } : null);
+    } catch (error) {
+      console.error("Lỗi làm giàu dữ liệu đơn hàng:", error);
+    }
   };
 
   const handleCancelOrder = (id: string) => {
@@ -824,19 +856,28 @@ export default function OrdersPage() {
                               <h5 className="font-bold text-sm truncate pr-4">{item.name}</h5>
                               <p className="font-black text-sm text-primary flex-shrink-0">{formatPrice(item.price)}</p>
                             </div>
-                            <div className="flex items-center justify-between mt-2">
-                              <div className="flex items-center gap-2">
-                                <span className="text-[10px] bg-background border border-border/50 px-2 py-0.5 rounded font-mono font-medium text-muted-foreground">
-                                  SKU: {item.sku}
-                                </span>
-                                <span className="text-[10px] text-muted-foreground font-medium">
-                                  Số lượng: <span className="font-bold">x{item.quantity}</span>
-                                </span>
+                              <div className="flex flex-col gap-1.5 mt-2">
+                                <div className="flex flex-wrap gap-1">
+                                  {item.attributes?.map((attr: any, idx: number) => (
+                                    <span key={idx} className="text-[9px] bg-primary/10 text-primary px-1.5 py-0.5 rounded-sm font-bold border border-primary/20 leading-none">
+                                      {attr.key}: {attr.value}
+                                    </span>
+                                  ))}
+                                </div>
+                                <div className="flex items-center justify-between">
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-[10px] bg-background border border-border/50 px-2 py-0.5 rounded font-mono font-medium text-muted-foreground">
+                                      SKU: {item.sku}
+                                    </span>
+                                    <span className="text-[10px] text-muted-foreground font-medium">
+                                      Số lượng: <span className="font-bold">x{item.quantity}</span>
+                                    </span>
+                                  </div>
+                                  <p className="text-xs font-bold text-muted-foreground">
+                                    Thành tiền: <span className="text-foreground">{formatPrice(item.price * item.quantity)}</span>
+                                  </p>
+                                </div>
                               </div>
-                              <p className="text-xs font-bold text-muted-foreground">
-                                Thành tiền: <span className="text-foreground">{formatPrice(item.price * item.quantity)}</span>
-                              </p>
-                            </div>
                           </div>
                         </div>
                         {/* Background Decoration */}

@@ -12,10 +12,18 @@ import {
   Search,
   AlertTriangle,
   MoreHorizontal,
+  Eye,
 } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { DataTable } from "@/components/shared/DataTable";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Badge } from "@/components/ui/badge";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -73,6 +81,30 @@ function RatingStars({ rating }: { rating: number }) {
   );
 }
 
+const parseComment = (comment: string) => {
+  if (!comment) return { variant: null, text: "" };
+  const match = comment.match(/^\[Biến thể:\s*([^\]]+)\]\s*([\s\S]*)$/);
+  if (match) {
+    return { variant: match[1], text: match[2] };
+  }
+  return { variant: null, text: comment };
+};
+
+const formatSkuValuesOnly = (sku: string) => {
+  if (!sku || sku === "N/A" || sku === "DEFAULT") return "";
+  if (sku.includes(":")) {
+    return sku
+      .split(/[,|\-]/)
+      .map(part => {
+        const splitPart = part.split(":");
+        return splitPart.length > 1 ? splitPart[1].trim() : part.trim();
+      })
+      .filter(Boolean)
+      .join(" - ");
+  }
+  return sku;
+};
+
 export default function ReviewsPage() {
   const { toast } = useToast();
   const [loading, setLoading] = useState(true);
@@ -83,6 +115,10 @@ export default function ReviewsPage() {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [reviewToDelete, setReviewToDelete] = useState<Review | null>(null);
   const [toggling, setToggling] = useState(false);
+
+  // View state
+  const [viewDialogOpen, setViewDialogOpen] = useState(false);
+  const [reviewToView, setReviewToView] = useState<Review | null>(null);
 
   const fetchReviews = async () => {
     try {
@@ -107,6 +143,11 @@ export default function ReviewsPage() {
   const handleDelete = (review: Review) => {
     setReviewToDelete(review);
     setDeleteDialogOpen(true);
+  };
+
+  const handleView = (review: Review) => {
+    setReviewToView(review);
+    setViewDialogOpen(true);
   };
 
   const performDelete = async () => {
@@ -155,25 +196,36 @@ export default function ReviewsPage() {
     {
       key: "product",
       header: "Sản phẩm",
-      render: (review: Review) => (
-        <div className="flex flex-col gap-1 max-w-[200px]">
-          <span className="text-sm font-medium text-foreground truncate">
-            {review.productId?.name}
-          </span>
-          <RatingStars rating={review.rating} />
-        </div>
-      ),
+      render: (review: Review) => {
+        const parsed = parseComment(review.comment);
+        return (
+          <div className="flex flex-col gap-1 max-w-[200px]">
+            <span className="text-sm font-medium text-foreground truncate">
+              {review.productId?.name}
+            </span>
+            {parsed.variant && (
+              <Badge variant="outline" className="w-fit text-[10px] px-1.5 py-0 h-4 bg-muted/50 border-border/50 text-muted-foreground max-w-[200px] truncate">
+                {parsed.variant}
+              </Badge>
+            )}
+            <RatingStars rating={review.rating} />
+          </div>
+        );
+      },
     },
     {
       key: "comment",
       header: "Nội dung",
-      render: (review: Review) => (
-        <div className="max-w-[300px]">
-          <p className="text-muted-foreground text-sm line-clamp-2">
-            {review.comment}
-          </p>
-        </div>
-      ),
+      render: (review: Review) => {
+        const parsed = parseComment(review.comment);
+        return (
+          <div className="max-w-[300px]">
+            <p className="text-muted-foreground text-sm line-clamp-2">
+              {parsed.text}
+            </p>
+          </div>
+        );
+      },
     },
     {
       key: "createdAt",
@@ -200,6 +252,10 @@ export default function ReviewsPage() {
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="dropdown-content">
+            <DropdownMenuItem onClick={() => handleView(review)}>
+              <Eye className="mr-2 h-4 w-4" />
+              Xem chi tiết
+            </DropdownMenuItem>
             <DropdownMenuItem 
               className="text-destructive focus:text-destructive"
               onClick={() => handleDelete(review)}
@@ -225,9 +281,18 @@ export default function ReviewsPage() {
         ? (reviews.reduce((acc, r) => acc + r.rating, 0) / reviews.length).toFixed(1)
         : "0.0",
       fiveStar: reviews.filter(r => r.rating === 5).length,
-      bad: reviews.filter(r => r.rating <= 2).length,
+      bad: reviews.filter(r => r.rating <= 3).length,
     };
   }, [reviews]);
+
+  const filteredReviews = useMemo(() => {
+    return reviews.filter(review => {
+      if (statusFilter === "all") return true;
+      if (statusFilter === "good") return review.rating >= 4;
+      if (statusFilter === "bad") return review.rating <= 3;
+      return true;
+    });
+  }, [reviews, statusFilter]);
 
   return (
     <div className="space-y-6">
@@ -264,7 +329,7 @@ export default function ReviewsPage() {
         </div>
 
         <div className="bg-card rounded-xl p-4 border border-border shadow-sm">
-          <p className="text-sm text-muted-foreground font-medium">Cần chú ý (≤ 2 sao)</p>
+          <p className="text-sm text-muted-foreground font-medium">Cần chú ý (≤ 3 sao)</p>
           <div className="flex items-baseline gap-2 mt-2">
             <span className="text-2xl font-bold text-destructive">{stats.bad}</span>
           </div>
@@ -281,10 +346,29 @@ export default function ReviewsPage() {
         </div>
       ) : (
         <DataTable<Review>
-          data={reviews}
+          data={filteredReviews}
           columns={columns}
           searchPlaceholder="Tìm kiếm nội dung đánh giá..."
           pageSize={10}
+          filterNode={
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="sm" className="h-10 gap-2 bg-background/50 border-border/40">
+                  <Filter className="h-4 w-4" />
+                  <span>
+                    {statusFilter === "all" ? "Tất cả đánh giá" : 
+                     statusFilter === "good" ? "Tốt (4-5 sao)" : 
+                     "Chưa tốt (1-3 sao)"}
+                  </span>
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="dropdown-content">
+                <DropdownMenuItem onClick={() => setStatusFilter("all")}>Tất cả đánh giá</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setStatusFilter("good")}>Tốt (4-5 sao)</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setStatusFilter("bad")}>Chưa tốt (1-3 sao)</DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          }
         />
       )}
 
@@ -326,6 +410,71 @@ export default function ReviewsPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* View Detail Dialog */}
+      <Dialog open={viewDialogOpen} onOpenChange={setViewDialogOpen}>
+        <DialogContent className="sm:max-w-md p-0 overflow-hidden border border-border shadow-2xl rounded-2xl">
+          <DialogHeader className="px-6 pt-6 pb-4 border-b border-border/40">
+            <DialogTitle className="text-xl font-bold flex items-center gap-2">
+              <MessageSquare className="h-5 w-5 text-primary" />
+              Chi tiết đánh giá
+            </DialogTitle>
+          </DialogHeader>
+          {reviewToView && (
+            <div className="p-6 space-y-6">
+              <div className="flex items-center gap-4 bg-muted/20 p-4 rounded-xl border border-border/40">
+                <Avatar className="h-12 w-12 border border-border/50">
+                  <AvatarImage src={reviewToView.userId?.avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${reviewToView.userId?._id}`} />
+                  <AvatarFallback>{reviewToView.userId?.fullName?.charAt(0)}</AvatarFallback>
+                </Avatar>
+                <div>
+                  <p className="font-bold text-foreground">{reviewToView.userId?.fullName}</p>
+                  <p className="text-xs text-muted-foreground">{reviewToView.userId?.email}</p>
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <div className="space-y-1">
+                  <div className="text-sm font-semibold text-foreground">Sản phẩm:</div>
+                  <div className="flex flex-col gap-2 text-sm text-foreground bg-muted/10 p-3 rounded-lg border border-border/40">
+                    <p className="font-medium text-primary">{reviewToView.productId?.name}</p>
+                    {parseComment(reviewToView.comment).variant && (
+                      <Badge variant="secondary" className="w-fit text-xs font-semibold px-2 py-0 border-border/50">
+                        Biến thể: {formatSkuValuesOnly(parseComment(reviewToView.comment).variant as string)}
+                      </Badge>
+                    )}
+                  </div>
+                </div>
+
+                <div className="space-y-1">
+                  <div className="text-sm font-semibold text-foreground">Mức độ tương tác:</div>
+                  <div className="bg-muted/10 p-3 rounded-lg border border-border/40">
+                     <RatingStars rating={reviewToView.rating} />
+                  </div>
+                </div>
+
+                <div className="space-y-1">
+                  <div className="text-sm font-semibold text-foreground">Đánh giá chung:</div>
+                  <div className="text-sm text-foreground bg-muted/10 p-3 rounded-lg border border-border/40 min-h-[80px]">
+                    {parseComment(reviewToView.comment).text ? (
+                      <p className="whitespace-pre-wrap">{parseComment(reviewToView.comment).text}</p>
+                    ) : (
+                      <span className="text-muted-foreground italic">(Khách hàng không để lại nhận xét)</span>
+                    )}
+                  </div>
+                </div>
+
+                <div className="space-y-1">
+                  <div className="text-sm font-semibold text-foreground">Thời gian:</div>
+                  <div className="text-sm text-muted-foreground">
+                     {format(new Date(reviewToView.createdAt), "HH:mm, 'Ngày' dd 'Tháng' MM 'Năm' yyyy", { locale: vi })}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -31,7 +31,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardFooter } from "@/componen
 import { useCart } from "@/hooks/useCart";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
-import { orderApi, paymentApi } from "@/services/api";
+import { orderApi, paymentApi, cartApi } from "@/services/api";
 import { 
   Dialog, 
   DialogContent, 
@@ -142,36 +142,36 @@ function CheckoutContent() {
     try {
       setIsProcessing(true);
       
-      // Mapping items carefully to handle both cart items (id) and order items (productId)
-      const items = checkoutItems.map(item => {
-        const productId = (item.productId || item.id || "").toString();
-        const sku = item.sku && item.sku !== "N/A" ? item.sku : "";
-        
-        if (!productId || !sku) {
-          console.error("Missing order data for item:", item);
-        }
-        
-        return {
-          productId,
-          sku: sku || "DEFAULT", // Try "DEFAULT" as a last resort if SKU is missing
-          quantity: item.quantity || 1
+      let orderId = "";
+
+      if (isBuyNow) {
+        // Mapping items for Buy Now
+        const items = checkoutItems.map(item => {
+          const productId = (item.productId || item.id || "").toString();
+          const sku = item.sku && item.sku !== "N/A" ? item.sku : "";
+          return {
+            productId,
+            sku: sku || "DEFAULT",
+            quantity: item.quantity || 1
+          };
+        });
+
+        const orderData = {
+          items,
+          paymentMethod: formData.paymentMethod === "VNPAYQR" ? "vnpay" : "cod",
+          idempotencyKey: `ord_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`
         };
-      });
 
-      const orderData = {
-        items,
-        paymentMethod: formData.paymentMethod === "VNPAYQR" ? "vnpay" : "cod",
-        idempotencyKey: `ord_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`
-      };
-
-      console.log("Sending order data:", orderData);
-
-      // Note: We don't send shippingInfo here because the Backend DTO (CreateOrderDto) 
-      // does not whitelist it, which would trigger a 400 Bad Request error.
-      const orderResponse = await orderApi.createOrder(orderData);
-      
-      // Handle both { _id } and { data: { _id } } or { id }
-      const orderId = orderResponse.data?._id || orderResponse.data?.id || orderResponse.data?.data?._id || orderResponse.data?.data?.id;
+        const orderResponse = await orderApi.createOrder(orderData);
+        orderId = orderResponse.data?._id || orderResponse.data?.id || orderResponse.data?.data?._id || orderResponse.data?.data?.id;
+      } else {
+        // standard cart checkout
+        const checkoutResponse = await cartApi.checkout({
+          paymentMethod: formData.paymentMethod === "VNPAYQR" ? "vnpay" : "cod",
+          idempotencyKey: `ord_cart_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`
+        });
+        orderId = checkoutResponse.data?._id || checkoutResponse.data?.id || checkoutResponse.data?.data?._id || checkoutResponse.data?.data?.id;
+      }
 
       if (!orderId) {
         throw new Error("Không lấy được mã đơn hàng từ hệ thống");
@@ -186,16 +186,15 @@ function CheckoutContent() {
             throw new Error("Không thể tạo liên kết thanh toán VNPay");
           }
 
-          // Clear cart/buyNowItem before redirecting
+          // Clear local data before redirect
           if (isBuyNow) {
             sessionStorage.removeItem("buyNowItem");
           } else {
             clearCart();
           }
 
-          // Directly redirect to VNPay
           window.location.href = url;
-          return; // Stop execution as we are redirecting
+          return;
         } catch (error: any) {
           console.error("VNPay error:", error);
           toast({
@@ -203,7 +202,6 @@ function CheckoutContent() {
             description: error.response?.data?.message || "Không thể khởi tạo thanh toán VNPay.",
             variant: "destructive"
           });
-          // Redirect to order history if order was created but payment initiation failed
           router.push("/orders");
         }
       } else {
@@ -223,12 +221,23 @@ function CheckoutContent() {
       console.error("Place order error:", error);
       toast({
         title: "Lỗi đặt hàng",
-        description: error.response?.data?.message || "Có lỗi xảy ra khi tạo đơn hàng. Vui lòng thử lại.",
+        description: getErrorMessage(error, "Có lỗi xảy ra khi tạo đơn hàng. Vui lòng thử lại."),
         variant: "destructive"
       });
     } finally {
       setIsProcessing(false);
     }
+  };
+
+  const getErrorMessage = (error: any, defaultMsg: string) => {
+    const msg = error?.response?.data?.message || error?.response?.data || error?.message;
+    if (typeof msg === 'string') return msg;
+    if (Array.isArray(msg)) return msg.join(', ');
+    if (typeof msg === 'object') {
+       if (msg.message) return typeof msg.message === 'string' ? msg.message : JSON.stringify(msg.message);
+       return JSON.stringify(msg);
+    }
+    return defaultMsg;
   };
 
   const formatPrice = (price: number) =>
@@ -467,9 +476,22 @@ function CheckoutContent() {
                           </div>
                           <div className="flex-1 min-w-0">
                             <p className="font-bold text-sm truncate">{item.name}</p>
+                            <p className="text-[11px] font-medium text-muted-foreground mt-0.5">
+                              {item.sku}
+                              {item.attributes && item.attributes.length > 0 && (
+                                <> - {item.attributes.map((a: any) => a.value).join(", ")}</>
+                              )}
+                            </p>
                             <div className="flex justify-between items-center mt-1">
                               <p className="text-xs text-muted-foreground">SL: x{item.quantity}</p>
-                              <p className="font-bold text-sm text-primary">{formatPrice(item.price * item.quantity)}</p>
+                              <div className="text-right">
+                                {item.originalPrice && item.originalPrice > item.price && (
+                                  <p className="text-[10px] text-muted-foreground line-through mb-0.5">
+                                    {formatPrice(item.originalPrice * item.quantity)}
+                                  </p>
+                                )}
+                                <p className="font-bold text-sm text-primary">{formatPrice(item.price * item.quantity)}</p>
+                              </div>
                             </div>
                           </div>
                         </div>
