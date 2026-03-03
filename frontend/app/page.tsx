@@ -9,16 +9,10 @@ import FeaturedProducts from "@/components/FeaturedProducts";
 import PromoBanner from "@/components/PromoBanner";
 import Footer from "@/components/Footer";
 import { useAuth } from "@/hooks/useAuth";
+import { useTheme } from "@/context/ThemeContext";
 import { Loader2 } from "lucide-react";
 
 export default function Home() {
-  const [isDarkMode, setIsDarkMode] = useState(() => {
-    // Initialize state from localStorage or system preference
-    const savedTheme = typeof window !== "undefined" ? localStorage.getItem("theme") : null;
-    const prefersDark = typeof window !== "undefined" ? window.matchMedia("(prefers-color-scheme: dark)").matches : false;
-    return savedTheme === "dark" || (!savedTheme && prefersDark);
-  });
-  
   const router = useRouter();
   const { user, loading } = useAuth();
 
@@ -28,21 +22,6 @@ export default function Home() {
       router.push('/admin');
     }
   }, [loading, user, router]);
-
-  // Apply theme changes to DOM
-  useEffect(() => {
-    if (isDarkMode) {
-      document.documentElement.classList.add("dark");
-      localStorage.setItem("theme", "dark");
-    } else {
-      document.documentElement.classList.remove("dark");
-      localStorage.setItem("theme", "light");
-    }
-  }, [isDarkMode]);
-
-  const toggleDarkMode = () => {
-    setIsDarkMode((prev) => !prev);
-  };
 
   // Show loading spinner while checking auth
   if (loading) {
@@ -60,10 +39,7 @@ export default function Home() {
 
   return (
     <div className="min-h-screen bg-background">
-      <Header
-        isDarkMode={isDarkMode}
-        toggleDarkMode={toggleDarkMode}
-      />
+      <Header />
 
       <main>
         <HeroBanner />

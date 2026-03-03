@@ -32,7 +32,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
-import { reviewApi } from "@/services/api";
+import { reviewApi, productApi } from "@/services/api";
 import { format } from "date-fns";
 import { vi } from "date-fns/locale";
 import {
@@ -60,6 +60,8 @@ interface Review {
     slug: string;
     images?: { url: string }[];
   };
+  sku?: string;
+  attributes?: any[];
   rating: number;
   comment: string;
   createdAt: string;
@@ -85,7 +87,15 @@ const parseComment = (comment: string) => {
   if (!comment) return { variant: null, text: "" };
   const match = comment.match(/^\[Biến thể:\s*([^\]]+)\]\s*([\s\S]*)$/);
   if (match) {
-    return { variant: match[1], text: match[2] };
+    let variant = match[1];
+    // Deduplicate if SKU is repeated like "SKU - SKU"
+    if (variant.includes(" - ")) {
+      const parts = variant.split(" - ");
+      if (parts.length === 2 && parts[0].trim() === parts[1].trim()) {
+        variant = parts[0].trim();
+      }
+    }
+    return { variant, text: match[2] };
   }
   return { variant: null, text: comment };
 };
@@ -102,7 +112,7 @@ const formatSkuValuesOnly = (sku: string) => {
       .filter(Boolean)
       .join(" - ");
   }
-  return sku;
+  return ""; // Consistent with orders page fix
 };
 
 export default function ReviewsPage() {
@@ -124,7 +134,46 @@ export default function ReviewsPage() {
     try {
       setLoading(true);
       const res = await reviewApi.getAdminReviews();
-      setReviews(res.data.data || res.data);
+      const rawReviews = res.data.data || res.data || [];
+      
+      // Bổ sung: Làm giàu dữ liệu bằng cách lấy thuộc tính của biến thể từ SKU
+      const productCache = new Map<string, any>();
+      
+      const enriched = await Promise.all(
+        rawReviews.map(async (review: any) => {
+          try {
+            // Lấy SKU: ưu tiên trường sku, nếu không có thì parse từ comment (legacy)
+            const sku = review.sku || parseComment(review.comment).variant;
+            if (!sku || sku === "N/A" || sku === "DEFAULT") return review;
+
+            const productId = review.productId?._id || review.productId;
+            if (!productId) return { ...review, sku };
+
+            // Cache tránh gọi API lặp lại cho cùng 1 sản phẩm
+            let product = productCache.get(productId);
+            if (!product) {
+              const prodRes = await productApi.getProduct(productId);
+              product = prodRes.data;
+              productCache.set(productId, product);
+            }
+
+            // Tìm biến thể khớp với SKU
+            const variant = product.variants?.find((v: any) => v.sku === sku);
+            
+            return {
+              ...review,
+              sku,
+              attributes: variant?.attributes || [],
+              // Nếu comment cũ có [Biến thể...], ta làm sạch nó khi hiển thị nếu cần
+            };
+          } catch (err) {
+            console.error("Lỗi làm giàu dữ liệu đánh giá:", err);
+            return review;
+          }
+        })
+      );
+
+      setReviews(enriched);
     } catch (error: any) {
       toast({
         variant: "destructive",
@@ -197,16 +246,27 @@ export default function ReviewsPage() {
       key: "product",
       header: "Sản phẩm",
       render: (review: Review) => {
-        const parsed = parseComment(review.comment);
+        const skuStr = review.sku || parseComment(review.comment).variant;
         return (
           <div className="flex flex-col gap-1 max-w-[200px]">
-            <span className="text-sm font-medium text-foreground truncate">
+            <span className="text-sm font-bold text-foreground truncate">
               {review.productId?.name}
             </span>
-            {parsed.variant && (
-              <Badge variant="outline" className="w-fit text-[10px] px-1.5 py-0 h-4 bg-muted/50 border-border/50 text-muted-foreground max-w-[200px] truncate">
-                {parsed.variant}
-              </Badge>
+            {skuStr && (
+              <div className="flex flex-col gap-1">
+                <Badge variant="outline" className="w-fit text-[10px] px-1.5 py-0 h-4 bg-muted/50 border-border/50 text-muted-foreground max-w-[180px] truncate font-mono">
+                  SKU: {skuStr}
+                </Badge>
+                {review.attributes && review.attributes.length > 0 && (
+                  <div className="flex flex-wrap gap-1">
+                    {review.attributes.map((attr: any, idx: number) => (
+                      <span key={idx} className="text-[9px] bg-primary/5 text-primary/80 px-1 py-0 rounded border border-primary/10 leading-none font-medium">
+                        {attr.key}: {attr.value}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
             )}
             <RatingStars rating={review.rating} />
           </div>
@@ -435,13 +495,23 @@ export default function ReviewsPage() {
 
               <div className="space-y-4">
                 <div className="space-y-1">
-                  <div className="text-sm font-semibold text-foreground">Sản phẩm:</div>
                   <div className="flex flex-col gap-2 text-sm text-foreground bg-muted/10 p-3 rounded-lg border border-border/40">
-                    <p className="font-medium text-primary">{reviewToView.productId?.name}</p>
-                    {parseComment(reviewToView.comment).variant && (
-                      <Badge variant="secondary" className="w-fit text-xs font-semibold px-2 py-0 border-border/50">
-                        Biến thể: {formatSkuValuesOnly(parseComment(reviewToView.comment).variant as string)}
-                      </Badge>
+                    <p className="font-bold text-primary">{reviewToView.productId?.name}</p>
+                    {reviewToView.sku && (
+                      <div className="flex flex-col gap-1.5">
+                        <Badge variant="secondary" className="w-fit text-[11px] font-mono px-2 py-0.5 border-border/50">
+                          SKU: {reviewToView.sku}
+                        </Badge>
+                        {reviewToView.attributes && reviewToView.attributes.length > 0 && (
+                          <div className="flex flex-wrap gap-1 mt-1">
+                            {reviewToView.attributes.map((attr: any, idx: number) => (
+                              <Badge key={idx} variant="outline" className="text-[10px] bg-primary/5 text-primary border-primary/20">
+                                {attr.key}: {attr.value}
+                              </Badge>
+                            ))}
+                          </div>
+                        )}
+                      </div>
                     )}
                   </div>
                 </div>

@@ -1,8 +1,10 @@
 "use client";
 
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
+import { useTheme } from "@/context/ThemeContext";
 import { ProductCard } from "@/components/ProductCard";
 import ProductFilters from "@/components/ProductFilters";
 import { Button } from "@/components/ui/button";
@@ -37,13 +39,15 @@ const sortOptions = [
 
 const PRODUCTS_PER_PAGE = 20;
 
-export default function ProductsPage() {
+function ProductsContent() {
+  const searchParams = useSearchParams();
+  const initialCategory = searchParams.get("category") || "all";
+
   const [isMounted, setIsMounted] = useState(false);
-  const [isDarkMode, setIsDarkMode] = useState(false);
   const [products, setProducts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [sortBy, setSortBy] = useState("popular");
-  const [selectedCategory, setSelectedCategory] = useState("all");
+  const [selectedCategory, setSelectedCategory] = useState(initialCategory);
   const [selectedBrands, setSelectedBrands] = useState<string[]>([]);
   const [priceRange, setPriceRange] = useState<[number, number]>([
     0, 100000000,
@@ -133,26 +137,8 @@ export default function ProductsPage() {
   }, []);
 
   useEffect(() => {
-    const savedTheme = localStorage.getItem("theme");
-    const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-
-    if (savedTheme === "dark" || (!savedTheme && prefersDark)) {
-      setIsDarkMode(true);
-      document.documentElement.classList.add("dark");
-    }
     setIsMounted(true);
   }, []);
-
-  const toggleDarkMode = () => {
-    setIsDarkMode(!isDarkMode);
-    if (!isDarkMode) {
-      document.documentElement.classList.add("dark");
-      localStorage.setItem("theme", "dark");
-    } else {
-      document.documentElement.classList.remove("dark");
-      localStorage.setItem("theme", "light");
-    }
-  };
 
   const filteredProducts = useMemo(() => {
     // 1. Flatten active category IDs from tree
@@ -230,10 +216,10 @@ export default function ProductsPage() {
         });
         break;
       case "rating":
-        filtered = filtered.sort((a, b) => (b.rating || 0) - (a.rating || 0));
+        filtered = filtered.sort((a, b) => (b.averageRating || 0) - (a.averageRating || 0));
         break;
       default:
-        filtered = filtered.sort((a, b) => (b.numReviews || 0) - (a.numReviews || 0));
+        filtered = filtered.sort((a, b) => (b.reviewCount || 0) - (a.reviewCount || 0));
     }
 
     return filtered;
@@ -266,10 +252,7 @@ export default function ProductsPage() {
 
   return (
     <div className="min-h-screen bg-background">
-      <Header
-        isDarkMode={isDarkMode}
-        toggleDarkMode={toggleDarkMode}
-      />
+      <Header />
 
       <main className="container mx-auto px-4 py-8">
         {/* Page Header */}
@@ -476,7 +459,7 @@ export default function ProductsPage() {
               {paginatedProducts.length > 0 ? (
                 <motion.div
                   layout
-                  className="grid gap-6 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
+                  className="grid gap-2 grid-cols-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-4"
                 >
                   <AnimatePresence mode="popLayout">
                     {paginatedProducts.map((product, index) => (
@@ -490,17 +473,15 @@ export default function ProductsPage() {
                       >
                         <ProductCard 
                           id={product.slug}
-                          productId={product._id}
                           name={product.name}
                           brandName={typeof product.brandId === 'object' ? product.brandId?.name : (brands.find(b => b.id === product.brandId)?.name || "")}
-                          price={product.variants?.[0]?.price || product.price || 0}
+                          price={product.price || 0}
                           originalPrice={product.originalPrice}
                           image={product.images?.[0]?.url || ""}
-                          rating={product.rating || 5}
-                          reviewCount={product.numReviews || 0}
-                          sku={product.variants?.[0]?.sku}
-                          badge={product.totalStock < 10 ? "hot" : undefined}
+                          rating={product.averageRating || 0}
+                          reviewCount={product.reviewCount || 0}
                           variants={product.variants}
+                          discountPercentage={product.discountPercentage}
                         />
                       </motion.div>
                     ))}
@@ -564,5 +545,13 @@ export default function ProductsPage() {
 
       <Footer />
     </div>
+  );
+}
+
+export default function ProductsPage() {
+  return (
+    <Suspense fallback={<div className="flex h-screen items-center justify-center bg-background"><Loader2 className="h-10 w-10 animate-spin text-primary" /></div>}>
+      <ProductsContent />
+    </Suspense>
   );
 }

@@ -2,59 +2,81 @@
 
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
-import { ChevronLeft, ChevronRight, ArrowRight } from "lucide-react";
+import { ChevronLeft, ChevronRight, ArrowRight, Loader2 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
-import Image from "next/image";
-import heroBanner from "@/assets/img/hero-banner.jpg";
-
-const slides = [
-  {
-    id: 1,
-    title: "iPhone 15 Pro Max",
-    subtitle: "Titan. Siêu mạnh mẽ.",
-    description: "Trải nghiệm chip A17 Pro đột phá với hiệu năng đỉnh cao",
-    cta: "Mua ngay",
-    image: heroBanner,
-    badge: "Mới",
-  },
-  {
-    id: 2,
-    title: "MacBook Air M3",
-    subtitle: "Mỏng nhẹ. Mạnh mẽ.",
-    description: "Chip M3 mới với hiệu năng CPU nhanh hơn 60%",
-    cta: "Khám phá",
-    image: heroBanner,
-    badge: "Hot",
-  },
-  {
-    id: 3,
-    title: "Galaxy S24 Ultra",
-    subtitle: "AI trong tay bạn",
-    description:
-      "Tích hợp Galaxy AI với khả năng dịch thuật và chỉnh sửa ảnh thông minh",
-    cta: "Tìm hiểu",
-    image: heroBanner,
-    badge: "Sale",
-  },
-];
+import Link from "next/link";
+import { productApi } from "@/services/api";
 
 export default function HeroBanner() {
   const [currentSlide, setCurrentSlide] = useState(0);
+  const [slides, setSlides] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    const fetchLatestProducts = async () => {
+      try {
+        setLoading(true);
+        const res = await productApi.getProducts({ limit: 5 });
+        const fetchedProducts = res.data.data || res.data || [];
+        
+        const formattedSlides = fetchedProducts.map((p: any) => ({
+          id: p._id,
+          title: p.name,
+          subtitle: "Sản phẩm mới",
+          description: p.description 
+            ? p.description
+                .replace(/<[^>]+>/g, ' ')
+                .replace(/&nbsp;/g, ' ')
+                .replace(/&amp;/g, '&')
+                .replace(/&quot;/g, '"')
+                .replace(/&#39;/g, "'")
+                .replace(/&lt;/g, '<')
+                .replace(/&gt;/g, '>')
+                .replace(/\s+/g, ' ')
+                .trim()
+                .substring(0, 120) + "..." 
+            : "Khám phá ngay sản phẩm công nghệ mới nhất với ưu đãi tốt nhất.",
+          cta: "Mua ngay",
+          image: p.images?.[0]?.url || "https://placehold.co/600x400?text=No+Image",
+          badge: "Mới",
+          slug: p.slug
+        }));
+        
+        setSlides(formattedSlides);
+      } catch (error) {
+        console.error("Lỗi khi tải banner:", error);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchLatestProducts();
+  }, []);
+
+  useEffect(() => {
+    if (slides.length === 0) return;
     const timer = setInterval(() => {
       setCurrentSlide((prev) => (prev + 1) % slides.length);
     }, 5000);
     return () => clearInterval(timer);
-  }, []);
+  }, [slides.length]);
 
   const nextSlide = () => {
-    setCurrentSlide((prev) => (prev + 1) % slides.length);
+    if (slides.length > 0) setCurrentSlide((prev) => (prev + 1) % slides.length);
   };
 
   const prevSlide = () => {
-    setCurrentSlide((prev) => (prev - 1 + slides.length) % slides.length);
+    if (slides.length > 0) setCurrentSlide((prev) => (prev - 1 + slides.length) % slides.length);
   };
+
+  if (loading) {
+    return (
+      <section className="relative min-h-[500px] lg:min-h-[600px] flex items-center justify-center bg-gradient-to-br from-secondary via-background to-accent/30">
+        <Loader2 className="w-10 h-10 animate-spin text-primary" />
+      </section>
+    );
+  }
+
+  if (slides.length === 0) return null;
 
   return (
     <section className="relative overflow-hidden bg-gradient-to-br from-secondary via-background to-accent/30">
@@ -90,16 +112,20 @@ export default function HeroBanner() {
                   {slides[currentSlide].description}
                 </p>
                 <div className="flex flex-col sm:flex-row gap-4 justify-center lg:justify-start">
-                  <Button className="btn-primary px-8 py-6 text-lg rounded-full group">
-                    {slides[currentSlide].cta}
-                    <ArrowRight className="ml-2 w-5 h-5 group-hover:translate-x-1 transition-transform" />
-                  </Button>
-                  <Button
-                    variant="outline"
-                    className="px-8 py-6 text-lg rounded-full"
-                  >
-                    Xem chi tiết
-                  </Button>
+                  <Link href={`/products/${slides[currentSlide].slug}`} className="w-full sm:w-auto">
+                    <Button className="btn-primary w-full px-8 py-6 text-lg rounded-full group">
+                      {slides[currentSlide].cta}
+                      <ArrowRight className="ml-2 w-5 h-5 group-hover:translate-x-1 transition-transform" />
+                    </Button>
+                  </Link>
+                  <Link href={`/products/${slides[currentSlide].slug}`} className="w-full sm:w-auto">
+                    <Button
+                      variant="outline"
+                      className="w-full px-8 py-6 text-lg rounded-full"
+                    >
+                      Xem chi tiết
+                    </Button>
+                  </Link>
                 </div>
               </div>
 
@@ -110,11 +136,10 @@ export default function HeroBanner() {
                   animate={{ scale: 1, opacity: 1 }}
                   transition={{ duration: 0.5, delay: 0.2 }}
                 >
-                  <Image
+                  <img
                     src={slides[currentSlide].image}
                     alt={slides[currentSlide].title}
-                    className="w-full max-w-lg mx-auto rounded-3xl shadow-2xl"
-                    priority
+                    className="w-full max-w-md lg:max-w-lg mx-auto rounded-3xl shadow-2xl object-contain aspect-[4/3] lg:aspect-video bg-white p-4"
                   />
                 </motion.div>
                 {/* Decorative elements */}
@@ -126,13 +151,13 @@ export default function HeroBanner() {
           {/* Navigation Arrows */}
           <button
             onClick={prevSlide}
-            className="absolute left-2 lg:left-4 top-1/2 -translate-y-1/2 w-10 h-10 lg:w-12 lg:h-12 rounded-full bg-background/80 backdrop-blur-sm border border-border flex items-center justify-center hover:bg-accent transition-colors"
+            className="absolute -left-5 lg:-left-12 xl:-left-16 top-1/2 -translate-y-1/2 w-10 h-10 lg:w-12 lg:h-12 rounded-full bg-background/80 backdrop-blur-sm border border-border flex items-center justify-center hover:bg-accent transition-colors z-10"
           >
             <ChevronLeft className="w-5 h-5 lg:w-6 lg:h-6" />
           </button>
           <button
             onClick={nextSlide}
-            className="absolute right-2 lg:right-4 top-1/2 -translate-y-1/2 w-10 h-10 lg:w-12 lg:h-12 rounded-full bg-background/80 backdrop-blur-sm border border-border flex items-center justify-center hover:bg-accent transition-colors"
+            className="absolute -right-5 lg:-right-12 xl:-right-16 top-1/2 -translate-y-1/2 w-10 h-10 lg:w-12 lg:h-12 rounded-full bg-background/80 backdrop-blur-sm border border-border flex items-center justify-center hover:bg-accent transition-colors z-10"
           >
             <ChevronRight className="w-5 h-5 lg:w-6 lg:h-6" />
           </button>

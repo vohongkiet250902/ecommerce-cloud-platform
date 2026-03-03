@@ -47,13 +47,13 @@ export default function PromoBanner() {
               Giảm đến 50%
             </h2>
             <p className="text-white/90 text-lg mb-6">
-              Chương trình khuyến mãi đặc biệt cuối năm. Hàng ngàn sản phẩm công
+              Chương trình khuyến mãi đặc biệt đầu năm. Hàng ngàn sản phẩm công
               nghệ với giá ưu đãi chưa từng có!
             </p>
             <div className="flex flex-col sm:flex-row gap-4">
               <Button
                 size="lg"
-                className="bg-white text-destructive hover:bg-white/90 rounded-full px-8 group"
+                className="bg-white text-destructive hover:bg-white/90 rounded-full px-8 group cursor-pointer"
               >
                 Mua ngay
                 <ArrowRight className="ml-2 w-5 h-5 group-hover:translate-x-1 transition-transform" />
@@ -61,7 +61,7 @@ export default function PromoBanner() {
               <Button
                 size="lg"
                 variant="outline"
-                className="border-white text-white hover:bg-white/10 rounded-full px-8"
+                className="border-white text-white hover:bg-white/10 rounded-full px-8 cursor-pointer"
               >
                 Xem chi tiết
               </Button>
@@ -111,10 +111,10 @@ export default function PromoBanner() {
                 Điện thoại
               </span>
               <h3 className="text-2xl lg:text-3xl font-bold text-white mt-2 mb-4">
-                iPhone 15 Series
+                iPhone 17 Series
               </h3>
               <p className="text-white/80 mb-6">Giảm đến 3 triệu, trả góp 0%</p>
-              <Button className="bg-white text-primary hover:bg-white/90 rounded-full">
+              <Button className="bg-white text-primary hover:bg-white/90 rounded-full cursor-pointer">
                 Khám phá ngay
               </Button>
             </div>
@@ -131,10 +131,10 @@ export default function PromoBanner() {
             <div className="relative z-10">
               <span className="text-white/80 text-sm font-medium">Laptop</span>
               <h3 className="text-2xl lg:text-3xl font-bold text-white mt-2 mb-4">
-                MacBook M3 Series
+                MacBook M4 Series
               </h3>
               <p className="text-white/80 mb-6">Quà tặng lên đến 5 triệu</p>
-              <Button className="bg-white text-violet-600 hover:bg-white/90 rounded-full">
+              <Button className="bg-white text-violet-600 hover:bg-white/90 rounded-full cursor-pointer">
                 Tìm hiểu thêm
               </Button>
             </div>

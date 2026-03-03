@@ -55,7 +55,22 @@ type Product = {
   totalStock: number;
 };
 
-// Removed mock reviews
+const parseComment = (comment: string) => {
+  if (!comment) return { variant: null, text: "" };
+  const match = comment.match(/^\[Biến thể:\s*([^\]]+)\]\s*([\s\S]*)$/);
+  if (match) {
+    let variant = match[1];
+    // Deduplicate if SKU is repeated like "SKU - SKU"
+    if (variant.includes(" - ")) {
+      const parts = variant.split(" - ");
+      if (parts.length === 2 && parts[0].trim() === parts[1].trim()) {
+        variant = parts[0].trim();
+      }
+    }
+    return { variant, text: match[2].trim() };
+  }
+  return { variant: null, text: comment };
+};
 
 export default function ProductDetailPage() {
   const params = useParams() as { id?: string | string[] };
@@ -64,7 +79,6 @@ export default function ProductDetailPage() {
 
   const [product, setProduct] = useState<Product | null>(null);
   const [loading, setLoading] = useState(true);
-  const [isDarkMode, setIsDarkMode] = useState(false);
   const [selectedImage, setSelectedImage] = useState(0);
   const [quantity, setQuantity] = useState(1);
   const [selectedVariantIndex, setSelectedVariantIndex] = useState(0);
@@ -158,26 +172,7 @@ export default function ProductDetailPage() {
   };
 
 
-  useEffect(() => {
-    const savedTheme = localStorage.getItem("theme");
-    const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
 
-    if (savedTheme === "dark" || (!savedTheme && prefersDark)) {
-      setIsDarkMode(true);
-      document.documentElement.classList.add("dark");
-    }
-  }, []);
-
-  const toggleDarkMode = () => {
-    setIsDarkMode(!isDarkMode);
-    if (!isDarkMode) {
-      document.documentElement.classList.add("dark");
-      localStorage.setItem("theme", "dark");
-    } else {
-      document.documentElement.classList.remove("dark");
-      localStorage.setItem("theme", "light");
-    }
-  };
 
   const formatPrice = (value: number) => {
     return new Intl.NumberFormat("vi-VN", {
@@ -371,10 +366,7 @@ export default function ProductDetailPage() {
 
   return (
     <div className="min-h-screen bg-background">
-      <Header
-        isDarkMode={isDarkMode}
-        toggleDarkMode={toggleDarkMode}
-      />
+      <Header />
 
       <main className="container mx-auto px-4 py-8">
         {/* Breadcrumb */}
@@ -851,11 +843,22 @@ export default function ProductDetailPage() {
                                     </span>
                                   </div>
                                 </div>
-                                <Badge variant="secondary" className="bg-success/10 text-success border-success/20 text-[10px] font-black uppercase tracking-wider h-fit py-1 px-3">
-                                  Đã mua hàng
-                                </Badge>
                               </div>
-                              <p className="text-muted-foreground leading-relaxed text-sm md:text-base">{review.comment || review.content}</p>
+                              {review.sku && (
+                                <div className="flex flex-wrap items-center gap-2 mb-2">
+                                  <span className="text-[10px] font-mono bg-primary/10 text-primary px-2 py-0.5 rounded-md font-bold">
+                                    SKU: {review.sku}
+                                  </span>
+                                  {product?.variants?.find((v: any) => v.sku === review.sku)?.attributes.map((attr: any, i: number) => (
+                                    <span key={i} className="text-[10px] bg-muted px-2 py-0.5 rounded-full text-muted-foreground font-bold">
+                                      {attr.key}: {attr.value}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+                              <p className="text-muted-foreground leading-relaxed text-sm md:text-base">
+                                {parseComment(review.comment || review.content).text}
+                              </p>
                             </div>
                           </div>
                         </motion.div>

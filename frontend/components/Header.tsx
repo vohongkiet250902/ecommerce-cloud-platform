@@ -18,13 +18,12 @@ import {
 import { motion, AnimatePresence } from "framer-motion";
 import { useAuth } from "@/hooks/useAuth";
 import { useRouter } from "next/navigation";
+import { useTheme } from "@/context/ThemeContext";
 import { useCart } from "@/hooks/useCart";
 import { CartSidebar } from "./CartSidebar";
 
 interface HeaderProps {
   cartItemCount?: number;
-  isDarkMode: boolean;
-  toggleDarkMode: () => void;
   onCartClick?: () => void;
 }
 
@@ -45,10 +44,9 @@ const searchSuggestions = [
 
 export default function Header({
   cartItemCount: manualCartItemCount,
-  isDarkMode,
-  toggleDarkMode,
   onCartClick,
 }: HeaderProps) {
+  const { isDarkMode, toggleDarkMode } = useTheme();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [showSuggestions, setShowSuggestions] = useState(false);

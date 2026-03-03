@@ -60,6 +60,14 @@ interface Order {
   paymentStatus: "pending" | "paid" | "refunded";
   paymentMethod?: string;
   createdAt: string;
+  shippingInfo?: {
+    receiverName: string;
+    phone: string;
+    street: string;
+    ward: string;
+    district: string;
+    city: string;
+  };
 }
 
 /* ===================== CONFIG ===================== */
@@ -286,19 +294,33 @@ export default function OrdersPage() {
             const productId = typeof item.productId === 'string' ? item.productId : item.productId?._id;
             if (!productId) return item;
 
-            const prodRes = await productApi.getProduct(productId);
-            const p = prodRes.data;
-            
-            // Tìm đúng biến thể theo SKU
-            const variant = p.variants?.find((v: any) => v.sku === item.sku);
-            
-            return { 
-              ...item, 
-              // Lấy thuộc tính của biến thể
-              attributes: variant?.attributes || [],
-              // Ưu tiên: Ảnh biến thể > Ảnh snapshot đơn hàng > Ảnh đại diện sản phẩm
-              imageUrl: variant?.image?.url || item.imageUrl || p.thumbnail || p.images?.[0]?.url 
-            };
+            // Strategy: Try detail API first
+            try {
+              const prodRes = await productApi.getProduct(productId);
+              const p = prodRes.data;
+              
+              // Tìm đúng biến thể theo SKU
+              const variant = p.variants?.find((v: any) => v.sku === item.sku);
+              
+              return { 
+                ...item, 
+                attributes: variant?.attributes || item.attributes || [],
+                imageUrl: variant?.image?.url || item.imageUrl || p.thumbnail || p.images?.[0]?.url 
+              };
+            } catch (err) {
+              // Fallback to name search if direct ID lookup fails
+              const searchRes = await productApi.getProducts({ keyword: item.name, limit: 1 });
+              const list = searchRes.data?.data || searchRes.data || [];
+              if (Array.isArray(list) && list.length > 0) {
+                const p = list[0];
+                const variant = p.variants?.find((v: any) => v.sku === item.sku);
+                return { 
+                  ...item, 
+                  attributes: variant?.attributes || item.attributes || [],
+                  imageUrl: variant?.image?.url || item.imageUrl || p.thumbnail || p.images?.[0]?.url 
+                };
+              }
+            }
           } catch (err) {
             console.error("Lỗi lấy thông tin biến thể:", err);
           }
@@ -654,96 +676,126 @@ export default function OrdersPage() {
             <DialogTitle>Chi tiết đơn hàng</DialogTitle>
           </DialogHeader>
           {selectedOrder && (
-            <div className="flex flex-col max-h-[90vh]">
+            <div className="flex flex-col max-h-[90vh] print-area">
               {/* Modal Header with Gradient */}
-              <div className="bg-primary/5 px-6 py-6 border-b border-border/50">
+              <div className="bg-primary/5 px-6 py-4 border-b border-border/50">
                 <div className="flex items-center justify-between">
-                  <div>
+                  <div className="flex flex-col">
                     <div className="flex items-center gap-2 mb-1">
                       <span className="bg-primary/10 text-primary px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider">
-                        Đơn hàng
+                        Hóa đơn điện tử
                       </span>
-                      <h2 className="text-xl font-black tracking-tight">
+                      <h2 className="text-xl font-bold tracking-tight">
                         #{selectedOrder._id.substring(selectedOrder._id.length - 8).toUpperCase()}
                       </h2>
                     </div>
-                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <div className="flex items-center gap-2 text-[11px] text-muted-foreground font-medium">
                       <Calendar className="h-3 w-3" />
-                      {new Date(selectedOrder.createdAt).toLocaleDateString("vi-VN", {
+                      Ngày đặt: {new Date(selectedOrder.createdAt).toLocaleDateString("vi-VN", {
                         day: '2-digit',
-                        month: 'long',
+                        month: '2-digit',
                         year: 'numeric',
                         hour: '2-digit',
                         minute: '2-digit'
                       })}
                     </div>
                   </div>
-                  <Badge variant="outline" className={cn("px-4 py-1.5 text-sm font-bold rounded-full", statusConfig[selectedOrder.status]?.className)}>
-                    {statusConfig[selectedOrder.status]?.label}
-                  </Badge>
+                  <div className="flex flex-col items-end gap-1">
+                    <Badge variant="outline" className={cn("px-3 py-1 text-xs font-bold rounded-full", statusConfig[selectedOrder.status]?.className)}>
+                      {statusConfig[selectedOrder.status]?.label}
+                    </Badge>
+                  </div>
                 </div>
               </div>
 
-              <div className="overflow-y-auto p-6 space-y-8 custom-scrollbar">
-                {/* 2-Column Info Grid */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+              <div className="overflow-y-auto p-6 space-y-6 custom-scrollbar">
+                {/* Information Sections Filter for Printing */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   {/* Customer Info Card */}
-                  <div className="space-y-4">
-                    <div className="flex items-center gap-2 font-bold text-sm uppercase tracking-widest text-muted-foreground">
-                      <User className="h-4 w-4" />
-                      Thông tin khách hàng
+                  <div className="space-y-3">
+                    <div className="flex items-center gap-2 font-bold text-xs uppercase tracking-widest text-primary/70">
+                      <User className="h-3.5 w-3.5" />
+                      Người nhận hàng
                     </div>
-                    <div className="bg-muted/30 rounded-2xl p-5 border border-border/40 space-y-3">
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-full bg-background flex items-center justify-center border border-border/50 shadow-sm font-black text-primary">
-                          {(selectedOrder.userId?.fullName || selectedOrder.userId?.name || "K")[0].toUpperCase()}
-                        </div>
-                        <div>
-                          <p className="font-bold text-base leading-none mb-1">
-                            {selectedOrder.userId?.fullName || selectedOrder.userId?.name || "Khách vãng lai"}
-                          </p>
-                          <p className="text-xs text-muted-foreground">ID: {selectedOrder.userId?._id?.slice(-8).toUpperCase() || 'N/A'}</p>
-                        </div>
-                      </div>
-                      <div className="grid gap-2 pt-2">
-                        <div className="flex items-center gap-2 text-sm">
-                          <Mail className="h-3.5 w-3.5 text-muted-foreground" />
-                          <span className="text-muted-foreground">Email:</span>
-                          <span className="font-medium truncate">{selectedOrder.userId?.email || 'N/A'}</span>
-                        </div>
-                        <div className="flex items-center gap-2 text-sm">
+                    <div className="bg-muted/30 rounded-2xl p-4 border border-border/40 space-y-3">
+                      <p className="font-bold text-base text-foreground">
+                        {selectedOrder.shippingInfo?.receiverName || selectedOrder.userId?.fullName || selectedOrder.userId?.name || "Khách hàng"}
+                      </p>
+                      
+                      <div className="grid gap-2 text-xs">
+                        <div className="flex items-center gap-2">
                           <Phone className="h-3.5 w-3.5 text-muted-foreground" />
-                          <span className="text-muted-foreground">SĐT:</span>
-                          <span className="font-medium">{selectedOrder.userId?.phone || 'Chưa cập nhật'}</span>
+                          <span className="font-bold text-foreground">SĐT:</span>
+                          <span className="font-medium">{selectedOrder.shippingInfo?.phone || selectedOrder.userId?.phone || 'Chưa cập nhật'}</span>
+                        </div>
+                        {selectedOrder.userId?.email && (
+                          <div className="flex items-center gap-2">
+                            <Mail className="h-3.5 w-3.5 text-muted-foreground" />
+                            <span className="font-bold text-foreground">Email:</span>
+                            <span className="font-medium truncate">{selectedOrder.userId.email}</span>
+                          </div>
+                        )}
+                        <div className="flex items-start gap-2 border-t border-border/30 pt-2 mt-1">
+                          <MapPin className="h-3.5 w-3.5 text-muted-foreground mt-0.5" />
+                          <div className="flex flex-col gap-0.5">
+                            <span className="font-bold text-foreground">Đia chỉ:</span>
+                            {selectedOrder.shippingInfo ? (
+                              <>
+                                <p className="font-medium text-muted-foreground">{selectedOrder.shippingInfo.street}</p>
+                                <p className="font-medium text-muted-foreground">
+                                  {selectedOrder.shippingInfo.ward}, {selectedOrder.shippingInfo.district}
+                                </p>
+                                <p className="font-medium text-muted-foreground">{selectedOrder.shippingInfo.city}</p>
+                              </>
+                            ) : (
+                              <p className="font-medium text-muted-foreground italic">Cập nhật lúc giao hàng</p>
+                            )}
+                          </div>
                         </div>
                       </div>
                     </div>
                   </div>
 
                   {/* Payment Info Card */}
-                  <div className="space-y-4">
-                    <div className="flex items-center gap-2 font-bold text-sm uppercase tracking-widest text-muted-foreground">
-                      <CreditCard className="h-4 w-4" />
-                      Chi tiết thanh toán
+                  <div className="space-y-3">
+                    <div className="flex items-center gap-2 font-bold text-xs uppercase tracking-widest text-primary/70">
+                      <CreditCard className="h-3.5 w-3.5" />
+                      Thanh toán
                     </div>
-                    <div className="bg-muted/30 rounded-2xl p-5 border border-border/40 space-y-4">
-                      <div className="flex items-center justify-between">
-                        <span className="text-sm text-muted-foreground">Phương thức:</span>
-                        <Badge variant="secondary" className="font-bold uppercase tracking-tighter">
-                          {selectedOrder.paymentMethod || 'COD'}
-                        </Badge>
+                    <div className="bg-muted/30 rounded-2xl p-4 border border-border/40 space-y-3 flex flex-col justify-between">
+                      <div className="space-y-2">
+                        <div className="flex justify-between items-center text-xs">
+                          <span className="text-muted-foreground font-medium">Hình thức:</span>
+                          <span className="font-bold uppercase text-primary">
+                            {selectedOrder.paymentMethod === 'vnpay' ? 'VNPay (E-Wallet)' : selectedOrder.paymentMethod || 'COD'}
+                          </span>
+                        </div>
+                        <div className="flex justify-between items-center text-xs">
+                          <span className="text-muted-foreground font-medium">Trạng thái:</span>
+                          <Badge variant="outline" className={cn("font-bold text-[9px] uppercase py-0 px-2", paymentStatusConfig[selectedOrder.paymentStatus]?.className)}>
+                            {paymentStatusConfig[selectedOrder.paymentStatus]?.label}
+                          </Badge>
+                        </div>
+                        {(selectedOrder as any).couponCode && (
+                          <div className="flex justify-between items-center text-xs">
+                            <span className="text-muted-foreground font-medium">Mã giảm giá:</span>
+                            <span className="font-bold text-success">{(selectedOrder as any).couponCode}</span>
+                          </div>
+                        )}
+                        {(selectedOrder as any).discountAmount > 0 && (
+                          <div className="flex justify-between items-center text-xs">
+                            <span className="text-muted-foreground font-medium">Đã giảm:</span>
+                            <span className="font-bold text-destructive">-{formatPrice((selectedOrder as any).discountAmount)}</span>
+                          </div>
+                        )}
                       </div>
-                      <div className="flex items-center justify-between">
-                        <span className="text-sm text-muted-foreground">Trạng thái thanh toán:</span>
-                        <Badge variant="outline" className={cn("font-bold text-[10px]", paymentStatusConfig[selectedOrder.paymentStatus]?.className)}>
-                          {paymentStatusConfig[selectedOrder.paymentStatus]?.label.toUpperCase()}
-                        </Badge>
-                      </div>
-                      <div className="h-[1px] bg-border/40" />
-                      <div className="flex items-center justify-between pt-1">
-                        <span className="text-sm font-bold">Tổng quyết toán:</span>
-                        <span className="text-lg font-black text-primary tracking-tighter">
-                          {formatPrice(selectedOrder.totalAmount)}
+                      
+                      <div className="h-[1px] bg-border/20 my-1" />
+                      
+                      <div className="flex flex-col items-end gap-1">
+                        <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Tổng cộng</span>
+                        <span className="text-2xl font-bold text-primary tracking-tight">
+                          {formatPrice(selectedOrder.totalAmount || 0)}
                         </span>
                       </div>
                     </div>
@@ -854,7 +906,7 @@ export default function OrdersPage() {
                           <div className="flex-1 min-w-0">
                             <div className="flex items-start justify-between gap-2">
                               <h5 className="font-bold text-sm truncate pr-4">{item.name}</h5>
-                              <p className="font-black text-sm text-primary flex-shrink-0">{formatPrice(item.price)}</p>
+                              <p className="font-bold text-sm text-primary flex-shrink-0">{formatPrice(item.price)}</p>
                             </div>
                               <div className="flex flex-col gap-1.5 mt-2">
                                 <div className="flex flex-wrap gap-1">
@@ -889,7 +941,7 @@ export default function OrdersPage() {
               </div>
 
               {/* Modal Footer with Actions */}
-              <div className="bg-muted/30 p-4 border-t border-border/50 flex items-center justify-between gap-3">
+              <div className="bg-muted/30 p-4 border-t border-border/50 flex items-center justify-between gap-3 print:hidden">
                 <Button 
                   variant="outline" 
                   onClick={handlePrint}
@@ -898,7 +950,7 @@ export default function OrdersPage() {
                   <Printer className="h-4 w-4 mr-2" />
                   In hóa đơn
                 </Button>
-                <Button variant="ghost" onClick={() => setDetailModalOpen(false)} className="rounded-xl font-bold">
+                <Button variant="ghost" onClick={() => setDetailModalOpen(false)} className="rounded-xl font-bold print:hidden">
                   Đóng
                 </Button>
               </div>
@@ -910,17 +962,50 @@ export default function OrdersPage() {
       {/* Print Styles */}
       <style jsx global>{`
         @media print {
+          /* 1. Hide everything but the body to protect the layout */
+          body {
+            background: white !important;
+          }
           body * {
-            visibility: hidden;
+            visibility: hidden !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
           }
-          .print-area, .print-area * {
-            visibility: visible;
+          /* 2. Target the invoice area specifically */
+          .print-area, 
+          .print-area *, 
+          .print-area div, 
+          .print-area p, 
+          .print-area span, 
+          .print-area h2, 
+          .print-area h5, 
+          .print-area img {
+            visibility: visible !important;
           }
+          /* 3. Re-position the area to the top-left of the physical paper */
           .print-area {
-            position: absolute;
-            left: 0;
-            top: 0;
-            width: 100%;
+            position: absolute !important;
+            left: 0 !important;
+            top: 0 !important;
+            width: 100% !important;
+            margin: 0 !important;
+            background: white !important;
+            display: block !important;
+            z-index: 99999 !important;
+          }
+          /* 4. Ensure parent containers are visible enough to show children */
+          [role="dialog"], [data-radix-portal] {
+            visibility: visible !important;
+            background: transparent !important;
+            box-shadow: none !important;
+            border: none !important;
+          }
+          /* 5. Hide everything marked to be hidden and common overlay elements */
+          .print\:hidden, [data-state="open"] > [role="presentation"] {
+            display: none !important;
+          }
+          .custom-scrollbar {
+            overflow: visible !important;
           }
         }
       `}</style>

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/hooks/useAuth";
+import { useTheme } from "@/context/ThemeContext";
 import { Loader2, Sun, Moon } from "lucide-react";
 import {
   LayoutDashboard,
@@ -137,12 +138,8 @@ export default function AdminLayout({
     }
   }, [isMobile]);
 
-  const [isDarkMode, setIsDarkMode] = useState(() => {
-    // Initialize state from localStorage or system preference
-    const savedTheme = typeof window !== "undefined" ? localStorage.getItem("theme") : null;
-    const prefersDark = typeof window !== "undefined" ? window.matchMedia("(prefers-color-scheme: dark)").matches : false;
-    return savedTheme === "dark" || (!savedTheme && prefersDark);
-  });
+  const { isDarkMode, toggleDarkMode } = useTheme();
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
 
   // Search Logic
   const [searchQuery, setSearchQuery] = useState("");
@@ -178,20 +175,7 @@ export default function AdminLayout({
     }
   };
 
-  useEffect(() => {
-    // Apply theme to DOM
-    if (isDarkMode) {
-      document.documentElement.classList.add("dark");
-      localStorage.setItem("theme", "dark");
-    } else {
-      document.documentElement.classList.remove("dark");
-      localStorage.setItem("theme", "light");
-    }
-  }, [isDarkMode]);
 
-  const toggleDarkMode = () => {
-    setIsDarkMode((prev) => !prev);
-  };
 
   // Kiểm tra auth và redirect nếu cần
   useEffect(() => {

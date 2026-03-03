@@ -111,6 +111,8 @@ export const authApi = {
   refresh: () => apiClient.post('/auth/refresh'),
   logout: () => apiClient.post('/auth/logout'),
   getCurrentUser: () => apiClient.get('/users/me'),
+  updateProfile: (data: { fullName?: string; phone?: string; avatar?: string }) =>
+    apiClient.patch('/users/me', data),
 };
 
 export const productApi = {
@@ -163,6 +165,14 @@ export const usersApi = {
     apiClient.put(`/users/${id}`, data),
   toggleUserStatus: (id: string, isActive: boolean) =>
     apiClient.patch(`/admin/users/${id}/status`, { isActive }),
+
+  getAddresses: () => apiClient.get('/users/me/addresses'),
+  addAddress: (data: Record<string, unknown>) => apiClient.post('/users/me/addresses', data),
+  updateAddress: (addressId: string, data: Record<string, unknown>) =>
+    apiClient.patch(`/users/me/addresses/${addressId}`, data),
+  deleteAddress: (addressId: string) => apiClient.delete(`/users/me/addresses/${addressId}`),
+  setDefaultAddress: (addressId: string) =>
+    apiClient.patch(`/users/me/addresses/${addressId}/default`),
 };
 
 export const couponApi = {
@@ -178,7 +188,13 @@ export const orderApi = {
     apiClient.get('/admin/orders', { params }),
   getUserOrders: (params?: { page?: number; limit?: number; status?: string }) =>
     apiClient.get('/orders/me', { params }),
-  createOrder: (data: { items: { productId: string; sku: string; quantity: number }[]; paymentMethod?: string; idempotencyKey?: string }) => {
+  createOrder: (data: { 
+    items: { productId: string; sku: string; quantity: number }[]; 
+    shippingInfo: { receiverName: string; phone: string; street: string; ward: string; district: string; city: string; };
+    paymentMethod?: string; 
+    idempotencyKey?: string;
+    couponCode?: string;
+  }) => {
     const { idempotencyKey, ...orderData } = data;
     const headers = idempotencyKey ? { 'idempotency-key': idempotencyKey } : {};
     return apiClient.post('/orders', orderData, { headers });
@@ -197,11 +213,17 @@ export const cartApi = {
   removeItem: (data: { productId: string; sku: string }) => 
     apiClient.delete('/cart/items', { data }),
   clearCart: () => apiClient.delete('/cart'),
-  checkout: (data: { paymentMethod: string; idempotencyKey?: string }) => {
+  checkout: (data: { 
+    paymentMethod: string; 
+    shippingInfo: { receiverName: string; phone: string; street: string; ward: string; district: string; city: string; };
+    idempotencyKey?: string;
+  }) => {
     const { idempotencyKey, ...checkoutData } = data;
     const headers = idempotencyKey ? { 'idempotency-key': idempotencyKey } : {};
     return apiClient.patch('/cart/checkout', checkoutData, { headers });
   },
+  applyCoupon: (code: string) => apiClient.post('/cart/coupon', { code }),
+  removeCoupon: () => apiClient.delete('/cart/coupon'),
 };
 
 export const paymentApi = {
@@ -220,7 +242,7 @@ export const reviewApi = {
   deleteReview: (id: string) => apiClient.delete(`/admin/reviews/${id}`),
   getReviewsByProduct: (productId: string, params?: { page?: number; limit?: number; rating?: number; sortOrder?: string }) =>
     apiClient.get(`/reviews/product/${productId}`, { params }),
-  createReview: (data: { productId: string; rating: number; comment: string }) =>
+  createReview: (data: { productId: string; rating: number; comment: string; sku: string }) =>
     apiClient.post('/reviews', data),
 };
 

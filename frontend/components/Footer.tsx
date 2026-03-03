@@ -115,11 +115,11 @@ export default function Footer() {
             </p>
             <div className="space-y-3">
               <a
-                href="tel:1900123456"
+                href="tel:0866791305"
                 className="flex items-center gap-2 text-sm text-background/70 hover:text-background transition-colors"
               >
                 <Phone className="w-4 h-4" />
-                1900 123 456
+                0866791305
               </a>
               <a
                 href="mailto:support@protechstore.vn"
@@ -130,7 +130,7 @@ export default function Footer() {
               </a>
               <p className="flex items-center gap-2 text-sm text-background/70">
                 <MapPin className="w-4 h-4" />
-                123 Nguyễn Huệ, Q.1, TP.HCM
+                12 Nguyễn Văn Bảo, Phường 1, Quận Gò Vấp, TP.HCM
               </p>
             </div>
           </div>

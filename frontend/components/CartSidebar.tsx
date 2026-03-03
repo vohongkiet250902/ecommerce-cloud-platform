@@ -134,7 +134,7 @@ export function CartSidebar({
                     onOpenChange(false);
                     router.push('/products');
                   }} 
-                  className="rounded-full px-8"
+                  className="rounded-xl px-8"
                 >
                   Tiếp tục mua sắm
                 </Button>
@@ -278,7 +278,7 @@ export function CartSidebar({
 
                   <div className="grid grid-cols-1 gap-3">
                     <Button 
-                      className="w-full h-12 text-base font-bold rounded-xl gradient-hero shadow-lg shadow-primary/20 transition-all hover:scale-[1.02] active:scale-[0.98]"
+                      className="w-full h-12 text-base font-bold rounded-xl gradient-hero shadow-lg shadow-primary/20 transition-all hover:scale-[1.02] active:scale-[0.98] cursor-pointer"
                       onClick={handleCheckout}
                       disabled={isProcessing}
                     >
@@ -293,7 +293,7 @@ export function CartSidebar({
                     </Button>
                     <Button
                       variant="ghost"
-                      className="w-full h-12 text-muted-foreground hover:text-foreground font-medium"
+                      className="w-full h-12 text-muted-foreground hover:text-foreground font-medium rounded-xl cursor-pointer"
                       onClick={() => {
                         onOpenChange(false);
                         router.push('/products');

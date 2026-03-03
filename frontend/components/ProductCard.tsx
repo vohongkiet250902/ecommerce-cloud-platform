@@ -1,54 +1,87 @@
 "use client";
 
 import Link from "next/link";
-import { Heart, Star } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Star } from "lucide-react";
 import { motion } from "framer-motion";
 
 interface ProductCardProps {
-  id: string; // This is the slug for routing
-  productId?: string; // This is the _id for backend
+  id: string;
   name: string;
   price: number;
   originalPrice?: number;
   image: string;
-  sku?: string;
   rating: number;
   reviewCount: number;
-  badge?: "new" | "sale" | "hot";
-  variants?: { price: number }[];
+  variants?: any[];
   brandName?: string;
+  discountPercentage?: number;
 }
 
 export function ProductCard({
   id,
-  productId,
   name,
   price,
   originalPrice,
   image,
-  sku,
   rating,
   reviewCount,
-  badge,
   variants,
   brandName,
+  discountPercentage,
 }: ProductCardProps) {
-  const discountPercent = originalPrice
-    ? Math.round(((originalPrice - price) / originalPrice) * 100)
-    : 0;
+  // Validate variants and compute manual final prices using `discountPercentage`
+  const computedVariants = variants && variants.length > 0
+    ? variants.map(v => {
+        const dp = v.discountPercentage || 0;
+        const basePrice = v.price || 0;
+        const computedFinalPrice = dp > 0 ? basePrice - (basePrice * dp / 100) : basePrice;
+        return {
+          ...v,
+          computedFinalPrice,
+          originalPrice: basePrice,
+        };
+      })
+    : [];
+
+  let dp = discountPercentage || 0;
+  if (!dp && computedVariants.length > 0) {
+    const varDiscounts = computedVariants.map(v => v.discountPercentage || 0);
+    const maxVarDiscount = Math.max(...varDiscounts);
+    if (maxVarDiscount > 0) dp = maxVarDiscount;
+  }
+  if (!dp && originalPrice && originalPrice > price) {
+    dp = Math.round(((originalPrice - price) / originalPrice) * 100);
+  }
+  const displayDiscount = dp;
+
+  let finalPrice = price;
+  let finalOriginalPrice = originalPrice;
+  if (computedVariants.length === 0 && discountPercentage && discountPercentage > 0) {
+    // If no variants but top-level discount exists, price acts as original base
+    finalOriginalPrice = price;
+    finalPrice = price - (price * discountPercentage / 100);
+  }
 
   const formatPrice = (value: number) =>
     new Intl.NumberFormat("vi-VN", { style: "currency", currency: "VND", maximumFractionDigits: 0 }).format(
       value
     );
 
-  const minPrice = variants && variants.length > 0 
-    ? Math.min(...variants.map(v => v.price)) 
-    : price;
-  const maxPrice = variants && variants.length > 0 
-    ? Math.max(...variants.map(v => v.price)) 
-    : price;
+  const minVariant = computedVariants.length > 0 
+    ? computedVariants.reduce((prev, curr) => (curr.computedFinalPrice < prev.computedFinalPrice ? curr : prev), computedVariants[0])
+    : null;
+    
+  const maxVariant = computedVariants.length > 0 
+    ? computedVariants.reduce((prev, curr) => (curr.computedFinalPrice > prev.computedFinalPrice ? curr : prev), computedVariants[0])
+    : null;
+
+  const minPrice = minVariant ? minVariant.computedFinalPrice : finalPrice;
+  const maxPrice = maxVariant ? maxVariant.computedFinalPrice : finalPrice;
+    
+  // Find matching original price for min variant, fallback to computed final original 
+  const originalMinPrice = (minVariant && (minVariant.discountPercentage > 0 || minVariant.originalPrice > minVariant.price))
+    ? minVariant.originalPrice 
+    : (finalOriginalPrice !== undefined && finalOriginalPrice > finalPrice ? finalOriginalPrice : undefined);
 
   const hasPriceRange = minPrice !== maxPrice;
 
@@ -61,6 +94,11 @@ export function ProductCard({
       >
         {/* Image Container */}
         <div className="relative aspect-square overflow-hidden bg-secondary/50">
+          {displayDiscount > 0 && (
+            <div className="absolute top-2 right-2 z-10 bg-destructive text-white text-xs font-bold px-2 py-1 rounded-bl-xl rounded-tr-lg shadow-md">
+              -{displayDiscount}%
+            </div>
+          )}
           {image ? (
             <img
               src={image}
@@ -72,80 +110,61 @@ export function ProductCard({
               <span className="text-xs">No Image</span>
              </div>
           )}
-
-          {/* Badges */}
-          {badge && (
-            <div className="absolute top-3 left-3 z-10">
-              <span
-                className={`${
-                  badge === "new"
-                    ? "badge-new"
-                    : badge === "hot"
-                    ? "bg-warning text-warning-foreground px-2 py-1 text-xs font-semibold rounded-full"
-                    : "badge-sale"
-                }`}
-              >
-                {badge === "new" ? "Mới" : badge === "hot" ? "Hot" : `-${discountPercent}%`}
-              </span>
-            </div>
-          )}
-
-
-
         </div>
 
         {/* Content */}
-        <div className="p-4 flex flex-col flex-grow">
+        <div className="p-2 flex flex-col flex-grow">
           {/* Rating */}
-          <div className="flex items-center gap-1 mb-2">
-            <div className="flex items-center">
-              {[...Array(5)].map((_, i) => (
-                <Star
-                  key={i}
-                  className={`w-3.5 h-3.5 ${
-                    i < Math.floor(rating)
-                      ? "fill-warning text-warning"
-                      : "fill-muted text-muted"
-                  }`}
-                />
-              ))}
-            </div>
-            <span className="text-xs text-muted-foreground">({reviewCount})</span>
+          <div className="flex items-center gap-1 mb-1.5">
+            <span className="text-xs font-bold text-foreground">
+              {rating > 0 ? rating.toFixed(1) : "0.0"}
+            </span>
+            <Star className="w-3 h-3 fill-warning text-warning" />
+            <span className="text-[10px] text-muted-foreground ml-0.5 truncate">
+              ({reviewCount || 0})
+            </span>
           </div>
 
           {brandName && (
-            <span className="text-[10px] font-bold uppercase tracking-wider text-primary/70 mb-1 block">
+            <span className="text-[9px] font-bold uppercase tracking-wider text-primary/70 mb-1 block truncate">
               {brandName}
             </span>
           )}
 
           {/* Name */}
           <div className="flex-grow">
-            <h3 className="font-medium text-foreground mb-2 line-clamp-2 group-hover:text-primary transition-colors min-h-[2.5rem]">
+            <h3 className="font-medium text-foreground mb-1 line-clamp-2 group-hover:text-primary transition-colors text-xs sm:text-sm min-h-[2rem] leading-tight">
               {name}
             </h3>
           </div>
 
           {/* Price */}
-          <div className="flex items-baseline flex-nowrap truncate gap-x-1.5 sm:gap-x-2">
-            <span className="text-base sm:text-lg font-bold sm:font-black text-primary leading-tight whitespace-nowrap">
-              {hasPriceRange ? (
-                <>
-                  {formatPrice(minPrice).replace('₫', '')} - {formatPrice(maxPrice)}
-                </>
-              ) : (
-                formatPrice(price)
-              )}
-            </span>
-            {originalPrice && originalPrice > price && (
-              <span className="text-[10px] sm:text-xs text-muted-foreground line-through font-medium opacity-70 whitespace-nowrap">
-                {formatPrice(originalPrice)}
-              </span>
-            )}
-            {discountPercent > 0 && (
-              <span className="bg-destructive text-white text-[8px] sm:text-[10px] font-bold px-1.5 py-0.5 rounded-md shadow-sm whitespace-nowrap">
-                -{discountPercent}%
-              </span>
+          <div className="flex flex-wrap items-baseline gap-x-1.5 sm:gap-x-2">
+            {hasPriceRange ? (
+              <div className="flex items-baseline gap-x-1 sm:gap-x-1.5 flex-wrap">
+                <span className="text-sm sm:text-base font-bold text-primary leading-tight whitespace-nowrap">
+                  {formatPrice(minPrice).replace('₫', '').trim()}
+                </span>
+                {originalMinPrice && originalMinPrice > minPrice && (
+                  <span className="text-[10px] sm:text-xs text-muted-foreground line-through font-normal opacity-70 whitespace-nowrap">
+                    {formatPrice(originalMinPrice).replace('₫', '').trim()}
+                  </span>
+                )}
+                <span className="text-sm sm:text-base font-bold text-primary leading-tight whitespace-nowrap">
+                  - {formatPrice(maxPrice)}
+                </span>
+              </div>
+            ) : (
+              <>
+                <span className="text-sm sm:text-base font-bold text-primary leading-tight whitespace-nowrap">
+                  {formatPrice(minPrice)}
+                </span>
+                {originalMinPrice && originalMinPrice > minPrice && (
+                  <span className="text-[10px] sm:text-xs text-muted-foreground line-through font-normal opacity-70 whitespace-nowrap">
+                    {formatPrice(originalMinPrice)}
+                  </span>
+                )}
+              </>
             )}
           </div>
         </div>

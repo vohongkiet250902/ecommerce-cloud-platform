@@ -45,6 +45,7 @@ import {
 
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
+import { useTheme } from "@/context/ThemeContext";
 import { cn } from "@/lib/utils";
 
 /* =======================
@@ -117,11 +118,7 @@ function AuthContent() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [targetEmail, setTargetEmail] = useState("");
-  const [isDarkMode, setIsDarkMode] = useState(() => {
-    if (typeof window === "undefined") return false;
-    const savedTheme = localStorage.getItem("theme");
-    return savedTheme === "dark";
-  });
+  const { isDarkMode, toggleDarkMode } = useTheme();
 
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -131,12 +128,6 @@ function AuthContent() {
     signIn, signUp, verifyAccount, resendActivation, 
     forgotPassword, resetPassword, isAuthenticated, loading, user 
   } = useAuth();
-  
-  useEffect(() => {
-    if (isDarkMode) document.documentElement.classList.add("dark");
-    else document.documentElement.classList.remove("dark");
-    localStorage.setItem("theme", isDarkMode ? "dark" : "light");
-  }, [isDarkMode]);
 
   const loginForm = useForm<LoginFormData>({
     resolver: zodResolver(loginSchema),
@@ -309,7 +300,7 @@ function AuthContent() {
         <Button
           variant="ghost"
           size="icon"
-          onClick={() => setIsDarkMode(!isDarkMode)}
+          onClick={toggleDarkMode}
           className="rounded-full hover:bg-muted/50"
         >
           {isDarkMode ? (

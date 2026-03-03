@@ -11,25 +11,11 @@ import Footer from "@/components/Footer";
 import { cn } from "@/lib/utils";
 
 export default function PaymentResultPage() {
-  const [isDarkMode, setIsDarkMode] = useState(false);
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
     setMounted(true);
-    const savedTheme = localStorage.getItem("theme");
-    const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-    if (savedTheme === "dark" || (!savedTheme && prefersDark)) {
-      setIsDarkMode(true);
-      document.documentElement.classList.add("dark");
-    }
   }, []);
-
-  const toggleDarkMode = () => {
-    const newMode = !isDarkMode;
-    setIsDarkMode(newMode);
-    document.documentElement.classList.toggle("dark");
-    localStorage.setItem("theme", newMode ? "dark" : "light");
-  };
 
   // Prevent hydration mismatch
   if (!mounted) {
@@ -43,7 +29,7 @@ export default function PaymentResultPage() {
 
   return (
     <div className="min-h-screen bg-secondary/30 dark:bg-background flex flex-col">
-      <Header isDarkMode={isDarkMode} toggleDarkMode={toggleDarkMode} />
+      <Header />
 
       <main className="flex-1 container mx-auto px-4 py-12 flex items-center justify-center">
         <Suspense fallback={

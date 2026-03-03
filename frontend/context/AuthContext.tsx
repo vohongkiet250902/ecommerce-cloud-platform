@@ -11,6 +11,8 @@ export interface User {
   fullName: string;
   role: 'user' | 'admin';
   isActive: boolean;
+  phone?: string;
+  addresses?: any[];
 }
 
 interface AuthError {

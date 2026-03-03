@@ -26,6 +26,8 @@ interface CartContextType {
   updateQuantity: (id: string | number, quantity: number) => void;
   clearCart: () => void;
   cartItemCount: number;
+  couponCode?: string;
+  discountAmount?: number;
 }
 
 const CartContext = createContext<CartContextType | undefined>(undefined);
@@ -33,6 +35,8 @@ const CartContext = createContext<CartContextType | undefined>(undefined);
 export function CartProvider({ children }: { children: React.ReactNode }): React.JSX.Element {
   const [isCartOpen, setIsCartOpen] = useState(false);
   const [cartItems, setCartItems] = useState<CartItem[]>([]);
+  const [couponCode, setCouponCode] = useState<string | undefined>(undefined);
+  const [discountAmount, setDiscountAmount] = useState<number | undefined>(undefined);
   const { isAuthenticated } = useAuth();
 
   useEffect(() => {
@@ -78,6 +82,8 @@ export function CartProvider({ children }: { children: React.ReactNode }): React
           }));
           
           setCartItems(mappedItems);
+          setCouponCode(apiCart.couponCode);
+          setDiscountAmount(apiCart.discountAmount);
           localStorage.setItem("cart", JSON.stringify(mappedItems));
         })
         .catch((e) => console.error("Failed to fetch cart", e));
@@ -166,6 +172,8 @@ export function CartProvider({ children }: { children: React.ReactNode }): React
         updateQuantity,
         clearCart,
         cartItemCount,
+        couponCode,
+        discountAmount,
       }}
     >
       {children}
