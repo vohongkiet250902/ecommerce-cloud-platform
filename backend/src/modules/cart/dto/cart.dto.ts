@@ -3,9 +3,12 @@ import {
   ArrayMaxSize,
   IsArray,
   IsBoolean,
+  IsDefined,
   IsIn,
   IsInt,
   IsMongoId,
+  IsNotEmptyObject,
+  IsObject,
   IsOptional,
   IsString,
   Min,
@@ -56,8 +59,34 @@ export class ApplyCouponCartDto {
   code: string;
 }
 
+export class CartShippingInfoDto {
+  @IsString()
+  receiverName: string;
+
+  @IsString()
+  phone: string;
+
+  @IsString()
+  street: string;
+
+  @IsString()
+  ward: string;
+
+  @IsString()
+  district: string;
+
+  @IsString()
+  city: string;
+}
+
 export class CheckoutCartDto {
   @IsOptional()
   @IsIn(['cod', 'mock', 'vnpay'])
   paymentMethod?: string;
+  @IsDefined({ message: 'Vui lòng cung cấp thông tin giao hàng' })
+  @IsNotEmptyObject()
+  @IsObject()
+  @ValidateNested()
+  @Type(() => CartShippingInfoDto)
+  shippingInfo: CartShippingInfoDto;
 }

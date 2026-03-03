@@ -9,6 +9,9 @@ import {
   ValidateNested,
   IsOptional,
   IsIn,
+  IsDefined,
+  IsNotEmptyObject,
+  IsObject,
 } from 'class-validator';
 
 export class CreateOrderItemDto {
@@ -23,6 +26,26 @@ export class CreateOrderItemDto {
   quantity: number;
 }
 
+export class ShippingInfoDto {
+  @IsString()
+  receiverName: string;
+
+  @IsString()
+  phone: string;
+
+  @IsString()
+  street: string;
+
+  @IsString()
+  ward: string;
+
+  @IsString()
+  district: string;
+
+  @IsString()
+  city: string;
+}
+
 export class CreateOrderDto {
   @IsArray()
   @ArrayMinSize(1)
@@ -30,7 +53,6 @@ export class CreateOrderDto {
   @Type(() => CreateOrderItemDto)
   items: CreateOrderItemDto[];
 
-  // BƯỚC MỚI: Bổ sung trường paymentMethod vào đây để NestJS cho phép nhận dữ liệu
   @IsOptional()
   @IsIn(['cod', 'mock', 'vnpay'], {
     message: "Phương thức thanh toán chỉ được là: 'cod', 'mock' hoặc 'vnpay'",
@@ -40,4 +62,11 @@ export class CreateOrderDto {
   @IsOptional()
   @IsString()
   couponCode?: string;
+
+  @IsDefined({ message: 'Vui lòng cung cấp thông tin giao hàng' })
+  @IsNotEmptyObject()
+  @IsObject()
+  @ValidateNested()
+  @Type(() => ShippingInfoDto)
+  shippingInfo: ShippingInfoDto;
 }
