@@ -1,0 +1,25 @@
+{
+  "tai nghe": [
+    "headphone",
+    "earphone",
+    "tai nghe bluetooth",
+    "tai nghe không dây"
+  ],
+  "airpod": ["airpods", "air pod", "tai nghe apple"],
+  "ốp lưng": ["case", "phone case", "ốp điện thoại", "ốp"],
+  "cường lực": ["kính cường lực", "tempered glass", "miếng dán màn hình"],
+  "sạc": ["charger", "adapter", "củ sạc", "sạc nhanh", "fast charger"],
+  "cáp sạc": ["cable", "charging cable", "dây sạc", "usb cable"],
+  "iphone": ["i phone", "ip", "apple phone"],
+  "điện thoại": ["phone", "smartphone", "mobile"],
+  "đồng hồ": ["watch", "smartwatch", "apple watch"],
+  "loa": ["speaker", "bluetooth speaker", "loa bluetooth"],
+  "bàn phím": ["keyboard", "mechanical keyboard", "phím cơ"],
+  "chuột": ["mouse", "gaming mouse"],
+  "ssd": ["ổ cứng ssd", "solid state drive"],
+  "ram": ["memory", "bộ nhớ trong", "random access memory"],
+  "laptop": ["notebook", "máy tính xách tay"],
+  "máy tính": ["pc", "computer", "desktop"],
+  "màn hình": ["monitor", "display", "screen"],
+  "router": ["wifi router", "bộ phát wifi", "bộ định tuyến"]
+}
