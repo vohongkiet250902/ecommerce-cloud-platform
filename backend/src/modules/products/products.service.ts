@@ -51,30 +51,101 @@ export class ProductsService {
     }
   }
 
-  private calculateVariantPrices(variants: ProductVariant[] = []) {
-    variants.forEach((v: any) => {
-      const discount = v.discountPercentage || 0;
-      v.finalPrice = v.price - v.price * (discount / 100);
+  private calculateVariantPrices(variants: any[]) {
+    return (variants ?? []).map((v) => {
+      const price = Number(v.price ?? 0);
+      const rawDiscount = Number(v.discountPercentage ?? 0);
+
+      const safePrice = Number.isFinite(price) && price > 0 ? price : 0;
+      const discount = Number.isFinite(rawDiscount)
+        ? Math.max(0, Math.min(100, rawDiscount))
+        : 0;
+
+      const finalPrice =
+        safePrice > 0 ? Math.round(safePrice * (1 - discount / 100)) : 0;
+
+      return {
+        ...v,
+        price: safePrice,
+        discountPercentage: discount,
+        finalPrice,
+      };
     });
   }
 
+  // -----------------------------
+  // ✅ Search sync helpers (populate để có categoryName/brandName)
+  // -----------------------------
+  private async getProductForSearchIndex(productId: string) {
+    return this.productModel
+      .findById(productId)
+      .select({
+        name: 1,
+        slug: 1,
+        description: 1,
+        categoryId: 1,
+        brandId: 1,
+        images: 1,
+        variants: 1,
+        specs: 1,
+        totalStock: 1,
+        status: 1,
+        isFeatured: 1,
+        averageRating: 1,
+        reviewCount: 1,
+        createdAt: 1,
+      })
+      .populate({ path: 'categoryId', select: 'name' })
+      .populate({ path: 'brandId', select: 'name' });
+  }
+
+  private async syncProductToSearchById(productId: string) {
+    const product = await this.getProductForSearchIndex(productId);
+    if (!product) return;
+    await this.searchService.addOrUpdateProduct(product);
+  }
+
+  /** best-effort để không fail luồng nghiệp vụ nếu Meili lỗi */
+  private syncProductToSearchAsync(productId: string) {
+    void this.syncProductToSearchById(productId).catch((err) => {
+      console.error(
+        `[SearchSync] upsert failed for product ${productId}:`,
+        err?.message ?? err,
+      );
+    });
+  }
+
+  private removeProductFromSearchAsync(productId: string) {
+    void this.searchService.removeProduct(productId).catch((err) => {
+      console.error(
+        `[SearchSync] delete failed for product ${productId}:`,
+        err?.message ?? err,
+      );
+    });
+  }
+
+  // -----------------------------
+  // ✅ CRUD
+  // -----------------------------
   async create(dto: any) {
     await this.validateCategoryAndBrand(dto.categoryId, dto.brandId);
+
     if (dto.variants?.length) {
       this.validateUniqueSku(dto.variants);
+      dto.variants = this.calculateVariantPrices(dto.variants); // ✅ FIX: phải gán lại
       dto.totalStock = this.calculateTotalStock(dto.variants);
-      this.calculateVariantPrices(dto.variants);
     }
-    const exists = await this.productModel.findOne({ slug: dto.slug });
-    if (exists) throw new BadRequestException('Slug already exists');
 
-    // Lưu vào MongoDB
+    // slug unique
+    if (dto.slug) {
+      const exists = await this.productModel.findOne({ slug: dto.slug });
+      if (exists) throw new BadRequestException('Slug already exists');
+    }
+
     const product = await this.productModel.create(dto);
 
-    // BỔ SUNG: Đồng bộ sang Meilisearch
-    this.searchService
-      .addOrUpdateProduct(product)
-      .catch((err) => console.error('Lỗi đồng bộ tạo mới Meilisearch:', err));
+    // ✅ incremental indexing đúng chuẩn (populate category/brand name)
+    this.syncProductToSearchAsync(String(product._id));
 
     return product;
   }
@@ -88,16 +159,18 @@ export class ProductsService {
       keyword,
       minPrice,
       maxPrice,
-      sort,
+      sort, // hiện chưa dùng => bạn có thể implement sau
       isFeatured,
       ...filterParams
     } = query;
-    const filter: any = {};
 
+    const filter: any = {};
     if (!forAdmin) filter.status = 'active';
     if (categoryId) filter.categoryId = categoryId;
     if (brandId) filter.brandId = brandId;
     if (keyword) filter.$text = { $search: keyword };
+
+    // Lưu ý: filter này theo variants.price (DB), khác với search engine (min/max overlap)
     if (minPrice || maxPrice) {
       filter['variants.price'] = {};
       if (minPrice) filter['variants.price'].$gte = +minPrice;
@@ -119,7 +192,6 @@ export class ProductsService {
         });
       }
     });
-
     if (attributeQueries.length > 0) filter.$and = attributeQueries;
 
     return this.productModel
@@ -135,13 +207,23 @@ export class ProductsService {
 
     await this.validateCategoryAndBrand(dto.categoryId, dto.brandId);
 
+    // ✅ slug unique when updating
+    if (dto.slug && dto.slug !== product.slug) {
+      const existed = await this.productModel.findOne({
+        slug: dto.slug,
+        _id: { $ne: id },
+      });
+      if (existed) throw new BadRequestException('Slug already exists');
+    }
+
+    // remove old images if replaced
     if (dto.images) {
       const newPublicIds = (dto.images || []).map((img) => img.publicId);
       const removedImages = (product.images || []).filter(
-        (img) => !newPublicIds.includes(img.publicId),
+        (img: any) => !newPublicIds.includes(img.publicId),
       );
       await Promise.all(
-        removedImages.map((img) =>
+        removedImages.map((img: any) =>
           this.uploadService.deleteImage(img.publicId),
         ),
       );
@@ -149,21 +231,25 @@ export class ProductsService {
 
     if (dto.variants?.length) {
       this.validateUniqueSku(dto.variants);
+      dto.variants = this.calculateVariantPrices(dto.variants); // ✅ FIX: phải gán lại
       dto.totalStock = this.calculateTotalStock(dto.variants);
-      this.calculateVariantPrices(dto.variants);
     }
 
     const updatedProduct = await this.productModel.findByIdAndUpdate(id, dto, {
       new: true,
+      runValidators: true,
     });
+    if (!updatedProduct) throw new NotFoundException('Product not found');
 
-    // BỔ SUNG: Đồng bộ cập nhật sang Meilisearch
-    if (updatedProduct) {
-      this.searchService
-        .addOrUpdateProduct(updatedProduct)
-        .catch((err) =>
-          console.error('Lỗi đồng bộ cập nhật Meilisearch:', err),
-        );
+    // ✅ incremental indexing đúng chuẩn
+    // nếu status không active thì remove khỏi index (tránh “rác” trong search)
+    if (
+      (updatedProduct as any).status &&
+      (updatedProduct as any).status !== 'active'
+    ) {
+      this.removeProductFromSearchAsync(String(updatedProduct._id));
+    } else {
+      this.syncProductToSearchAsync(String(updatedProduct._id));
     }
 
     return updatedProduct;
@@ -173,16 +259,16 @@ export class ProductsService {
     const product = await this.productModel.findByIdAndUpdate(
       id,
       { status },
-      { new: true },
+      { new: true, runValidators: true },
     );
     if (!product) throw new NotFoundException('Product not found');
 
-    // BỔ SUNG: Đồng bộ trạng thái sang Meilisearch
-    this.searchService
-      .addOrUpdateProduct(product)
-      .catch((err) =>
-        console.error('Lỗi đồng bộ trạng thái Meilisearch:', err),
-      );
+    // ✅ status inactive => remove khỏi Meili, active => upsert
+    if (status !== 'active') {
+      this.removeProductFromSearchAsync(String(product._id));
+    } else {
+      this.syncProductToSearchAsync(String(product._id));
+    }
 
     return product;
   }
@@ -190,11 +276,9 @@ export class ProductsService {
   async remove(id: string) {
     const deletedProduct = await this.productModel.findByIdAndDelete(id);
 
-    // BỔ SUNG: Xóa khỏi Meilisearch
+    // ✅ delete khỏi Meili (best-effort)
     if (deletedProduct) {
-      this.searchService
-        .removeProduct(id)
-        .catch((err) => console.error('Lỗi đồng bộ xóa Meilisearch:', err));
+      this.removeProductFromSearchAsync(String(id));
     }
 
     return deletedProduct;
@@ -218,25 +302,15 @@ export class ProductsService {
     return product;
   }
 
-  // BỔ SUNG: Hàm đồng bộ toàn bộ sản phẩm sang Meilisearch dành cho Admin
+  /**
+   * ✅ Admin: đồng bộ toàn bộ index
+   * Khuyên dùng pipeline reindex của SearchService (đã batch + purge + thống kê)
+   */
   async syncAllToMeilisearch() {
-    // Lấy toàn bộ sản phẩm trong DB
-    const products = await this.productModel.find({});
-    let successCount = 0;
-
-    for (const product of products) {
-      try {
-        await this.searchService.addOrUpdateProduct(product);
-        successCount++;
-      } catch (error) {
-        console.error(`Lỗi đồng bộ sản phẩm ${product._id}:`, error);
-      }
-    }
-
-    return {
-      message: 'Đồng bộ hoàn tất!',
-      totalProductsInDB: products.length,
-      syncedToMeilisearch: successCount,
-    };
+    return this.searchService.reindexProducts({
+      purge: true,
+      onlyActive: false,
+      batchSize: 500,
+    });
   }
 }

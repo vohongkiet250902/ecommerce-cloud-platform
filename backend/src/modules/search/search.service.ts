@@ -48,7 +48,8 @@ type ProductSearchDoc = {
   name: string;
   slug: string;
   description?: string;
-
+  categoryName?: string;
+  brandName?: string;
   categoryId?: string;
   brandId?: string;
 
@@ -162,7 +163,14 @@ export class SearchService implements OnModuleInit {
     }
 
     await this.productsIndex().updateSettings({
-      searchableAttributes: ['name', 'description', 'attributePairs', 'slug'],
+      searchableAttributes: [
+        'name',
+        'categoryName',
+        'brandName',
+        'description',
+        'attributePairs',
+        'slug',
+      ],
 
       filterableAttributes: [
         'categoryId',
@@ -298,6 +306,33 @@ export class SearchService implements OnModuleInit {
     const totalStock = this.computeTotalStock(productData);
     const inStock = totalStock > 0;
 
+    const categoryIdRaw = productData.categoryId;
+    const brandIdRaw = productData.brandId;
+
+    const categoryId =
+      categoryIdRaw && typeof categoryIdRaw === 'object' && categoryIdRaw._id
+        ? String(categoryIdRaw._id)
+        : categoryIdRaw
+          ? String(categoryIdRaw)
+          : undefined;
+
+    const brandId =
+      brandIdRaw && typeof brandIdRaw === 'object' && brandIdRaw._id
+        ? String(brandIdRaw._id)
+        : brandIdRaw
+          ? String(brandIdRaw)
+          : undefined;
+
+    const categoryName =
+      categoryIdRaw && typeof categoryIdRaw === 'object' && categoryIdRaw.name
+        ? String(categoryIdRaw.name)
+        : undefined;
+
+    const brandName =
+      brandIdRaw && typeof brandIdRaw === 'object' && brandIdRaw.name
+        ? String(brandIdRaw.name)
+        : undefined;
+
     const images = Array.isArray(productData?.images)
       ? productData.images.map((x: any) => x?.url).filter(Boolean)
       : [];
@@ -314,10 +349,10 @@ export class SearchService implements OnModuleInit {
       name: String(productData.name ?? ''),
       slug: String(productData.slug ?? ''),
       description: productData.description ?? '',
-      categoryId: productData.categoryId
-        ? productData.categoryId.toString()
-        : undefined,
-      brandId: productData.brandId ? productData.brandId.toString() : undefined,
+      categoryId,
+      brandId,
+      categoryName,
+      brandName,
       images,
       image: images[0] ?? null,
       minPrice,
@@ -386,6 +421,8 @@ export class SearchService implements OnModuleInit {
         reviewCount: 1,
         createdAt: 1,
       })
+      .populate({ path: 'categoryId', select: 'name' })
+      .populate({ path: 'brandId', select: 'name' })
       .cursor();
 
     let scanned = 0;
