@@ -8,6 +8,12 @@ import { useAuth } from "@/hooks/useAuth";
 import { useTheme } from "@/context/ThemeContext";
 import { Loader2, Sun, Moon } from "lucide-react";
 import {
+  X,
+  Activity,
+  Box,
+  TrendingUp,
+  ArrowUpRight,
+  Filter,
   LayoutDashboard,
   Package,
   ShoppingCart,
@@ -26,8 +32,10 @@ import {
   ChevronDown,
   Zap,
   ArrowRight,
-  X,
+  Settings2,
 } from "lucide-react";
+import { categoryApi, brandApi } from "@/services/api";
+import { useRef } from "react";
 
 import { cn } from "@/lib/utils";
 import { useIsMobile } from "@/hooks/use-mobile";
@@ -41,6 +49,7 @@ import {
   TooltipTrigger,
   TooltipContent,
   TooltipProvider,
+  TooltipPortal,
 } from "@/components/ui/tooltip";
 import {
   DropdownMenu,
@@ -52,6 +61,23 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
+import {
+  Card,
+  CardHeader,
+  CardTitle,
+  CardContent,
+  CardDescription,
+} from "@/components/ui/card";
+import { useToast } from "@/hooks/use-toast";
 
 import "./admin.css";
 
@@ -141,33 +167,132 @@ export default function AdminLayout({
   const { isDarkMode, toggleDarkMode } = useTheme();
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
 
-  // Search Logic
+  // Search Hub State (Premium)
   const [searchQuery, setSearchQuery] = useState("");
   const [isSearching, setIsSearching] = useState(false);
-  const [searchResults, setSearchResults] = useState<any[]>([]);
+  const [searchResults, setSearchResults] = useState<any>(null);
   const [showResults, setShowResults] = useState(false);
+  const [suggestions, setSuggestions] = useState<any>(null);
+  const [categories, setCategories] = useState<any[]>([]);
+  const [brands, setBrands] = useState<any[]>([]);
+  const [filters, setFilters] = useState({
+    categoryId: "",
+    brandId: "",
+    inStock: false,
+    minPrice: "",
+    maxPrice: "",
+    attributes: "",
+    attrKey: "",
+    attrValue: "",
+    sort: "default"
+  });
+  const searchRef = useRef<HTMLDivElement>(null);
+  const { toast } = useToast();
 
+  // Helper for attribute toggle
+  const toggleAttribute = (pair: string) => {
+    setFilters(prev => {
+      const current = prev.attributes.split(',').map(s => s.trim()).filter(Boolean);
+      const isThere = current.includes(pair);
+      const next = isThere ? current.filter(s => s !== pair) : [...current, pair];
+      return { ...prev, attributes: next.join(',') };
+    });
+  };
+
+  // Fetch Metadata
   useEffect(() => {
-    const handler = setTimeout(() => {
-      if (searchQuery.trim()) {
-        performSearch(searchQuery);
-        setShowResults(true);
-      } else {
-        setSearchResults([]);
-        setShowResults(false);
+    const fetchData = async () => {
+      try {
+        const [catRes, brandRes] = await Promise.all([
+          categoryApi.getAdminCategories(),
+          brandApi.getAdminBrands()
+        ]);
+        setCategories(catRes.data.data || catRes.data);
+        setBrands(brandRes.data.data || brandRes.data);
+      } catch (e) { console.error("Metadata fetch error", e); }
+    };
+    fetchData();
+  }, []);
+
+  // Click outside listener
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+       const target = event.target as Node;
+       if (searchRef.current && !searchRef.current.contains(target)) {
+          // If clicking on a portal-based element or specifically a Radix Select item, don't close
+          if (target instanceof HTMLElement) {
+             const isRadixPortal = target.closest('[data-radix-portal]');
+             const isSelectUI = target.closest('[role="listbox"]') || target.closest('[role="option"]');
+             const isDetached = !document.body.contains(target); // Radix often unmounts items instantly on click
+
+             if (isRadixPortal || isSelectUI || isDetached) {
+                return;
+             }
+          }
+          setShowResults(false);
+       }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  // Search Process
+  useEffect(() => {
+    const handler = setTimeout(async () => {
+      if (!searchQuery.trim()) {
+        setSearchResults(null);
+        setSuggestions(null);
+        // Do not close showResults here so it stays open on empty focus
+        return;
       }
+
+      setShowResults(true);
+
+      // 1. Fetch Suggestions
+      if (searchQuery.length >= 2) {
+        apiClient.get("/search/suggest", { params: { q: searchQuery } })
+          .then(res => setSuggestions(res.data))
+          .catch(() => {});
+      }
+
+      // 2. Perform Search
+      performSearch(searchQuery);
     }, 400);
 
     return () => clearTimeout(handler);
-  }, [searchQuery]);
+  }, [searchQuery, filters]);
 
   const performSearch = async (query: string) => {
     try {
       setIsSearching(true);
       const res = await apiClient.get("/search/products", {
-        params: { keyword: query, limit: 10 }
+        params: { 
+          q: query, 
+          limit: 10,
+          facets: true,
+          facetLabels: true,
+          ...Object.fromEntries(
+            Object.entries(filters)
+              .map(([k, v]) => {
+                if (k === 'attributes' && typeof v === 'string') {
+                   let manual = "";
+                   if (filters.attrKey?.trim() && filters.attrValue?.trim()) {
+                      manual = `${filters.attrKey.trim()}:${filters.attrValue.trim()}`;
+                   }
+                   const raw = v + (manual ? (v ? `,${manual}` : manual) : "");
+                   const normalized = raw.split(',')
+                      .map(p => p.split(':').map(part => part.trim().toLowerCase()).join(':'))
+                      .filter(p => p.includes(':'))
+                      .join(',');
+                   return [k, normalized];
+                }
+                return [k, v];
+              })
+              .filter(([k, v]) => v !== "" && v !== "default" && v !== false && k !== 'attrKey' && k !== 'attrValue')
+          )
+        }
       });
-      setSearchResults(res.data.hits || []);
+      setSearchResults(res.data);
     } catch (error) {
       console.error("Layout search error:", error);
     } finally {
@@ -294,104 +419,367 @@ export default function AdminLayout({
         >
           {/* Header */}
           <header className="h-16 bg-card border-b border-border px-6 flex items-center justify-between sticky top-0 z-30">
-            {/* Search */}
-            <div className="flex items-center gap-4 flex-1 max-w-xl relative">
+            {/* Search Hub */}
+            <div className="flex items-center gap-4 flex-1 max-w-xl relative" ref={searchRef}>
               <div className="relative w-full group">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground transition-colors group-focus-within:text-primary" />
+                <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground transition-colors group-focus-within:text-indigo-500" />
                 <Input
-                  placeholder="Tìm nhanh sản phẩm..."
-                  className="pl-10 h-10 bg-secondary/50 border-0 focus-visible:ring-1 focus-visible:ring-primary/30 rounded-full"
+                  placeholder="Tìm kiếm sản phẩm..."
+                  className="pl-11 h-11 bg-secondary/40 border-border/40 focus-visible:ring-2 focus-visible:ring-indigo-500/20 rounded-2xl text-sm font-medium transition-all"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  onFocus={() => searchQuery.trim() && setShowResults(true)}
+                  onFocus={() => setShowResults(true)}
+                  onClick={() => setShowResults(true)}
                 />
                 
                 {searchQuery && (
-                   <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-2">
-                     {isSearching && <Loader2 className="h-3 w-3 animate-spin text-primary" />}
+                   <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center gap-2">
+                     {isSearching && <Loader2 className="h-3 w-3 animate-spin text-indigo-500" />}
                      <button 
                         onClick={() => {
                           setSearchQuery("");
-                          setSearchResults([]);
+                          setSearchResults(null);
+                          setSuggestions(null);
                           setShowResults(false);
                         }}
-                        className="h-5 w-5 rounded-full hover:bg-muted flex items-center justify-center text-muted-foreground"
+                        className="h-6 w-6 rounded-full hover:bg-muted flex items-center justify-center text-muted-foreground transition-colors"
                      >
-                       <X className="h-3 w-3" />
+                       <X className="h-3.5 w-3.5" />
                      </button>
                    </div>
                 )}
               </div>
 
-              {/* Search Results Dropdown */}
-              {showResults && (searchQuery.trim()) && (
-                <>
-                  <div className="fixed inset-0 z-40" onClick={() => setShowResults(false)} />
-                  <div className="absolute top-[calc(100%+8px)] left-0 right-0 bg-card border border-border rounded-2xl shadow-2xl z-50 overflow-hidden animate-in fade-in slide-in-from-top-2 duration-200">
-                    <div className="p-2 max-h-[400px] overflow-y-auto">
-                      {searchResults.length > 0 ? (
-                        <>
-                          <div className="px-3 py-2 text-[10px] font-bold text-muted-foreground uppercase opacity-60 tracking-widest border-b mb-1">
-                            Sản phẩm ({searchResults.length})
-                          </div>
-                          {searchResults.map((product) => (
-                            <div
-                              key={product.id}
-                              className="flex items-center gap-3 p-2.5 rounded-xl hover:bg-secondary cursor-pointer transition-colors group"
-                              onClick={() => {
-                                router.push(`/admin/products/${product.id}`);
-                                setShowResults(false);
-                                setSearchQuery("");
-                              }}
-                            >
-                              <div className="h-10 w-10 relative rounded-lg overflow-hidden shrink-0 border border-border/50 bg-white">
-                                {product.image ? (
-                                  <Image src={product.image} alt={product.name} fill className="object-cover" />
-                                ) : (
-                                  <div className="w-full h-full flex items-center justify-center text-[10px] uppercase bg-muted text-muted-foreground">No</div>
-                                )}
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <p className="text-sm font-semibold truncate group-hover:text-primary transition-colors">{product.name}</p>
-                                <p className="text-xs text-muted-foreground">
-                                  {new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(product.price)}
-                                </p>
-                              </div>
-                              <ArrowRight className="h-4 w-4 text-muted-foreground opacity-0 -translate-x-2 group-hover:opacity-100 group-hover:translate-x-0 transition-all" />
+              {/* Advanced Search Hub Panel */}
+              {showResults && (
+                <div className="absolute top-[calc(100%+12px)] -left-20 sm:left-0 w-[95vw] sm:w-[850px] bg-background/95 backdrop-blur-xl border border-border/60 rounded-[2rem] shadow-[0_20px_70px_-10px_rgba(0,0,0,0.3)] z-50 overflow-hidden animate-in fade-in slide-in-from-top-4 duration-500">
+                   <div className="grid grid-cols-1 md:grid-cols-12 max-h-[600px]">
+                      
+                      {/* Left: Configuration (Quick Filters) - Same as Sandbox */}
+                      <div className="md:col-span-4 bg-muted/20 border-r border-border/40 overflow-y-auto max-h-[600px] scrollbar-hide">
+                         <div className="p-6 space-y-6">
+                            <div className="flex items-center justify-between pb-4 border-b border-border/40">
+                               <p className="text-[11px] font-bold text-muted-foreground/70 flex items-center gap-2">
+                                  <Settings2 className="h-3.5 w-3.5 text-indigo-500" /> Cấu hình Sandbox
+                               </p>
+                               <Button 
+                                  variant="ghost" 
+                                  size="sm" 
+                                  className="h-7 rounded-lg text-[10px] font-bold text-muted-foreground hover:text-indigo-600 px-2 cursor-pointer"
+                                  onClick={() => setFilters({
+                                     categoryId: "",
+                                     brandId: "",
+                                     inStock: false,
+                                     minPrice: "",
+                                     maxPrice: "",
+                                     attributes: "",
+                                     attrKey: "",
+                                     attrValue: "",
+                                     sort: "default"
+                                  })}
+                               >
+                                  Đặt lại
+                               </Button>
                             </div>
-                          ))}
-                        </>
-                      ) : !isSearching ? (
-                        <div className="p-8 text-center bg-muted/10">
-                          <p className="text-sm font-medium text-muted-foreground">Không tìm thấy sản phẩm nào.</p>
-                        </div>
-                      ) : (
-                        <div className="p-8 text-center">
-                          <Loader2 className="h-6 w-6 animate-spin text-primary mx-auto mb-2 opacity-40" />
-                          <p className="text-xs text-muted-foreground">Đang tìm kiếm...</p>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </>
+
+                            <div className="space-y-6">
+                               {/* Sorting */}
+                               <div className="space-y-2.5">
+                                  <Label className="text-[11px] font-bold text-muted-foreground ml-1">Chiến lược xếp hạng</Label>
+                                  <Select value={filters.sort} onValueChange={(v) => setFilters(f => ({...f, sort: v}))}>
+                                     <SelectTrigger className="h-10 rounded-xl bg-background border-border shadow-sm font-semibold text-xs">
+                                        <SelectValue placeholder="Mặc định (AI)" />
+                                     </SelectTrigger>
+                                     <SelectContent className="rounded-xl border-border shadow-lg">
+                                        <SelectItem value="default" className="text-xs font-medium">Độ tương quan</SelectItem>
+                                        <SelectItem value="minPrice:asc" className="text-xs font-medium">Giá: Thấp đến Cao</SelectItem>
+                                        <SelectItem value="minPrice:desc" className="text-xs font-medium">Giá: Cao đến Thấp</SelectItem>
+                                        <SelectItem value="createdAt:desc" className="text-xs font-medium">Ngày đăng (Mới nhất)</SelectItem>
+                                     </SelectContent>
+                                  </Select>
+                               </div>
+
+                               {/* Price Range */}
+                               <div className="space-y-2.5">
+                                  <Label className="text-[11px] font-bold text-muted-foreground ml-1">Khoảng giá (VND)</Label>
+                                  <div className="grid grid-cols-1 gap-3">
+                                     <div className="relative group">
+                                        <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[8px] font-black text-muted-foreground/40 group-focus-within:text-indigo-500 transition-colors">MIN</span>
+                                        <Input 
+                                           placeholder="Giá tối thiểu..." 
+                                           className="h-10 rounded-xl bg-background border-border text-[11px] font-bold pl-4 pr-12 focus-visible:ring-indigo-500/20 shadow-sm"
+                                           value={filters.minPrice}
+                                           onChange={(e) => setFilters(f => ({...f, minPrice: e.target.value}))}
+                                        />
+                                     </div>
+                                     <div className="relative group">
+                                        <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[8px] font-black text-muted-foreground/40 group-focus-within:text-indigo-500 transition-colors">MAX</span>
+                                        <Input 
+                                           placeholder="Giá tối đa..." 
+                                           className="h-10 rounded-xl bg-background border-border text-[11px] font-bold pl-4 pr-12 focus-visible:ring-indigo-500/20 shadow-sm"
+                                           value={filters.maxPrice}
+                                           onChange={(e) => setFilters(f => ({...f, maxPrice: e.target.value}))}
+                                        />
+                                     </div>
+                                  </div>
+                               </div>
+
+                               {/* Status Switch */}
+                               <div className="flex items-center justify-between p-4 rounded-2xl bg-background/50 border border-border/40 shadow-sm transition-all hover:bg-white hover:border-indigo-100">
+                                  <div className="space-y-0.5">
+                                     <Label className="text-[11px] font-bold text-foreground">Tình trạng</Label>
+                                     <p className="text-[9px] text-muted-foreground font-medium">Chỉ sản phẩm còn hàng</p>
+                                  </div>
+                                  <Switch 
+                                     checked={filters.inStock} 
+                                     onCheckedChange={(v) => setFilters(f => ({...f, inStock: v}))}
+                                     className="data-[state=checked]:bg-indigo-600 scale-90"
+                                  />
+                               </div>
+
+                               {/* Advanced Attributes Manual Input */}
+                               <div className="space-y-3">
+                                  <div className="flex items-center justify-between px-1">
+                                     <Label className="text-[11px] font-bold text-muted-foreground">Thuộc tính sản phẩm</Label>
+                                     <Tooltip>
+                                        <TooltipTrigger asChild>
+                                           <div className="h-4 w-4 rounded-full bg-muted/50 flex items-center justify-center cursor-help relative z-20">
+                                              <Settings className="h-2.5 w-2.5 text-muted-foreground" />
+                                           </div>
+                                        </TooltipTrigger>
+                                        <TooltipPortal>
+                                           <TooltipContent side="top" sideOffset={8} className="z-[100] text-[10px] font-medium max-w-[200px] p-3 rounded-xl border-none shadow-2xl bg-slate-900 text-white">
+                                              Nhập Key (VD: RAM) và Value (VD: 16GB) để lọc chính xác.
+                                           </TooltipContent>
+                                        </TooltipPortal>
+                                     </Tooltip>
+                                  </div>
+                                  <div className="space-y-2">
+                                     <div className="relative group">
+                                        <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[8px] font-black text-muted-foreground/40 group-focus-within:text-indigo-500 transition-colors uppercase">Key</span>
+                                        <Input 
+                                           placeholder="Tên thuộc tính (VD: color)..." 
+                                           className="h-10 rounded-xl bg-background border-border text-[11px] font-bold pl-4 pr-12 focus-visible:ring-indigo-500/20 shadow-sm transition-all group-hover:border-indigo-200"
+                                           value={filters.attrKey}
+                                           onChange={(e) => setFilters(f => ({...f, attrKey: e.target.value}))}
+                                        />
+                                     </div>
+                                     <div className="relative group">
+                                        <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[8px] font-black text-muted-foreground/40 group-focus-within:text-indigo-500 transition-colors uppercase">Value</span>
+                                        <Input 
+                                           placeholder="Giá trị (VD: blue)..." 
+                                           className="h-10 rounded-xl bg-background border-border text-[11px] font-bold pl-4 pr-12 focus-visible:ring-indigo-500/20 shadow-sm transition-all group-hover:border-indigo-200"
+                                           value={filters.attrValue}
+                                           onChange={(e) => setFilters(f => ({...f, attrValue: e.target.value}))}
+                                        />
+                                     </div>
+                                  </div>
+                               </div>
+
+                               {/* Dynamic Facets from Results */}
+                               {searchResults && (
+                                 <div className="space-y-6 pt-4 border-t border-border/40">
+                                    {[
+                                       { title: "Thương hiệu", data: searchResults.facets?.brandId, labels: searchResults.facetLabels?.brandId, key: "brandId" },
+                                       { title: "Danh mục", data: searchResults.facets?.categoryId, labels: searchResults.facetLabels?.categoryId, key: "categoryId" },
+                                       { title: "Thuộc tính", data: searchResults.facets?.attributePairs, labels: null, key: "attributes" }
+                                    ].map((sec: any) => {
+                                      const hasData = sec.data && Object.keys(sec.data).length > 0;
+                                      if (!hasData) return null;
+
+                                      return (
+                                       <div key={sec.key} className="space-y-2.5">
+                                          <div className="flex items-center justify-between px-1">
+                                             <h5 className="text-[10px] font-bold text-muted-foreground/60">{sec.title}</h5>
+                                          </div>
+                                          <div className="grid grid-cols-1 gap-1.5 max-h-[160px] overflow-y-auto scrollbar-hide pr-1">
+                                             {Object.entries(sec.data as Record<string, number>).slice(0, 8).map(([facetId, facetCount]) => {
+                                                const isSelected = sec.key === 'attributes' 
+                                                  ? filters.attributes.split(',').map(s => s.trim()).filter(Boolean).includes(facetId)
+                                                  : (filters as any)[sec.key] === facetId;
+                                                  
+                                                return (
+                                                  <button 
+                                                     key={facetId} 
+                                                     onClick={() => {
+                                                       if (sec.key === 'attributes') {
+                                                         toggleAttribute(facetId);
+                                                       } else {
+                                                         setFilters(prev => ({ ...prev, [sec.key]: (prev as any)[sec.key] === facetId ? "" : facetId }));
+                                                       }
+                                                     }}
+                                                     className={cn(
+                                                       "group flex items-center justify-between px-3 py-2 rounded-xl border transition-all text-left",
+                                                       isSelected 
+                                                         ? "bg-slate-900 border-slate-900 text-white shadow-md shadow-indigo-500/10" 
+                                                         : "bg-background border-border/40 text-muted-foreground hover:border-indigo-300 hover:bg-slate-50"
+                                                     )}
+                                                   >
+                                                    <div className="flex items-center gap-2 min-w-0">
+                                                       <div className={cn(
+                                                          "h-1 w-1 rounded-full transition-all",
+                                                          isSelected ? "bg-indigo-400 scale-150" : "bg-muted-foreground/30 group-hover:bg-indigo-300"
+                                                       )} />
+                                                       <span className="text-[10px] font-semibold truncate">
+                                                          {sec.labels?.[facetId] || facetId}
+                                                       </span>
+                                                    </div>
+                                                    <span className={cn(
+                                                      "text-[8px] font-mono font-bold px-1 py-0.5 rounded",
+                                                      isSelected ? "bg-white/10 text-white" : "bg-muted text-muted-foreground"
+                                                    )}>
+                                                       {facetCount}
+                                                    </span>
+                                                  </button>
+                                                );
+                                             })}
+                                          </div>
+                                       </div>
+                                      );
+                                    })}
+                                 </div>
+                               )}
+                            </div>
+                         </div>
+                      </div>
+
+                      {/* Right: Suggestions & Top Results */}
+                      <div className="md:col-span-8 p-6 overflow-hidden flex flex-col h-[600px]">
+                         <div className="flex flex-col h-full min-h-0 space-y-6">
+                            
+                            {/* Tags / Suggestions */}
+                            {suggestions?.querySuggestions?.length > 0 && (
+                               <div className="flex-shrink-0 space-y-3">
+                                  <p className="text-[11px] font-bold text-muted-foreground/70 flex items-center gap-2">
+                                     <TrendingUp className="h-3.5 w-3.5 text-indigo-500" /> Gợi ý xu hướng
+                                  </p>
+                                  <div className="flex flex-wrap gap-2">
+                                     {suggestions.querySuggestions.map((s: string) => (
+                                        <Badge 
+                                           key={s} 
+                                           variant="secondary" 
+                                           className="px-4 py-2 rounded-full cursor-pointer hover:bg-indigo-600 hover:text-white transition-all text-xs font-bold bg-muted/40 border border-border/40"
+                                           onClick={() => setSearchQuery(s)}
+                                        >
+                                           {s}
+                                        </Badge>
+                                     ))}
+                                  </div>
+                               </div>
+                            )}
+
+                            {/* Hits List Section */}
+                            <div className="flex-1 flex flex-col min-h-0 space-y-4 overflow-hidden">
+                               <p className="text-[11px] font-bold text-muted-foreground/70 flex items-center justify-between flex-shrink-0">
+                                  <span className="flex items-center gap-2">
+                                     <Box className="h-3.5 w-3.5 text-indigo-500" /> {searchQuery ? "Kết quả tìm kiếm" : "Gợi ý cho bạn"}
+                                  </span>
+                                  {searchResults?.totalHits > 0 && (
+                                     <span className="text-indigo-600/60 font-mono tracking-tight text-[10px]">({searchResults.totalHits} kết quả)</span>
+                                  )}
+                                </p>
+
+                               <div className="flex-1 overflow-y-auto pr-2 space-y-2.5 pb-20 scrollbar-thin scrollbar-thumb-indigo-100 scrollbar-track-transparent">
+                                  {searchQuery.trim() ? (
+                                     searchResults?.hits?.length > 0 ? (
+                                        searchResults.hits.map((p: any) => (
+                                           <Link
+                                              key={p.id || p._id}
+                                              href={`/admin/products/${p.id || p._id}`}
+                                              className="flex items-center gap-4 p-3 rounded-2xl bg-muted/10 border border-transparent hover:border-indigo-100 hover:bg-white cursor-pointer transition-all group shadow-sm no-underline text-foreground"
+                                              onClick={() => {
+                                                setShowResults(false);
+                                                setSearchQuery("");
+                                              }}
+                                           >
+                                              <div className="h-14 w-14 relative rounded-xl overflow-hidden shrink-0 border border-border/50 bg-white group-hover:scale-105 transition-transform duration-500 shadow-sm">
+                                                {p.image ? (
+                                                  <Image src={p.image} alt={p.name} fill className="object-cover" />
+                                                ) : (
+                                                  <div className="w-full h-full flex items-center justify-center text-[10px] font-bold text-muted-foreground bg-muted/20">Empty</div>
+                                                )}
+                                              </div>
+                                              <div className="flex-1 min-w-0">
+                                              <p className="text-sm font-semibold truncate group-hover:text-indigo-600 transition-colors leading-snug">{p.name}</p>
+                                              <div className="flex items-center gap-3 mt-1.5 font-mono">
+                                                 <p className="text-xs font-bold text-indigo-600">
+                                                   {new Intl.NumberFormat('vi-VN').format(p.minPrice || p.price)}đ
+                                                 </p>
+                                                 <span className="w-1 h-1 rounded-full bg-border" />
+                                                 <p className="text-[10px] text-muted-foreground font-medium">ID: {(p.id || p._id).substring(0,8)}</p>
+                                              </div>
+                                           </div>
+                                              <ArrowUpRight className="h-4 w-4 text-muted-foreground opacity-0 -translate-x-2 group-hover:opacity-100 group-hover:translate-x-0 transition-all mr-2" />
+                                           </Link>
+                                        ))
+                                     ) : isSearching ? (
+                                        <div className="py-20 flex flex-col items-center justify-center gap-4 bg-muted/5 rounded-3xl border border-dashed border-border/60">
+                                           <div className="h-10 w-10 relative">
+                                              <div className="absolute inset-0 rounded-full border-2 border-indigo-100" />
+                                              <div className="absolute inset-0 rounded-full border-2 border-indigo-500 border-t-transparent animate-spin" />
+                                           </div>
+                                           <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest animate-pulse">Neural Ranking đang tìm kiếm...</p>
+                                        </div>
+                                     ) : (
+                                        <div className="py-20 flex flex-col items-center justify-center gap-3 bg-muted/5 rounded-3xl border border-dashed border-border/60">
+                                           <Activity className="h-8 w-8 text-muted-foreground/20" />
+                                           <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest opacity-40">Không tìm thấy sản phẩm phù hợp</p>
+                                        </div>
+                                     )
+                                  ) : (
+                                     <div className="py-12 space-y-10">
+                                        <div className="flex flex-col items-center text-center gap-4">
+                                           <div className="h-16 w-16 rounded-[2rem] bg-indigo-50 flex items-center justify-center text-indigo-600 shadow-inner">
+                                              <Zap className="h-8 w-8" />
+                                           </div>
+                                           <div className="space-y-1">
+                                              <h3 className="text-lg font-bold text-foreground tracking-tight">Bắt đầu tìm kiếm...</h3>
+                                           </div>
+                                        </div>
+
+                                        <div className="space-y-4">
+                                           <p className="text-[11px] font-bold text-muted-foreground/50 flex items-center gap-2 px-2">
+                                              <TrendingUp className="h-3 w-3" /> Xu hướng tìm kiếm
+                                           </p>
+                                           <div className="flex flex-wrap gap-2">
+                                              {["iphone", "laptop", "tai nghe", "macbook", "tablet", "ipad"].map((tag) => (
+                                                 <button 
+                                                    key={tag} 
+                                                    className="bg-muted/30 hover:bg-indigo-600 hover:text-white transition-all px-5 py-2.5 rounded-full text-xs font-bold border border-border/40 flex items-center gap-2 group shadow-sm"
+                                                    onClick={() => setSearchQuery(tag)}
+                                                 >
+                                                    <TrendingUp className="h-3 w-3 opacity-40 group-hover:opacity-100 transition-opacity" />
+                                                    {tag}
+                                                 </button>
+                                              ))}
+                                           </div>
+                                        </div>
+                                     </div>
+                                  )}
+                               </div>
+                            </div>
+                         </div>
+                      </div>
+                   </div>
+                </div>
               )}
             </div>
 
             {/* Right Actions */}
             <div className="flex items-center gap-2">
               {/* Dark Mode Toggle */}
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={toggleDarkMode}
-              className="rounded-full"
-            >
-              {isDarkMode ? (
-                <Sun className="w-5 h-5" />
-              ) : (
-                <Moon className="w-5 h-5" />
-              )}
-            </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={toggleDarkMode}
+                className="rounded-full"
+              >
+                {isDarkMode ? (
+                  <Sun className="w-5 h-5" />
+                ) : (
+                  <Moon className="w-5 h-5" />
+                )}
+              </Button>
               {/* User Menu */}
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>

@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo, useRef } from "react";
 import Link from "next/link";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
@@ -33,6 +33,7 @@ import { useAuth } from "@/hooks/useAuth";
 type Product = {
   _id: string;
   name: string;
+  sku?: string;
   slug: string;
   description: string;
   price: number;
@@ -106,33 +107,83 @@ export default function ProductDetailPage() {
   const { addItem } = useCart();
   const { isAuthenticated } = useAuth();
 
+  const searchParams = useSearchParams();
+  const nameQuery = searchParams.get('name');
+
   useEffect(() => {
     const fetchProduct = async () => {
       if (!idParam) return;
       try {
         setLoading(true);
-        const res = await productApi.getProductDetail(idParam);
-        const data = res.data.data || res.data;
         
-        // Safety check for active category/brand or product status
-        if (!data || (data.category && data.category.isActive === false) || (data.brand && data.brand.isActive === false)) {
-            toast({
-              title: "Thông báo",
-              description: "Sản phẩm hiện không khả dụng!",
-              variant: "destructive",
-            });
+        // Step 1: Try direct access (standard Slug route)
+        try {
+          const res = await productApi.getProductDetail(idParam);
+          const data = res.data.data || res.data;
+          
+          if (!data || (data.category && data.category.isActive === false) || (data.brand && data.brand.isActive === false)) {
+            toast({ title: "Thông báo", description: "Sản phẩm hiện không khả dụng!", variant: "destructive" });
             router.push("/products");
             return;
-        }
+          }
 
-        setProduct(data);
+          setProduct(data);
+          return; // Success!
+        } catch (detailErr: any) {
+          // If NOT a 404, throw it to the outer catch
+          if (detailErr?.response?.status !== 404) throw detailErr;
+          
+          // Step 2: If 404, we might have an ID instead of a Slug. Start Resolution Strategies.
+          console.log("Direct access failed with 404, attempting ID resolution strategies...");
+          
+          // Strategy A: Resolve via Search V2 (MeiliSearch)
+          try {
+            // @ts-ignore - searchV2 exists in productApi
+            const searchRes = await productApi.searchV2({ q: idParam, limit: 1 });
+            const list = searchRes?.data?.hits || [];
+            if (Array.isArray(list) && list.length > 0 && list[0].slug) {
+              if (list[0].slug !== idParam) {
+                console.log("Resolved ID via Search V2 Redirecting to:", list[0].slug);
+                router.replace(`/products/${list[0].slug}${nameQuery ? `?name=${encodeURIComponent(nameQuery)}` : ''}`);
+                return;
+              }
+            }
+          } catch (e) {}
+
+          // Strategy B: Resolve via MongoDB Keyword (Search by ID)
+          try {
+            const mongoRes = await productApi.getProducts({ keyword: idParam, limit: 1 });
+            const mongoList = mongoRes?.data?.data || mongoRes?.data || [];
+            if (Array.isArray(mongoList) && mongoList.length > 0 && mongoList[0].slug) {
+                if (mongoList[0].slug !== idParam) {
+                  console.log("Resolved ID via Mongo Redirecting to:", mongoList[0].slug);
+                  router.replace(`/products/${mongoList[0].slug}${nameQuery ? `?name=${encodeURIComponent(nameQuery)}` : ''}`);
+                  return;
+                }
+            }
+          } catch (e) {}
+
+          // Strategy C: Resolve via Name Query (Forwarded from Orders)
+          if (nameQuery) {
+            try {
+              const nameRes = await productApi.getProducts({ keyword: nameQuery, limit: 1 });
+              const nameList = nameRes?.data?.data || nameRes?.data || [];
+              if (Array.isArray(nameList) && nameList.length > 0 && nameList[0].slug) {
+                if (nameList[0].slug !== idParam) {
+                  console.log("Resolved ID via Name Query Redirecting to:", nameList[0].slug);
+                  router.replace(`/products/${nameList[0].slug}`);
+                  return;
+                }
+              }
+            } catch (e) {}
+          }
+
+          // If all strategies fail
+          throw new Error("Không tìm thấy sản phẩm");
+        }
       } catch (error) {
-        console.error("Failed to fetch product", error);
-        toast({
-          title: "Lỗi",
-          description: "Không thể tải thông tin sản phẩm",
-          variant: "destructive",
-        });
+        console.error("Failed to load product", error);
+        toast({ title: "Lỗi", description: "Không thể tải thông tin sản phẩm này!", variant: "destructive" });
         router.push("/products");
       } finally {
         setLoading(false);
@@ -140,7 +191,7 @@ export default function ProductDetailPage() {
     };
 
     fetchProduct();
-  }, [idParam, router]);
+  }, [idParam, router, nameQuery]);
 
   useEffect(() => {
     const fetchReviews = async () => {
@@ -485,15 +536,16 @@ export default function ProductDetailPage() {
             )}
           </div>
 
-          {/* Product Info */}
-          <div className="space-y-6">
-            <div>
-              <p className="text-sm text-primary font-medium mb-2">{product.brand?.name}</p>
-              <h1 className="text-2xl lg:text-3xl font-bold text-foreground mb-3">
+          <div className="space-y-8">
+            <div className="space-y-2">
+              <div className="flex items-center gap-3 flex-wrap">
+                <p className="text-sm text-primary font-bold tracking-wide uppercase">{product.brand?.name}</p>
+              </div>
+              <h1 className="text-2xl lg:text-4.5xl font-black text-foreground leading-tight tracking-tight">
                 {product.name}
               </h1>
 
-              <div className="flex items-center gap-4 flex-wrap">
+              <div className="flex items-center gap-4 flex-wrap pt-2">
                 {product.reviewCount > 0 && (
                   <div className="flex items-center gap-2 bg-secondary/50 px-3 py-1.5 rounded-full border border-border/40">
                     <div className="flex items-center gap-0.5">
@@ -526,21 +578,30 @@ export default function ProductDetailPage() {
               </div>
             </div>
 
-            <div className="flex items-end gap-3">
-              <span className="text-3xl lg:text-4xl font-bold text-primary">
+            <div className="flex items-end gap-3 py-2">
+              <span className="text-3xl lg:text-4xl font-black text-primary">
                 {formatPrice(currentPrice)}
               </span>
               {oldPriceToDisplay && oldPriceToDisplay > currentPrice && (
-                <>
-                  <span className="text-xl text-muted-foreground line-through">
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="text-xl text-muted-foreground line-through decoration-destructive/30">
                     {formatPrice(oldPriceToDisplay)}
                   </span>
-                  <Badge variant="secondary" className="bg-destructive/10 text-destructive">
+                  <Badge variant="secondary" className="bg-destructive/10 text-destructive font-bold">
                     -{discountPercent}%
                   </Badge>
-                </>
+                </div>
               )}
             </div>
+
+            {(currentVariant?.sku || product?.sku) && (
+              <div className="flex items-center gap-2 pt-0.5">
+                <span className="text-[10px] font-bold text-muted-foreground/60 uppercase tracking-widest">SKU:</span>
+                <Badge variant="outline" className="text-[10px] font-black px-2 py-0 rounded-md border-primary/20 text-primary bg-primary/5 uppercase font-mono">
+                  {currentVariant?.sku || product?.sku}
+                </Badge>
+              </div>
+            )}
 
 
             {product.variants && product.variants.length > 0 && Object.keys(attributeGroups).length > 0 && (

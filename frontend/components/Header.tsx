@@ -21,6 +21,7 @@ import { useRouter } from "next/navigation";
 import { useTheme } from "@/context/ThemeContext";
 import { useCart } from "@/hooks/useCart";
 import { CartSidebar } from "./CartSidebar";
+import { SearchHub } from "./SearchHub";
 
 interface HeaderProps {
   cartItemCount?: number;
@@ -34,22 +35,12 @@ const navItems = [
   { label: "Hỗ trợ", href: "/support" },
 ];
 
-const searchSuggestions = [
-  "iPhone 15 Pro Max",
-  "MacBook Air M3",
-  "Samsung Galaxy S24",
-  "iPad Pro",
-  "AirPods Pro",
-];
-
 export default function Header({
   cartItemCount: manualCartItemCount,
   onCartClick,
 }: HeaderProps) {
   const { isDarkMode, toggleDarkMode } = useTheme();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [showSuggestions, setShowSuggestions] = useState(false);
   const { user, isAuthenticated, signOut } = useAuth();
   const { 
     cartItems, 
@@ -75,10 +66,6 @@ export default function Header({
       setIsCartOpen(true);
     }
   };
-
-  const filteredSuggestions = searchSuggestions.filter((item) =>
-    item.toLowerCase().includes(searchQuery.toLowerCase())
-  );
 
   const handleLogout = async () => {
     await signOut();
@@ -120,47 +107,8 @@ export default function Header({
             ))}
           </nav>
 
-          {/* Search Bar */}
-          <div className="hidden md:flex flex-1 max-w-md mx-8 relative">
-            <div className="relative w-full">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-              <Input
-                type="text"
-                placeholder="Tìm kiếm sản phẩm..."
-                suppressHydrationWarning
-                className="search-input pl-10 pr-4 w-full rounded-full"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                onFocus={() => setShowSuggestions(true)}
-                onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
-              />
-              <AnimatePresence>
-                {showSuggestions &&
-                  searchQuery &&
-                  filteredSuggestions.length > 0 && (
-                    <motion.div
-                      initial={{ opacity: 0, y: -10 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, y: -10 }}
-                      className="absolute top-full left-0 right-0 mt-2 bg-card rounded-xl shadow-lg border border-border overflow-hidden"
-                    >
-                      {filteredSuggestions.map((suggestion, index) => (
-                        <button
-                          key={index}
-                          type="button"
-                          className="w-full px-4 py-3 text-left hover:bg-primary hover:text-primary-foreground transition-all text-sm"
-                          onMouseDown={(e) => e.preventDefault()} // tránh blur trước khi click
-                          onClick={() => setSearchQuery(suggestion)}
-                        >
-                          <Search className="inline-block w-4 h-4 mr-2 text-muted-foreground" />
-                          {suggestion}
-                        </button>
-                      ))}
-                    </motion.div>
-                  )}
-              </AnimatePresence>
-            </div>
-          </div>
+          {/* Search Hub (Advanced AI Search) */}
+          <SearchHub />
 
           {/* Actions */}
           <div className="flex items-center gap-2">
@@ -294,20 +242,6 @@ export default function Header({
                 <Menu className="w-5 h-5" />
               )}
             </Button>
-          </div>
-        </div>
-
-        {/* Mobile Search */}
-        <div className="md:hidden pb-4">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-            <Input
-              type="text"
-              placeholder="Tìm kiếm sản phẩm..."
-              className="search-input pl-10 pr-4 w-full rounded-full"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-            />
           </div>
         </div>
       </div>

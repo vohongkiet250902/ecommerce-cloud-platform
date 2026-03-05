@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { 
   Package, 
   Search, 
@@ -99,14 +100,9 @@ export default function MyOrdersPage() {
     return "";
   };
 
-  // Helper to get variant display info from item
+  // Helper to get variant display info from item (using data provided by BE)
   const getVariantDisplay = (item: any) => {
-    if (!item.attributes || item.attributes.length === 0) {
-      return item.variantName || "";
-    }
-    return item.attributes
-      .map((attr: any) => `${attr.key || attr.name}: ${attr.value || attr.val}`)
-      .join(" - ");
+    return item.sku && item.sku !== 'DEFAULT' ? `SKU: ${item.sku}` : "";
   };
 
   // Review state
@@ -160,115 +156,7 @@ export default function MyOrdersPage() {
       const limit = res.data?.limit || responseData.limit || 5;
       setTotalPages(Math.ceil(total / limit) || 1);
 
-      // Background enrichment - Optimized product lookup
-      if (fetchedOrders.length > 0) {
-        Promise.all(fetchedOrders.map(async (order: any) => {
-          const orderIdStr = String(order._id || order.id);
-          const enrichedItems = await Promise.all(order.items.map(async (item: any) => {
-            try {
-              let pData = null;
-              const productIdValue = item.productId || item.product;
-              const pId = typeof productIdValue === 'string' ? productIdValue : (productIdValue?._id || productIdValue?.id || productIdValue?.slug);
-              
-              // Strategy 1: Try by slug/id via getProductDetail
-              if (pId) {
-                try {
-                  const res = await productApi.getProductDetail(pId);
-                  pData = res?.data?.data || res?.data || null;
-                  // Ensure pData is valid
-                  if (pData && (!pData._id && !pData.id)) {
-                    pData = null;
-                  }
-                } catch (err: any) {
-                  console.warn(`Failed to get product by ID ${pId}:`, err?.message);
-                }
-              }
-              
-              // Strategy 2: SKU search (more reliable for variant matching)
-              if (!pData && item.sku && item.sku !== 'DEFAULT') {
-                try {
-                  const res = await productApi.getProducts({ keyword: item.sku, limit: 5 });
-                  const list = res?.data?.data || res?.data || [];
-                  if (Array.isArray(list) && list.length > 0) {
-                    pData = list[0];
-                  }
-                } catch (err: any) {
-                  console.warn(`Failed to search by SKU ${item.sku}:`, err?.message);
-                }
-              }
-              
-              // Strategy 3: Product name search
-              if (!pData && item.name) {
-                try {
-                  const searchName = item.name.split(' ').slice(0, 3).join(' ');
-                  const res = await productApi.getProducts({ keyword: searchName, limit: 5 });
-                  const list = res?.data?.data || res?.data || [];
-                  if (Array.isArray(list) && list.length > 0) {
-                    pData = list[0];
-                  }
-                } catch (err: any) {
-                  console.warn(`Failed to search by name ${item.name}:`, err?.message);
-                }
-              }
-              
-              // Enrich item with product data and variant info
-              if (pData && (pData._id || pData.id)) {
-                const variants = pData.variants || [];
-                const itemSkuStr = String(item.sku || "").trim().toLowerCase();
-                const itemVariantId = String(item.variantId || "").trim();
-                
-                // Match variant by SKU or variantId
-                let matchedVariant = null;
-                if (variants.length > 0) {
-                  matchedVariant = variants.find((v: any) => 
-                    String(v.sku || "").trim().toLowerCase() === itemSkuStr
-                  );
-                  
-                  if (!matchedVariant && itemVariantId) {
-                    matchedVariant = variants.find((v: any) => 
-                      String(v._id || v.id || "").trim() === itemVariantId
-                    );
-                  }
-                }
-                
-                // Build enriched attributes
-                let enrichedAttributes = [];
-                if (matchedVariant?.attributes && Array.isArray(matchedVariant.attributes) && matchedVariant.attributes.length > 0) {
-                  enrichedAttributes = matchedVariant.attributes;
-                } else if (item.attributes && Array.isArray(item.attributes)) {
-                  enrichedAttributes = item.attributes;
-                }
-                
-                // Get image from variant or product
-                const imageUrl = matchedVariant?.image?.url || matchedVariant?.imageUrl || item.imageUrl || (pData.images && pData.images[0]?.url) || null;
-                
-                return {
-                  ...item,
-                  attributes: enrichedAttributes,
-                  variantName: matchedVariant?.name || matchedVariant?.title || item.variantName || "",
-                  imageUrl: imageUrl,
-                  slug: pData.slug,
-                  productId: pData._id || pData.id || pId
-                };
-              }
-            } catch (err) {
-              console.warn("Item enrichment failed:", item.name, err);
-            }
-            return item;
-          }));
-          return { orderId: orderIdStr, items: enrichedItems };
-        })).then(enrichmentResults => {
-          setOrders(prev => {
-             return prev.map(originalOrder => {
-               const oId = String(originalOrder._id || originalOrder.id);
-               const result = enrichmentResults.find(r => r.orderId === oId);
-               return result ? { ...originalOrder, items: result.items } : originalOrder;
-             });
-          });
-        }).catch(err => {
-          console.error("Error during background enrichment:", err);
-        });
-      }
+      // Enrichment logic removed as per user request to only show BE data
     } catch (error) {
       console.error("Failed to fetch orders", error);
       toast({
@@ -282,110 +170,10 @@ export default function MyOrdersPage() {
     }
   };
 
-  const handleViewOrderDetail = async (order: any) => {
+  const handleViewOrderDetail = (order: any) => {
     setSelectedOrderDetail(order);
     setIsDetailModalOpen(true);
-    setIsEnrichingDetail(true);
-
-    try {
-      const enrichedItems = await Promise.all(
-        order.items.map(async (item: any) => {
-          try {
-            let pData = null;
-            const productIdValue = item.productId || item.product;
-            const pId = typeof productIdValue === 'string' ? productIdValue : (productIdValue?._id || productIdValue?.id || productIdValue?.slug);
-            
-            // Strategy 1: Try by slug/id via getProductDetail
-            if (pId) {
-              try {
-                const res = await productApi.getProductDetail(pId);
-                pData = res?.data?.data || res?.data || null;
-                if (pData && (!pData._id && !pData.id)) {
-                  pData = null;
-                }
-              } catch (err: any) {
-                console.warn(`Failed to get product by ID ${pId}:`, err?.message);
-              }
-            }
-            
-            // Strategy 2: SKU search
-            if (!pData && item.sku && item.sku !== 'DEFAULT') {
-              try {
-                const res = await productApi.getProducts({ keyword: item.sku, limit: 5 });
-                const list = res?.data?.data || res?.data || [];
-                if (Array.isArray(list) && list.length > 0) pData = list[0];
-              } catch (err: any) {
-                console.warn(`Failed to search by SKU ${item.sku}:`, err?.message);
-              }
-            }
-            
-            // Strategy 3: Product name search
-            if (!pData && item.name) {
-              try {
-                const searchName = item.name.split(' ').slice(0, 3).join(' ');
-                const res = await productApi.getProducts({ keyword: searchName, limit: 5 });
-                const list = res?.data?.data || res?.data || [];
-                if (Array.isArray(list) && list.length > 0) pData = list[0];
-              } catch (err: any) {
-                console.warn(`Failed to search by name ${item.name}:`, err?.message);
-              }
-            }
-
-            if (pData && (pData._id || pData.id)) {
-              const variants = pData.variants || [];
-              const itemSkuStr = String(item.sku || "").trim().toLowerCase();
-              const itemVariantId = String(item.variantId || "").trim();
-              
-              // Match variant by SKU or variantId
-              let matchedVariant = null;
-              if (variants.length > 0) {
-                matchedVariant = variants.find((v: any) => 
-                  String(v.sku || "").trim().toLowerCase() === itemSkuStr
-                );
-                
-                if (!matchedVariant && itemVariantId) {
-                  matchedVariant = variants.find((v: any) => 
-                    String(v._id || v.id || "").trim() === itemVariantId
-                  );
-                }
-              }
-              
-              // Build enriched attributes
-              let enrichedAttributes = [];
-              if (matchedVariant?.attributes && Array.isArray(matchedVariant.attributes) && matchedVariant.attributes.length > 0) {
-                enrichedAttributes = matchedVariant.attributes;
-              } else if (item.attributes && Array.isArray(item.attributes)) {
-                enrichedAttributes = item.attributes;
-              }
-              
-              // Get image from variant or product
-              const imageUrl = matchedVariant?.image?.url || matchedVariant?.imageUrl || item.imageUrl || (pData.images && pData.images[0]?.url);
-
-              return {
-                ...item,
-                attributes: enrichedAttributes,
-                imageUrl: imageUrl,
-                slug: pData.slug,
-                variantName: matchedVariant?.name || matchedVariant?.title || item.variantName || "",
-                productId: pData._id || pData.id || pId
-              };
-            }
-          } catch (e) {
-            console.error("Error processing item for detail enrichment:", item.name, e);
-          }
-          return item;
-        })
-      );
-
-      setSelectedOrderDetail({
-        ...order,
-        items: enrichedItems
-      });
-    } catch (error) {
-      console.error("Error enriching order detail", error);
-    } finally {
-      setIsEnrichingDetail(false);
-    }
+    setIsEnrichingDetail(false);
   };
 
   useEffect(() => {
@@ -524,7 +312,7 @@ export default function MyOrdersPage() {
     <div className="min-h-screen bg-secondary/30 dark:bg-background flex flex-col">
       <Header />
       <main className="flex-1 container mx-auto px-4 py-8 lg:py-12">
-        <div className="max-w-5xl mx-auto space-y-8">
+        <div className="max-w-4xl mx-auto space-y-6">
           <div className="flex flex-col gap-4">
             <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="flex items-center gap-1 cursor-pointer group w-fit" onClick={() => router.push("/")}>
               <Button variant="ghost" size="sm" className="rounded-full h-10 w-10 p-0 group-hover:bg-primary/10 group-hover:text-primary transition-all duration-300 active:scale-95">
@@ -572,89 +360,82 @@ export default function MyOrdersPage() {
                   return (
                     <motion.div key={order._id} layout initial={{ opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95 }} transition={{ type: "spring", stiffness: 260, damping: 20, delay: idx * 0.05 }}>
                       <Card className="rounded-3xl border-none shadow-sm hover:shadow-xl transition-all duration-500 overflow-hidden bg-card/80 backdrop-blur-sm group border border-transparent hover:border-primary/20">
-                        <div className="p-6 border-b border-border/50 flex flex-wrap items-center justify-between gap-4 bg-muted/20">
-                          <div className="flex items-center gap-4">
-                            <div className={`w-12 h-12 rounded-2xl flex items-center justify-center transition-transform duration-500 group-hover:scale-110 ${status.color.split(' ')[0]}`}><Icon className="h-6 w-6" /></div>
+                        <div className="p-4 sm:px-5 border-b border-border/50 flex flex-wrap items-center justify-between gap-3 bg-muted/20">
+                          <div className="flex items-center gap-3">
+                            <div className={`w-10 h-10 rounded-xl flex items-center justify-center transition-transform duration-500 group-hover:scale-105 ${status.color.split(' ')[0]}`}><Icon className="h-5 w-5" /></div>
                             <div>
-                              <p className="text-[10px] font-black text-muted-foreground uppercase tracking-[0.2em]">Mã đơn hàng</p>
-                              <p className="font-mono font-bold text-lg">#{order._id.substring(order._id.length - 8).toUpperCase()}</p>
+                              <p className="text-[9px] font-black text-muted-foreground uppercase tracking-[0.2em]">Mã đơn hàng</p>
+                              <p className="font-mono font-bold text-base">#{order._id.substring(order._id.length - 8).toUpperCase()}</p>
                             </div>
                           </div>
                           <div className="flex flex-wrap items-center gap-3">
                             <div className="text-right hidden sm:block mr-2">
-                              <p className="text-[10px] font-black text-muted-foreground uppercase tracking-[0.2em]">Ngày đặt</p>
-                              <p className="text-sm font-bold">{format(new Date(order.createdAt), "dd/MM/yyyy HH:mm", { locale: vi })}</p>
+                              <p className="text-[9px] font-black text-muted-foreground uppercase tracking-[0.2em]">Ngày đặt</p>
+                              <p className="text-xs font-bold">{format(new Date(order.createdAt), "dd/MM/yyyy HH:mm", { locale: vi })}</p>
                             </div>
-                            <Badge className={`rounded-full px-5 py-1.5 border font-bold text-xs uppercase tracking-wider ${status.color}`}>{status.label}</Badge>
+                            <Badge className={`rounded-full px-4 py-1 border font-bold text-[10px] uppercase tracking-wider ${status.color}`}>{status.label}</Badge>
                           </div>
                         </div>
                         <CardContent className="p-0">
                           <div className="divide-y divide-border/50">
-                            {order.items.map((item: any, i: number) => (
-                              <div key={i} className="p-6 flex gap-6 hover:bg-primary/5 transition-colors duration-300">
-                                <div className="w-24 h-24 rounded-2xl bg-muted overflow-hidden flex-shrink-0 border border-border/50 relative">
-                                  {item.imageUrl ? <img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover transition-transform duration-700" /> : <div className="w-full h-full flex items-center justify-center text-muted-foreground/20"><Package className="h-10 w-10" /></div>}
-                                </div>
-                                <div className="flex-1 min-w-0 flex flex-col justify-center">
-                                  <h4 className="font-extrabold text-lg truncate group-hover:text-primary transition-colors duration-300">{item.name}</h4>
-                                    {item.sku && item.sku !== 'DEFAULT' && (
-                                      <div className="flex flex-wrap items-center gap-2 mt-2">
-                                        {item.attributes && item.attributes.length > 0 ? (
-                                          item.attributes.map((attr: any, idx: number) => (
-                                            <span key={idx} className="text-[10px] bg-primary/10 text-primary px-2.5 py-1 rounded-md font-bold border border-primary/20">
-                                              {attr.key || attr.name}: {attr.value || attr.val}
-                                            </span>
-                                          ))
-                                        ) : item.variantName ? (
-                                          <span className="text-[10px] bg-primary/10 text-primary px-2.5 py-1 rounded-md font-bold border border-primary/20">{item.variantName}</span>
-                                        ) : null}
-                                      </div>
-                                    )}
-                                  <div className="flex items-center justify-between mt-3">
-                                    <p className="text-sm font-medium bg-secondary/50 px-3 py-1 rounded-full">Số lượng: <span className="font-black">x{item.quantity}</span></p>
-                                    <div className="flex items-center gap-4">
-                                      {order.status === 'completed' && (
-                                        reviewedItems[`${item.productId}-${item.sku}`] ? (
-                                          <div className="flex items-center gap-1.5 bg-warning/10 px-3 py-1.5 rounded-full border border-warning/20">
-                                            <span className="text-[10px] font-black text-warning uppercase">Đã đánh giá</span>
-                                            <div className="flex gap-0.5 ml-1">{[...Array(reviewedItems[`${item.productId}-${item.sku}`])].map((_, i) => <Star key={i} className="w-2.5 h-2.5 fill-warning text-warning" />)}</div>
-                                          </div>
-                                        ) : (
-                                          <Button variant="outline" size="sm" className="h-8 rounded-full border-primary/20 text-primary hover:bg-primary hover:text-white text-[10px] font-bold uppercase transition-all" onClick={() => handleOpenReviewModal(item)}><Star className="w-3 h-3 mr-1 fill-current" />Đánh giá</Button>
-                                        )
-                                      )}
-                                      <p className="font-black text-xl text-primary">{formatPrice(item.price)}</p>
+                            {order.items.map((item: any, i: number) => {
+                              return (
+                                <div key={i} className="p-4 sm:px-5 flex gap-5">
+                                  <div className="w-16 h-16 rounded-xl bg-muted overflow-hidden flex-shrink-0 border border-border/50 relative block">
+                                    {item.imageUrl ? <img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-muted-foreground/20"><Package className="h-7 w-7" /></div>}
+                                  </div>
+                                  <div className="flex-1 min-w-0 flex flex-col justify-center">
+                                    <div className="flex justify-between items-start gap-3">
+                                       <div className="block min-w-0 flex-1">
+                                         <h4 className="font-bold text-base truncate">{item.name}</h4>
+                                       </div>
+                                       <p className="font-black text-base text-primary whitespace-nowrap">{formatPrice(item.price)}</p>
+                                    </div>
+                                    <div className="flex items-center justify-between mt-1">
+                                       <div className="flex items-center gap-3">
+                                           {item.sku && item.sku !== 'DEFAULT' && (
+                                               <span className="text-[9px] bg-primary/5 text-primary px-2 py-0.5 rounded-md font-mono border border-primary/20">SKU: {item.sku}</span>
+                                           )}
+                                           <p className="text-xs font-bold text-muted-foreground">Số lượng: <span className="text-foreground">x{item.quantity}</span></p>
+                                       </div>
+                                       {order.status === 'completed' && !reviewedItems[`${item.productId}-${item.sku}`] && (
+                                           <Button variant="outline" size="sm" className="h-7 px-3 rounded-full border-primary/20 text-primary hover:bg-primary hover:text-white text-[9px] font-bold uppercase transition-all" onClick={() => handleOpenReviewModal(item)}><Star className="w-3 h-3 mr-1 fill-current" />Đánh giá</Button>
+                                       )}
+                                       {reviewedItems[`${item.productId}-${item.sku}`] && (
+                                           <div className="flex items-center gap-1 bg-warning/5 px-2 py-0.5 rounded-full border border-warning/10">
+                                               <Star className="w-2.5 h-2.5 fill-warning text-warning" />
+                                               <span className="text-[9px] font-bold text-warning">{reviewedItems[`${item.productId}-${item.sku}`]}</span>
+                                           </div>
+                                       )}
                                     </div>
                                   </div>
                                 </div>
-                              </div>
-                            ))}
-                          </div>
+                            );
+                          })}
+                        </div>
                         </CardContent>
-                        <div className="p-6 bg-secondary/5 flex flex-col sm:flex-row items-center justify-between gap-6 border-t border-border/50">
+                        <div className="p-4 sm:px-5 bg-secondary/5 flex flex-col sm:flex-row items-center justify-between gap-4 border-t border-border/50">
                           <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 rounded-full bg-card flex items-center justify-center border border-border/50 shadow-sm"><AlertCircle className="h-5 w-5 text-muted-foreground" /></div>
+                            <div className="w-8 h-8 rounded-full bg-card flex items-center justify-center border border-border/50 shadow-sm"><AlertCircle className="h-4 w-4 text-muted-foreground" /></div>
                             <div>
-                                <p className="text-[10px] font-black text-muted-foreground uppercase tracking-wider">Thanh toán</p>
-                                <p className="text-sm"><span className="font-bold">{(order.paymentMethod || "cod").toUpperCase()}</span>{order.paymentStatus === 'paid' && <span className="ml-2 text-success font-black text-xs">● ĐÃ THANH TOÁN</span>}</p>
+                                <p className="text-[9px] font-black text-muted-foreground uppercase tracking-wider">Thanh toán</p>
+                                <p className="text-xs font-bold leading-tight uppercase">{(order.paymentMethod || "cod")} {order.paymentStatus === 'paid' && <span className="ml-1 text-success">● ĐÃ TRẢ</span>}</p>
                             </div>
                           </div>
-                          <div className="flex items-center gap-6 w-full sm:w-auto">
+                          <div className="flex items-center gap-5 w-full sm:w-auto">
                             <div className="text-right">
-                              <p className="text-[10px] font-black text-muted-foreground uppercase tracking-[0.2em]">Tổng giá trị</p>
-                              <p className="text-2xl font-black text-primary leading-tight drop-shadow-sm">{formatPrice(order.totalAmount)}</p>
+                              <p className="text-[9px] font-black text-muted-foreground uppercase tracking-widest">Toàn bộ</p>
+                              <p className="text-xl font-black text-primary leading-tight">{formatPrice(order.totalAmount)}</p>
                             </div>
                             <div className="flex gap-2">
-                              <Button variant="outline" size="default" className="rounded-2xl border-primary/20 text-primary hover:bg-primary/10 font-bold px-6 h-11 transition-all duration-300 active:scale-95 flex items-center gap-2 cursor-pointer" onClick={() => handleViewOrderDetail(order)}>
-                                <Eye className="h-4 w-4" /><span className="hidden sm:inline">Chi tiết</span><span className="sm:hidden text-xs">Chi tiết</span>
+                              <Button variant="outline" size="sm" className="rounded-xl border-primary/20 text-primary hover:bg-primary hover:text-white hover:border-primary font-bold px-4 h-9 text-xs transition-all duration-300 active:scale-95 flex items-center gap-2 cursor-pointer hover:shadow-md hover:shadow-primary/20" onClick={() => handleViewOrderDetail(order)}>
+                                <Eye className="h-3.5 w-3.5" />Chi tiết
                               </Button>
                               {(order.paymentStatus === 'failed' || (order.paymentMethod?.toLowerCase() === 'vnpay' && order.paymentStatus !== 'paid' && order.status !== 'cancelled')) && (
-                                <Button variant="default" size="default" className="rounded-2xl bg-primary hover:bg-primary/90 text-primary-foreground font-bold px-8 h-11 transition-all duration-300 active:scale-95 shadow-lg shadow-primary/20 flex items-center gap-2 cursor-pointer" onClick={() => handleRetryPayment(order._id)}>
-                                  <CreditCard className="h-4 w-4" />Thanh toán lại
-                                </Button>
+                                <Button variant="default" size="sm" className="rounded-xl bg-primary hover:bg-primary/90 text-primary-foreground font-bold px-5 h-9 text-xs transition-all active:scale-95 shadow-md shadow-primary/10 cursor-pointer" onClick={() => handleRetryPayment(order._id)}>Thanh toán lại</Button>
                               )}
                               {order.status === 'pending' && (
-                                <Button variant="outline" size="default" className="rounded-2xl border-destructive/20 text-destructive hover:bg-destructive hover:text-destructive-foreground font-bold px-6 h-11 transition-all duration-300 active:scale-95 cursor-pointer" onClick={() => handleCancelOrder(order._id)}>Hủy đơn hàng</Button>
+                                <Button variant="outline" size="sm" className="rounded-xl border-destructive/20 text-destructive hover:bg-destructive hover:text-destructive-foreground font-bold px-4 h-9 text-xs transition-all active:scale-95 cursor-pointer" onClick={() => handleCancelOrder(order._id)}>Hủy đơn</Button>
                               )}
                             </div>
                           </div>
@@ -685,89 +466,104 @@ export default function MyOrdersPage() {
       <Dialog open={isDetailModalOpen} onOpenChange={setIsDetailModalOpen}>
           <DialogContent className="max-w-3xl p-0 overflow-hidden border-none rounded-[2rem] bg-background/80 backdrop-blur-2xl shadow-2xl">
               <div className="flex flex-col h-[85vh] md:h-auto max-h-[90vh]">
-                  <div className="relative h-40 bg-primary/10 flex flex-col justify-end p-8 md:p-12 overflow-hidden">
-                      <div className="absolute top-0 right-0 p-8 opacity-10"><ShoppingBag className="w-32 h-32 text-primary" /></div>
-                      <div className="relative z-10 space-y-2">
-                           <div className="flex items-center gap-3">
-                              <Badge className="rounded-full px-4 py-1 font-bold bg-primary text-primary-foreground border-none">#{selectedOrderDetail?._id?.substring(selectedOrderDetail._id.length - 8).toUpperCase() || 'ORDER'}</Badge>
-                              {selectedOrderDetail && <Badge className={cn("rounded-full px-4 py-1 font-bold uppercase tracking-wider border-none", statusMap[selectedOrderDetail.status as OrderStatus]?.color || "")}>{statusMap[selectedOrderDetail.status as OrderStatus]?.label || ""}</Badge>}
+                  <div className="relative h-28 bg-primary/5 dark:bg-primary/10 flex flex-col justify-center px-6 md:px-10 overflow-hidden">
+                      <div className="absolute -top-4 -right-4 opacity-5"><ShoppingBag className="w-24 h-24 text-primary" /></div>
+                      <Button variant="ghost" size="icon" className="absolute top-4 right-4 z-50 rounded-full w-8 h-8 hover:bg-black/5 dark:hover:bg-white/5 transition-all flex items-center justify-center group" onClick={() => setIsDetailModalOpen(false)}>
+                          <X className="w-4 h-4 opacity-40 group-hover:opacity-100 transition-all group-hover:rotate-90" />
+                      </Button>
+                      <div className="relative z-10">
+                           <div className="flex items-center gap-2 mb-1">
+                              <Badge className="rounded-full px-3 py-0.5 text-[10px] font-black bg-primary text-primary-foreground border-none">#{selectedOrderDetail?._id?.substring(selectedOrderDetail._id.length - 8).toUpperCase() || 'ORDER'}</Badge>
+                              {selectedOrderDetail && <Badge className={cn("rounded-full px-3 py-0.5 text-[10px] font-black uppercase tracking-wider border-none", statusMap[selectedOrderDetail.status as OrderStatus]?.color || "")}>{statusMap[selectedOrderDetail.status as OrderStatus]?.label || ""}</Badge>}
                            </div>
                            <DialogHeader className="p-0 text-left sr-only"><DialogTitle>Chi tiết đơn hàng</DialogTitle><DialogDescription>Xem thông tin chi tiết về đơn hàng của bạn</DialogDescription></DialogHeader>
-                           <h2 className="text-3xl font-bold tracking-tight">Chi tiết đơn hàng</h2>
-                           {selectedOrderDetail && <p className="text-muted-foreground font-medium flex items-center gap-2"><Calendar className="w-4 h-4" />{format(new Date(selectedOrderDetail.createdAt), "cccc, dd MMMM yyyy", { locale: vi })}</p>}
+                           <h2 className="text-xl md:text-2xl font-black tracking-tight">Chi tiết đơn hàng</h2>
+                           {selectedOrderDetail && <p className="text-[11px] font-bold text-muted-foreground flex items-center gap-1.5 opacity-70"><Calendar className="w-3 h-3" />{format(new Date(selectedOrderDetail.createdAt), "cccc, dd/MM/yyyy", { locale: vi })}</p>}
                       </div>
                   </div>
-                  <div className="flex-1 overflow-y-auto px-8 md:px-12 py-8 space-y-10 custom-scrollbar">
-                      <div className="grid md:grid-cols-2 gap-8">
-                          <div className="space-y-4">
-                              <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-primary/60"><MapPin className="w-4 h-4" />Địa chỉ nhận hàng</div>
-                              <Card className="rounded-2xl border-border/40 bg-card/50 p-6 space-y-3 shadow-sm">
-                                  <div className="flex items-center gap-3"><div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-primary"><User className="w-4 h-4" /></div><p className="font-bold text-base">{selectedOrderDetail?.shippingInfo?.receiverName || user?.fullName}</p></div>
-                                  <div className="flex items-center gap-3 pl-11"><Smartphone className="w-3.5 h-3.5 text-muted-foreground" /><p className="text-sm font-medium">{selectedOrderDetail?.shippingInfo?.phone || (user as any)?.phone || "Chưa cập nhật"}</p></div>
-                                  <div className="flex items-start gap-3 pl-11"><MapPin className="w-3.5 h-3.5 mt-0.5 text-muted-foreground" />
-                                      <div className="text-sm font-medium leading-relaxed"><p>{selectedOrderDetail?.shippingInfo?.street}</p><p className="text-muted-foreground text-xs mt-1">{selectedOrderDetail?.shippingInfo?.ward}, {selectedOrderDetail?.shippingInfo?.district}</p><p className="text-muted-foreground text-xs">{selectedOrderDetail?.shippingInfo?.city}</p></div>
+                  <div className="flex-1 overflow-y-auto px-6 md:px-10 py-6 space-y-8 custom-scrollbar">
+                      <div className="grid md:grid-cols-2 gap-5">
+                          <div className="space-y-3">
+                              <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-primary/60"><MapPin className="w-3 h-3" />Địa chỉ nhận hàng</div>
+                              <Card className="rounded-2xl border-border/40 bg-card/50 p-4 space-y-2 shadow-sm border">
+                                  <div className="flex items-center gap-3"><div className="w-7 h-7 rounded-full bg-primary/10 flex items-center justify-center text-primary"><User className="w-3.5 h-3.5" /></div><p className="font-bold text-sm">{selectedOrderDetail?.shippingInfo?.receiverName || user?.fullName}</p></div>
+                                  <div className="flex items-center gap-3 pl-10"><Smartphone className="w-3 w-3 text-muted-foreground" /><p className="text-xs font-medium">{selectedOrderDetail?.shippingInfo?.phone || (user as any)?.phone || "Chưa cập nhật"}</p></div>
+                                  <div className="flex items-start gap-3 pl-10"><MapPin className="w-3 w-3 mt-0.5 text-muted-foreground" />
+                                      <div className="text-xs font-medium leading-relaxed"><p>{selectedOrderDetail?.shippingInfo?.street}</p><p className="text-muted-foreground text-[10px] mt-0.5">{selectedOrderDetail?.shippingInfo?.ward}, {selectedOrderDetail?.shippingInfo?.district}, {selectedOrderDetail?.shippingInfo?.city}</p></div>
                                   </div>
                               </Card>
                           </div>
-                          <div className="space-y-4">
-                              <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-primary/60"><CreditCard className="w-4 h-4" />Phương thức thanh toán</div>
-                              <Card className="rounded-2xl border-border/40 bg-card/50 p-6 flex flex-col justify-between shadow-sm h-[178px]">
-                                  <div className="flex items-center justify-between"><div className="flex items-center gap-3 text-lg font-black text-primary">{(selectedOrderDetail?.paymentMethod || 'cod').toUpperCase()}</div>{selectedOrderDetail?.paymentStatus === 'paid' ? <Badge className="bg-success/10 text-success border-success/20 font-bold px-3 py-1 rounded-full text-[10px] uppercase">Đã thanh toán</Badge> : <Badge className="bg-warning/10 text-warning border-warning/20 font-bold px-3 py-1 rounded-full text-[10px] uppercase">Chờ thanh toán</Badge>}</div>
-                                  <div className="pt-4 border-t border-border/40 flex justify-between items-end"><div className="space-y-1"><p className="text-[10px] font-black text-muted-foreground uppercase">Tổng tiền thanh toán</p><p className="text-2xl font-black text-primary">{formatPrice(selectedOrderDetail?.totalAmount || 0)}</p></div><CheckCircle className="w-8 h-8 text-success/20" /></div>
+                          <div className="space-y-3">
+                              <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-primary/60"><CreditCard className="w-3 h-3" />Phương thức thanh toán</div>
+                              <Card className="rounded-2xl border-border/40 bg-card/50 p-4 flex flex-col justify-between shadow-sm border h-[130px]">
+                                  <div className="flex items-center justify-between"><div className="flex items-center gap-3 text-base font-black text-primary">{(selectedOrderDetail?.paymentMethod || 'cod').toUpperCase()}</div>{selectedOrderDetail?.paymentStatus === 'paid' ? <Badge className="bg-success text-success-foreground font-black px-2 py-0.5 rounded-full text-[9px] uppercase border-none shadow-sm shadow-success/10">Đã trả</Badge> : <Badge className="bg-warning/10 text-warning border-warning/20 font-black px-2 py-0.5 rounded-full text-[9px] uppercase">Chờ trả</Badge>}</div>
+                                  <div className="pt-3 border-t border-border/40 flex justify-between items-end"><div className="space-y-0.5"><p className="text-[9px] font-black text-muted-foreground uppercase">Tổng tiền</p><p className="text-xl font-black text-primary leading-tight">{formatPrice(selectedOrderDetail?.totalAmount || 0)}</p></div><CheckCircle className="w-6 h-6 text-success/20" /></div>
                               </Card>
                           </div>
                       </div>
-                      <div className="space-y-4">
-                          <div className="flex items-center gap-2 text-xs font-black uppercase tracking-widest text-primary/60"><History className="w-4 h-4" />Hành trình đơn hàng</div>
-                          <div className="bg-muted/30 rounded-3xl p-8 border border-border/20">
-                              <div className="relative flex justify-between items-start max-w-2xl mx-auto">
-                                  <div className="absolute top-5 left-8 right-8 h-[2px] bg-border/40 z-0"><motion.div initial={{ width: 0 }} animate={{ width: selectedOrderDetail?.status === 'completed' ? '100%' : selectedOrderDetail?.status === 'shipping' ? '66%' : selectedOrderDetail?.status === 'paid' ? '33%' : '0%' }} className="h-full bg-primary" /></div>
+                      <div className="space-y-3">
+                          <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-primary/60"><History className="w-3 h-3" />Hành trình</div>
+                          <div className="bg-muted/30 rounded-2xl p-6 border border-border/20">
+                              <div className="relative flex justify-between items-start max-w-xl mx-auto">
+                                  <div className="absolute top-4 left-6 right-6 h-[1.5px] bg-border/40 z-0"><motion.div initial={{ width: 0 }} animate={{ width: selectedOrderDetail?.status === 'completed' ? '100%' : selectedOrderDetail?.status === 'shipping' ? '66%' : selectedOrderDetail?.status === 'paid' ? '33%' : '0%' }} className="h-full bg-primary" /></div>
                                   {[{ key: 'pending', label: 'Đặt hàng', icon: Clock }, { key: 'paid', label: 'Xác nhận', icon: CheckCircle2 }, { key: 'shipping', label: 'Giao hàng', icon: Truck }, { key: 'completed', label: 'Hoàn tất', icon: CheckCircle }].map((stage) => {
                                       const isActive = selectedOrderDetail?.status === stage.key || stage.key === 'pending' || (stage.key === 'paid' && ['paid', 'shipping', 'completed'].includes(selectedOrderDetail?.status)) || (stage.key === 'shipping' && ['shipping', 'completed'].includes(selectedOrderDetail?.status)) || (stage.key === 'completed' && selectedOrderDetail?.status === 'completed');
                                       return (
-                                          <div key={stage.key} className="relative z-10 flex flex-col items-center gap-3">
-                                              <div className={cn("w-10 h-10 rounded-full flex items-center justify-center transition-all duration-500 border-2 shadow-sm", isActive ? "bg-primary border-primary text-primary-foreground scale-110 shadow-primary/20" : "bg-card border-border/40 text-muted-foreground")}><stage.icon className="w-5 h-5" /></div>
-                                              <p className={cn("text-[10px] font-black uppercase tracking-wider", isActive ? "text-primary" : "text-muted-foreground")}>{stage.label}</p>
+                                          <div key={stage.key} className="relative z-10 flex flex-col items-center gap-2">
+                                              <div className={cn("w-8 h-8 rounded-full flex items-center justify-center transition-all duration-500 border-2 shadow-sm", isActive ? "bg-primary border-primary text-primary-foreground scale-110 shadow-primary/10" : "bg-card border-border/40 text-muted-foreground")}><stage.icon className="w-4 h-4" /></div>
+                                              <p className={cn("text-[9px] font-black uppercase tracking-wider", isActive ? "text-primary" : "text-muted-foreground")}>{stage.label}</p>
                                           </div>
                                       );
                                   })}
                               </div>
                           </div>
                       </div>
-                      <div className="space-y-4">
-                          <div className="flex items-center justify-between"><div className="flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-primary/60"><Package className="w-4 h-4" />Danh sách sản phẩm</div>{isEnrichingDetail && <div className="flex items-center gap-2 text-[10px] font-bold text-primary animate-pulse"><Loader2 className="w-3 h-3 animate-spin" />Đang tải thuộc tính...</div>}</div>
-                          <div className="space-y-4">
-                              {selectedOrderDetail?.items?.map((item: any, iIdx: number) => (
-                                  <div key={iIdx} className="group relative flex gap-6 p-5 rounded-2xl bg-card border border-border/40 hover:border-primary/30 hover:shadow-md transition-all duration-300">
-                                      <div className="w-20 h-20 rounded-xl overflow-hidden bg-muted border border-border/20 flex-shrink-0">{item.imageUrl ? <img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" /> : <div className="w-full h-full flex items-center justify-center text-muted-foreground/30"><Package className="w-8 h-8" /></div>}</div>
-                                      <div className="flex-1 min-w-0 py-1">
-                                          <div className="flex justify-between items-start gap-4"><h4 className="font-bold text-base truncate group-hover:text-primary transition-colors">{item.name}</h4><p className="font-black text-primary">{formatPrice(item.price)}</p></div>
-                                           <div className="mt-2 flex flex-wrap items-center gap-3">
-                                                {item.sku && item.sku !== 'DEFAULT' && (
-                                                   <div className="flex flex-wrap items-center gap-2 mt-2">
-                                                       {item.attributes && item.attributes.length > 0 ? (
-                                                           item.attributes.map((attr: any, aIdx: number) => (
-                                                               <span key={aIdx} className="text-[10px] bg-primary/10 text-primary px-2.5 py-1 rounded-md font-bold border border-primary/20">
-                                                                   {attr.key || attr.name}: {attr.value || attr.val}
-                                                               </span>
-                                                           ))
-                                                       ) : item.variantName ? (
-                                                          <span className="text-[10px] bg-primary/10 text-primary px-2.5 py-1 rounded-md font-bold border border-primary/20">{item.variantName}</span>
-                                                       ) : null}
-                                                   </div>
-                                                )}
+                      <div className="space-y-3">
+                          <div className="flex items-center justify-between"><div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-primary/60"><Package className="w-3 h-3" />Danh sách sản phẩm</div></div>
+                          <div className="space-y-3">
+                                {selectedOrderDetail?.items?.map((item: any, iIdx: number) => {
+                                    return (
+                                      <div key={iIdx} className="relative flex gap-4 p-3 rounded-xl bg-card border border-border/40">
+                                          <div className="w-14 h-14 rounded-lg overflow-hidden bg-muted border border-border/20 flex-shrink-0 block">
+                                            {item.imageUrl ? <img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-muted-foreground/30"><Package className="w-6 h-6" /></div>}
+                                          </div>
+                                          <div className="flex-1 min-w-0 py-0.5">
+                                              <div className="flex justify-between items-start gap-3">
+                                                <div className="block min-w-0 flex-1">
+                                                  <h4 className="font-bold text-sm truncate">{item.name}</h4>
+                                                </div>
+                                                <p className="font-black text-sm text-primary shrink-0">{formatPrice(item.price)}</p>
+                                              </div>
+                                           <div className="mt-1 flex items-center justify-between gap-2">
+                                             {item.sku && item.sku !== 'DEFAULT' && (
+                                               <div className="mt-2 flex flex-wrap items-center gap-2">
+                                                 <span className="text-[10px] bg-primary/5 text-primary px-2 py-0.5 rounded-md font-mono border border-primary/20">SKU: {item.sku}</span>
+                                               </div>
+                                            )}
                                                <p className="text-xs font-bold text-muted-foreground ml-auto">Số lượng: <span className="text-foreground">x{item.quantity}</span></p>
                                            </div>
                                       </div>
                                   </div>
-                              ))}
+                                    );
+                                  })}
                           </div>
                       </div>
                   </div>
-                  <div className="p-8 md:px-12 md:pb-12 bg-muted/10 border-t border-border/40 flex justify-end gap-4">
-                      <Button variant="ghost" className="rounded-xl font-bold h-12 px-8" onClick={() => setIsDetailModalOpen(false)}>Đóng</Button>
-                      {selectedOrderDetail?.status === 'pending' && <Button variant="destructive" className="rounded-xl font-bold h-12 px-8 bg-destructive/10 text-destructive hover:bg-destructive hover:text-white border border-destructive/20 transition-all" onClick={() => { setIsDetailModalOpen(false); handleCancelOrder(selectedOrderDetail._id); }}>Hủy đơn hàng</Button>}
-                      {(selectedOrderDetail?.paymentStatus === 'failed' || (selectedOrderDetail?.paymentMethod?.toLowerCase() === 'vnpay' && selectedOrderDetail?.paymentStatus !== 'paid' && selectedOrderDetail?.status !== 'cancelled')) && <Button className="rounded-xl font-bold h-12 px-8 gradient-hero shadow-lg" onClick={() => handleRetryPayment(selectedOrderDetail._id)}>Thanh toán lại</Button>}
+                  <div className="px-6 md:px-10 py-5 bg-muted/5 border-t border-border/40 flex justify-end gap-3 flex-wrap">
+                      <Button variant="ghost" className="rounded-xl font-bold h-10 px-6 text-xs transition-all duration-300 hover:bg-muted-foreground/10 hover:scale-105 active:scale-95 flex items-center gap-2 group border border-transparent hover:border-border/50" onClick={() => setIsDetailModalOpen(false)}>
+                          <X className="w-3 h-3 opacity-50 group-hover:opacity-100 transition-all group-hover:rotate-90" />
+                          Đóng
+                      </Button>
+                      {selectedOrderDetail?.status === 'pending' && (
+                        <Button variant="destructive" className="rounded-xl font-bold h-10 px-6 text-xs bg-destructive/5 text-destructive hover:bg-destructive hover:text-white border border-destructive/10 transition-all duration-300 hover:scale-105 active:scale-95 shadow-sm hover:shadow-destructive/20" onClick={() => { setIsDetailModalOpen(false); handleCancelOrder(selectedOrderDetail._id); }}>
+                          Hủy đơn hàng
+                        </Button>
+                      )}
+                      {(selectedOrderDetail?.paymentStatus === 'failed' || (selectedOrderDetail?.paymentMethod?.toLowerCase() === 'vnpay' && selectedOrderDetail?.paymentStatus !== 'paid' && selectedOrderDetail?.status !== 'cancelled')) && (
+                        <Button className="rounded-xl font-bold h-10 px-6 text-xs gradient-hero shadow-md shadow-primary/10 transition-all duration-300 hover:scale-105 active:scale-95 hover:shadow-primary/20" onClick={() => handleRetryPayment(selectedOrderDetail._id)}>
+                          Thanh toán lại
+                        </Button>
+                      )}
                   </div>
               </div>
           </DialogContent>
@@ -775,6 +571,9 @@ export default function MyOrdersPage() {
 
       <Dialog open={isReviewModalOpen} onOpenChange={setIsReviewModalOpen}>
         <DialogContent className="sm:max-w-[900px] p-0 overflow-hidden border-none shadow-2xl bg-[#0f172a] rounded-3xl group">
+          <Button variant="ghost" size="icon" className="absolute top-4 right-4 z-50 rounded-full w-8 h-8 hover:bg-white/10 transition-all flex items-center justify-center text-white/50 hover:text-white" onClick={() => setIsReviewModalOpen(false)}>
+              <X className="w-4 h-4" />
+          </Button>
           <div className="flex flex-col md:flex-row h-full min-h-[550px]">
             <div className="md:w-[42%] relative overflow-hidden flex flex-col justify-between p-10 md:p-12 text-white border-r border-white/5">
               <div className="absolute inset-0 bg-gradient-to-br from-indigo-600 via-primary to-blue-900 z-0"></div>
@@ -790,11 +589,9 @@ export default function MyOrdersPage() {
                       <div className="space-y-1">
                         <p className="text-xs font-medium text-white/60">Sản phẩm đang chọn</p>
                         <h4 className="font-semibold text-white text-lg md:text-xl leading-tight line-clamp-2">{selectedProduct.name}</h4>
-                        {selectedProduct.attributes && selectedProduct.attributes.length > 0 && (
+                        {selectedProduct.sku && selectedProduct.sku !== 'DEFAULT' && (
                           <div className="flex flex-wrap gap-1.5 mt-2">
-                            {selectedProduct.attributes.map((attr: any, idx: number) => (
-                              <Badge key={idx} variant="outline" className="text-[10px] font-bold px-2 py-0 border-white/20 text-white/90 bg-white/10 uppercase tracking-tighter">{attr.key || attr.name}: {attr.value || attr.val}</Badge>
-                            ))}
+                            <Badge variant="outline" className="text-[10px] font-bold px-2 py-0 border-white/20 text-white/90 bg-white/10 uppercase tracking-tighter">SKU: {selectedProduct.sku}</Badge>
                           </div>
                         )}
                       </div>

@@ -124,6 +124,7 @@ export const productApi = {
     apiClient.get('/admin/products', { params }),
   getProduct: (id: string) => apiClient.get(`/admin/products/${id}`),
   getProductDetail: (slug: string) => apiClient.get(`/products/${slug}`),
+  searchV2: (params: Record<string, unknown>) => apiClient.get('/search/products', { params }),
   createProduct: (data: Record<string, unknown>) =>
     apiClient.post('/admin/products', data),
   updateProduct: (id: string, data: Record<string, unknown>) =>

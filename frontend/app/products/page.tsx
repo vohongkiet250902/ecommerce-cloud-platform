@@ -42,13 +42,16 @@ const PRODUCTS_PER_PAGE = 20;
 function ProductsContent() {
   const searchParams = useSearchParams();
   const initialCategory = searchParams.get("category") || "all";
+  const initialBrand = searchParams.get("brand");
+  const initialQuery = searchParams.get("q") || "";
 
   const [isMounted, setIsMounted] = useState(false);
   const [products, setProducts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [sortBy, setSortBy] = useState("popular");
   const [selectedCategory, setSelectedCategory] = useState(initialCategory);
-  const [selectedBrands, setSelectedBrands] = useState<string[]>([]);
+  const [selectedBrands, setSelectedBrands] = useState<string[]>(initialBrand ? [initialBrand] : []);
+  const [searchQuery, setSearchQuery] = useState(initialQuery);
   const [priceRange, setPriceRange] = useState<[number, number]>([
     0, 100000000,
   ]);
@@ -171,6 +174,15 @@ function ProductsContent() {
         return p.status === 'active' && activeCategoryIdsFlattened.has(pCatId) && activeBrandIds.has(pBrandId);
     });
 
+    // 1.5 Filter by search query
+    if (searchQuery) {
+        const query = searchQuery.toLowerCase();
+        filtered = filtered.filter((p: any) => 
+            p.name.toLowerCase().includes(query) || 
+            (p.description && p.description.toLowerCase().includes(query))
+        );
+    }
+
     // 2. Filter by category (Recursive / Selected)
     if (selectedCategory !== "all") {
        const categoryIds = getCategoryIds(selectedCategory, categoriesData);
@@ -228,6 +240,7 @@ function ProductsContent() {
   const clearFilters = () => {
     setSelectedCategory("all");
     setSelectedBrands([]);
+    setSearchQuery("");
     setPriceRange([0, 100000000]);
     setCurrentPage(1);
   };
@@ -235,6 +248,7 @@ function ProductsContent() {
   const hasActiveFilters =
     selectedCategory !== "all" ||
     selectedBrands.length > 0 ||
+    searchQuery !== "" ||
     priceRange[0] > 0 ||
     priceRange[1] < 100000000;
 
@@ -248,7 +262,7 @@ function ProductsContent() {
   // Reset page when filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [selectedCategory, selectedBrands, priceRange, sortBy]);
+  }, [selectedCategory, selectedBrands, searchQuery, priceRange, sortBy]);
 
   return (
     <div className="min-h-screen bg-background">
@@ -391,7 +405,7 @@ function ProductsContent() {
                 {/* Sort */}
                 {isMounted && (
                   <Select value={sortBy} onValueChange={setSortBy}>
-                    <SelectTrigger className="w-[180px]">
+                    <SelectTrigger className="w-[180px] border-border/40">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
