@@ -1182,7 +1182,26 @@ export default function SearchManagement() {
                          {/* Result Cards Grid */}
                          <div className="grid grid-cols-1 gap-5">
                             {searchResults.hits.map((hit: any, i: number) => (
-                              <Card key={hit.id} className="group rounded-2xl border border-border shadow-sm hover:shadow-lg hover:border-indigo-400/50 transition-all duration-300 bg-background overflow-hidden">
+                              <Card 
+                                key={hit.id} 
+                                className="group rounded-2xl border border-border shadow-sm hover:shadow-lg hover:border-indigo-400/50 transition-all duration-300 bg-background overflow-hidden cursor-pointer"
+                                onClick={async () => {
+                                   try {
+                                      await apiClient.post("/search/events/click", {
+                                         productId: hit.id,
+                                         q: searchQuery,
+                                         position: i + 1
+                                      });
+                                      toast({
+                                         title: "Click Event Ghi nhận",
+                                         description: `Đã ghi nhận click cho sản phẩm ${hit.name}`,
+                                         variant: "success",
+                                      });
+                                   } catch (e) {
+                                      console.error("Lỗi tracking click", e);
+                                   }
+                                }}
+                              >
                                  <CardContent className="p-5 flex gap-6">
                                     {/* Image Section */}
                                     <div className="h-32 w-32 bg-muted rounded-xl overflow-hidden shrink-0 relative flex items-center justify-center border border-border group-hover:border-indigo-200 transition-colors">

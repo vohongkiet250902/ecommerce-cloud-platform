@@ -497,10 +497,15 @@ export function SearchHub() {
                                       href={`/products/${p.slug || p.id || p._id}`}
                                       className="flex items-center gap-4 p-3 rounded-2xl bg-muted/10 border border-transparent hover:border-primary/20 hover:bg-card cursor-pointer transition-all group shadow-sm no-underline text-foreground"
                                       onClick={() => {
-                                        setShowResults(false);
-                                        setSearchQuery("");
-                                      }}
-                                   >
+                                         apiClient.post("/search/events/click", {
+                                            productId: p.id || p._id,
+                                            q: searchQuery,
+                                            position: idx + 1
+                                         }).catch(() => {});
+                                         setShowResults(false);
+                                         setSearchQuery("");
+                                       }}
+                                    >
                                       <div className="h-16 w-16 relative rounded-xl overflow-hidden shrink-0 border border-border bg-white group-hover:scale-105 transition-transform duration-500 shadow-sm">
                                         {p.image ? (
                                           <Image src={p.image} alt={p.name} fill className="object-cover" />

@@ -682,16 +682,21 @@ export default function AdminLayout({
                                <div className="flex-1 overflow-y-auto pr-2 space-y-2.5 pb-20 scrollbar-thin scrollbar-thumb-indigo-100 scrollbar-track-transparent">
                                   {searchQuery.trim() ? (
                                      searchResults?.hits?.length > 0 ? (
-                                        searchResults.hits.map((p: any) => (
-                                           <Link
-                                              key={p.id || p._id}
-                                              href={`/admin/products/${p.id || p._id}`}
-                                              className="flex items-center gap-4 p-3 rounded-2xl bg-muted/10 border border-transparent hover:border-indigo-100 hover:bg-white cursor-pointer transition-all group shadow-sm no-underline text-foreground"
-                                              onClick={() => {
-                                                setShowResults(false);
-                                                setSearchQuery("");
-                                              }}
-                                           >
+                                         searchResults.hits.map((p: any, idx: number) => (
+                                            <Link
+                                               key={p.id || p._id}
+                                               href={`/admin/products/${p.id || p._id}`}
+                                               className="flex items-center gap-4 p-3 rounded-2xl bg-muted/10 border border-transparent hover:border-indigo-100 hover:bg-white cursor-pointer transition-all group shadow-sm no-underline text-foreground"
+                                               onClick={() => {
+                                                 apiClient.post("/search/events/click", {
+                                                    productId: p.id || p._id,
+                                                    q: searchQuery,
+                                                    position: idx + 1
+                                                 }).catch(() => {});
+                                                 setShowResults(false);
+                                                 setSearchQuery("");
+                                               }}
+                                            >
                                               <div className="h-14 w-14 relative rounded-xl overflow-hidden shrink-0 border border-border/50 bg-white group-hover:scale-105 transition-transform duration-500 shadow-sm">
                                                 {p.image ? (
                                                   <Image src={p.image} alt={p.name} fill className="object-cover" />
