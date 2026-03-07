@@ -55,7 +55,7 @@ export default function ProductFilters({
   return (
     <div className="space-y-6">
       {/* Price Range - Dual handle slider */}
-      <div className="bg-card rounded-xl p-4 border border-border">
+      <div className="bg-card rounded-xl p-4 border border-border/40">
         <h3 className="font-semibold text-foreground mb-4">Khoảng giá</h3>
         <div className="space-y-4">
           <Slider
@@ -85,7 +85,7 @@ export default function ProductFilters({
       </div>
 
       {/* Brands */}
-      <div className="bg-card rounded-xl p-4 border border-border">
+      <div className="bg-card rounded-xl p-4 border border-border/40">
         <h3 className="font-semibold text-foreground mb-4">Thương hiệu</h3>
         <div className="space-y-3">
           {brands.map((brand) => (
@@ -107,7 +107,7 @@ export default function ProductFilters({
       </div>
 
       {/* Clear Filters */}
-      <Button variant="outline" className="w-full" onClick={onClearFilters}>
+      <Button variant="outline" className="w-full border-border/40" onClick={onClearFilters}>
         Xóa bộ lọc
       </Button>
     </div>

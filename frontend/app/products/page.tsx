@@ -292,7 +292,7 @@ function ProductsContent() {
                   className={`rounded-full whitespace-nowrap px-6 transition-all duration-300 font-bold ${
                     isActive 
                       ? "bg-primary text-primary-foreground shadow-sm shadow-primary/20" 
-                      : "hover:border-primary/50"
+                      : "border-border/40 hover:border-primary/50"
                   }`}
                   onClick={() => setSelectedCategory(cat.value)}
                 >
@@ -320,7 +320,7 @@ function ProductsContent() {
                     transition={{ duration: 0.2, ease: "easeOut" }}
                     className="overflow-hidden"
                   >
-                    <div className="flex items-center gap-2 overflow-x-auto py-2 scrollbar-hide pl-4 border-l-2 border-primary/20 ml-2">
+                    <div className="flex items-center gap-2 overflow-x-auto py-2 scrollbar-hide pl-4 border-l-2 border-primary/10 ml-2">
                       <span className="text-[10px] font-black uppercase tracking-widest text-muted-foreground mr-2 whitespace-nowrap">
                         {node.name}
                       </span>
@@ -334,7 +334,7 @@ function ProductsContent() {
                             className={`rounded-full whitespace-nowrap px-4 h-8 text-xs ${
                               isChildActive 
                                 ? "bg-secondary text-secondary-foreground font-bold shadow-sm" 
-                                : "text-muted-foreground hover:text-foreground hover:bg-muted"
+                                : "text-muted-foreground hover:text-foreground hover:bg-muted border-border/10"
                             }`}
                             onClick={() => setSelectedCategory(child._id)}
                           >
@@ -371,7 +371,7 @@ function ProductsContent() {
                 {/* Mobile Filter Button */}
                 <Sheet open={isFilterOpen} onOpenChange={setIsFilterOpen}>
                   <SheetTrigger asChild>
-                    <Button variant="outline" className="lg:hidden">
+                    <Button variant="outline" className="lg:hidden border-border/40">
                       <SlidersHorizontal className="w-4 h-4 mr-2" />
                       Bộ lọc
                       {hasActiveFilters && (
@@ -405,10 +405,10 @@ function ProductsContent() {
                 {/* Sort */}
                 {isMounted && (
                   <Select value={sortBy} onValueChange={setSortBy}>
-                    <SelectTrigger className="w-[180px] border-border/40">
+                    <SelectTrigger className="w-[180px] border-border/20">
                       <SelectValue />
                     </SelectTrigger>
-                    <SelectContent>
+                    <SelectContent className="border-border/40">
                       {sortOptions.map((option) => (
                         <SelectItem key={option.value} value={option.value}>
                           {option.label}
@@ -523,6 +523,7 @@ function ProductsContent() {
                   size="icon"
                   onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
                   disabled={currentPage === 1}
+                  className="border-border/40"
                 >
                   <ChevronLeft className="w-4 h-4" />
                 </Button>
@@ -534,7 +535,7 @@ function ProductsContent() {
                       variant={currentPage === page ? "default" : "outline"}
                       size="icon"
                       onClick={() => setCurrentPage(page)}
-                      className="w-10 h-10"
+                      className={`w-10 h-10 ${currentPage !== page ? "border-border/40" : ""}`}
                     >
                       {page}
                     </Button>
@@ -548,6 +549,7 @@ function ProductsContent() {
                     setCurrentPage((p) => Math.min(totalPages, p + 1))
                   }
                   disabled={currentPage === totalPages}
+                  className="border-border/40"
                 >
                   <ChevronRight className="w-4 h-4" />
                 </Button>

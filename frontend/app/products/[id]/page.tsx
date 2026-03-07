@@ -681,7 +681,7 @@ export default function ProductDetailPage() {
             <div className="flex gap-3">
               <Button 
                 size="lg" 
-                className="flex-1 h-12 text-base" 
+                className="flex-1 h-12 text-base border-border/40" 
                 onClick={handleBuyNow}
                 disabled={currentStock === 0 || isProcessing}
               >
@@ -697,7 +697,7 @@ export default function ProductDetailPage() {
               <Button
                 size="lg"
                 variant="outline"
-                className="flex-1 h-12 text-base"
+                className="flex-1 h-12 text-base border-border/40"
                 onClick={handleAddToCart}
                 disabled={currentStock === 0}
               >
@@ -707,7 +707,7 @@ export default function ProductDetailPage() {
               <Button
                 size="icon"
                 variant="outline"
-                className="h-12 w-12"
+                className="h-12 w-12 border-border/40"
                 onClick={() => {
                   navigator.clipboard.writeText(window.location.href);
                   toast({
