@@ -8,10 +8,12 @@ import * as path from 'path';
 import { SearchLog, SearchLogDocument } from './schemas/search-log.schema';
 import { ClickLog, ClickLogDocument } from './schemas/click-log.schema';
 
-// ⬇️ dùng cho reindex + facet labels
 import { Product } from '../products/schemas/product.schema';
 import { Brand } from '../brands/schemas/brand.schema';
 import { Category } from '../categories/schemas/category.schema';
+
+import { TaxonomyResolver } from './utils/taxonomy-resolver.util';
+import { QueryIntentAnalyzer } from './utils/query-intent.util';
 
 type SearchSort =
   | 'minPrice:asc'
@@ -23,28 +25,21 @@ export type SearchV2Params = {
   q?: string;
   page?: number;
   limit?: number;
-
   categoryId?: string;
   brandId?: string;
   inStock?: boolean;
-
   minPrice?: number;
   maxPrice?: number;
-
-  // "color:black,storage:128gb"
   attributes?: string;
-
   sort?: SearchSort;
   facets?: boolean;
-  facetLabels?: boolean; // map brandId/categoryId => name
-
-  userId?: string; // optional analytics
-  sessionId?: string; // optional analytics
+  facetLabels?: boolean;
+  userId?: string;
+  sessionId?: string;
 };
 
 type ProductSearchDoc = {
   id: string;
-
   name: string;
   slug: string;
   description?: string;
@@ -52,23 +47,16 @@ type ProductSearchDoc = {
   brandName?: string;
   categoryId?: string;
   brandId?: string;
-
   image?: string | null;
   images?: string[];
-
   minPrice: number;
   maxPrice: number;
-
   totalStock: number;
   inStock: boolean;
-
   rating: number;
   reviewCount: number;
-
   isFeatured: boolean;
   createdAt: number;
-
-  // flatten để filter/facet dễ
   attributePairs: string[];
 };
 
@@ -77,13 +65,15 @@ export class SearchService implements OnModuleInit {
   private client: MeiliSearch;
   private indexUid: string;
 
+  private taxonomyResolver: TaxonomyResolver;
+  private intentAnalyzer: QueryIntentAnalyzer;
+
   constructor(
     private readonly config: ConfigService,
     @InjectModel(SearchLog.name)
     private readonly searchLogModel: Model<SearchLogDocument>,
     @InjectModel(ClickLog.name)
     private readonly clickLogModel: Model<ClickLogDocument>,
-
     @InjectModel(Product.name)
     private readonly productModel: Model<Product>,
     @InjectModel(Brand.name)
@@ -98,6 +88,13 @@ export class SearchService implements OnModuleInit {
       this.config.get<string>('MEILI_PRODUCTS_INDEX') || 'products';
 
     this.client = new MeiliSearch({ host, apiKey });
+
+    // Khởi tạo các Utilities phân tích ngữ nghĩa
+    this.taxonomyResolver = new TaxonomyResolver(
+      this.categoryModel,
+      this.brandModel,
+    );
+    this.intentAnalyzer = new QueryIntentAnalyzer(this.taxonomyResolver);
   }
 
   private productsIndex() {
@@ -111,20 +108,22 @@ export class SearchService implements OnModuleInit {
   }
 
   async onModuleInit() {
-    // Với meilisearch-js 0.55: API updates/tasks không đồng nhất giữa versions => không "await wait task"
-    // Mục tiêu: app không crash + settings được apply async
     try {
+      await this.taxonomyResolver.loadTaxonomy(); // Nạp danh mục, brand vào memory
       await this.ensureProductsIndexAndSettings();
     } catch (e: any) {
       console.error('[Meili] ensure settings failed:', e?.message ?? e);
     }
   }
 
-  private loadSynonyms(): Record<string, string[]> {
-    // Ưu tiên đọc từ file JSON để bạn dễ demo + viết report (query expansion)
-    // Env gợi ý: MEILI_SYNONYMS_FILE=./synonyms.vi.json
-    const envPath = this.config.get<string>('MEILI_SYNONYMS_FILE');
+  private async ensureTaxonomyReady() {
+    if (!this.taxonomyResolver.isReady) {
+      await this.taxonomyResolver.loadTaxonomy();
+    }
+  }
 
+  private loadSynonyms(): Record<string, string[]> {
+    const envPath = this.config.get<string>('MEILI_SYNONYMS_FILE');
     const candidates = [
       envPath,
       path.resolve(process.cwd(), 'synonyms.vi.json'),
@@ -136,26 +135,20 @@ export class SearchService implements OnModuleInit {
         const raw = fs.readFileSync(filePath, 'utf8');
         const parsed = JSON.parse(raw);
         if (parsed && typeof parsed === 'object') return parsed;
-      } catch {
-        // ignore parse errors, fallback
-      }
+      } catch {}
     }
 
-    // fallback tối thiểu (bạn có thể mở rộng trong file JSON)
     return {
       'tai nghe': ['headphone', 'earphone'],
       'ốp lưng': ['case', 'phone case'],
       sạc: ['charger', 'adapter'],
       'điện thoại': ['phone', 'smartphone'],
       iphone: ['i phone', 'ip'],
+      laptop: ['notebook', 'may tinh xach tay'],
     };
   }
 
-  /**
-   * ✅ settings chuẩn: searchable/filterable/sortable/facets/synonyms/typo
-   */
   private async ensureProductsIndexAndSettings() {
-    // ensure index exists
     try {
       await this.client.getIndex(this.indexUid);
     } catch {
@@ -163,15 +156,7 @@ export class SearchService implements OnModuleInit {
     }
 
     await this.productsIndex().updateSettings({
-      searchableAttributes: [
-        'name',
-        'categoryName',
-        'brandName',
-        'description',
-        'attributePairs',
-        'slug',
-      ],
-
+      searchableAttributes: ['name', 'brandName', 'categoryName', 'slug'],
       filterableAttributes: [
         'categoryId',
         'brandId',
@@ -183,7 +168,6 @@ export class SearchService implements OnModuleInit {
         'isFeatured',
         'attributePairs',
       ],
-
       sortableAttributes: [
         'minPrice',
         'createdAt',
@@ -192,28 +176,70 @@ export class SearchService implements OnModuleInit {
         'inStock',
         'isFeatured',
       ],
-
-      // facetsDistribution sẽ nằm trong search response nếu bạn truyền facets
-      // (Meili facets hoạt động dựa trên filterableAttributes)
-
       synonyms: this.loadSynonyms(),
-
       typoTolerance: {
         enabled: true,
         minWordSizeForTypos: { oneTypo: 4, twoTypos: 8 },
       },
-
       stopWords: ['và', 'là', 'của', 'cho', 'với', 'một', 'các', 'những', 'từ'],
     });
   }
-  // -----------------------------
-  // ✅ Document normalization
-  // -----------------------------
+
   private normalizeText(s: any): string {
     return String(s ?? '')
       .trim()
       .toLowerCase()
       .replace(/\s+/g, ' ');
+  }
+
+  private mergeFilterClauses(
+    ...groups: Array<Array<string | undefined | null> | undefined>
+  ): string | undefined {
+    const parts = groups
+      .flatMap((group) => group ?? [])
+      .filter((x): x is string => Boolean(x && x.trim()));
+    return parts.length ? parts.join(' AND ') : undefined;
+  }
+
+  private buildSearchOptions(input: {
+    q: string;
+    params: SearchV2Params;
+    filter?: string;
+    limit: number;
+    offset: number;
+  }): any {
+    const opts: any = {
+      limit: input.limit,
+      offset: input.offset,
+      filter: input.filter,
+      sort: this.buildSort(input.params),
+      facets:
+        input.params.facets === false
+          ? undefined
+          : ['brandId', 'categoryId', 'attributePairs'],
+      attributesToRetrieve: [
+        'id',
+        'name',
+        'slug',
+        'image',
+        'minPrice',
+        'maxPrice',
+        'inStock',
+        'totalStock',
+        'rating',
+        'reviewCount',
+        'brandId',
+        'categoryId',
+        'isFeatured',
+        'createdAt',
+      ],
+    };
+
+    if (input.q.split(' ').length > 1) {
+      opts.matchingStrategy = 'all';
+    }
+
+    return opts;
   }
 
   private computeMinMaxPrice(productData: any): {
@@ -228,10 +254,8 @@ export class SearchService implements OnModuleInit {
     for (const v of variants) {
       if (!v) continue;
       if ((v.status || 'active') !== 'active') continue;
-
       const rawPrice = Number(v.finalPrice ?? v.price ?? 0);
       if (!Number.isFinite(rawPrice) || rawPrice <= 0) continue;
-
       const discount = Number(v.discountPercentage ?? 0);
       const effectivePrice =
         v.finalPrice != null
@@ -239,7 +263,6 @@ export class SearchService implements OnModuleInit {
           : Number.isFinite(discount) && discount > 0
             ? Math.round(rawPrice * (1 - discount / 100))
             : rawPrice;
-
       if (Number.isFinite(effectivePrice) && effectivePrice > 0)
         prices.push(effectivePrice);
     }
@@ -251,7 +274,6 @@ export class SearchService implements OnModuleInit {
   private computeTotalStock(productData: any): number {
     const totalStock = Number(productData?.totalStock ?? NaN);
     if (Number.isFinite(totalStock)) return totalStock;
-
     const variants: any[] = Array.isArray(productData?.variants)
       ? productData.variants
       : [];
@@ -265,13 +287,8 @@ export class SearchService implements OnModuleInit {
     return sum;
   }
 
-  /**
-   * ✅ attributePairs = ["color:black","storage:128gb"]
-   * lấy từ product.specs + variant.attributes
-   */
   private buildAttributePairs(productData: any): string[] {
     const pairs = new Set<string>();
-
     const pushAttrs = (attrs: any[]) => {
       if (!Array.isArray(attrs)) return;
       for (const a of attrs) {
@@ -283,7 +300,6 @@ export class SearchService implements OnModuleInit {
     };
 
     pushAttrs(productData?.specs);
-
     const variants: any[] = Array.isArray(productData?.variants)
       ? productData.variants
       : [];
@@ -292,14 +308,11 @@ export class SearchService implements OnModuleInit {
       if ((v.status || 'active') !== 'active') continue;
       pushAttrs(v?.attributes);
     }
-
     return Array.from(pairs);
   }
 
   private toSearchDoc(productData: any): ProductSearchDoc | null {
     if (!productData?._id) return null;
-
-    // chỉ index product active để search “đúng”
     if ((productData.status || 'active') !== 'active') return null;
 
     const { minPrice, maxPrice } = this.computeMinMaxPrice(productData);
@@ -308,35 +321,29 @@ export class SearchService implements OnModuleInit {
 
     const categoryIdRaw = productData.categoryId;
     const brandIdRaw = productData.brandId;
-
     const categoryId =
       categoryIdRaw && typeof categoryIdRaw === 'object' && categoryIdRaw._id
         ? String(categoryIdRaw._id)
         : categoryIdRaw
           ? String(categoryIdRaw)
           : undefined;
-
     const brandId =
       brandIdRaw && typeof brandIdRaw === 'object' && brandIdRaw._id
         ? String(brandIdRaw._id)
         : brandIdRaw
           ? String(brandIdRaw)
           : undefined;
-
     const categoryName =
       categoryIdRaw && typeof categoryIdRaw === 'object' && categoryIdRaw.name
         ? String(categoryIdRaw.name)
         : undefined;
-
     const brandName =
       brandIdRaw && typeof brandIdRaw === 'object' && brandIdRaw.name
         ? String(brandIdRaw.name)
         : undefined;
-
     const images = Array.isArray(productData?.images)
       ? productData.images.map((x: any) => x?.url).filter(Boolean)
       : [];
-
     const createdAt =
       productData?.createdAt instanceof Date
         ? productData.createdAt.getTime()
@@ -367,14 +374,9 @@ export class SearchService implements OnModuleInit {
     };
   }
 
-  // -----------------------------
-  // ✅ Index CRUD hooks
-  // -----------------------------
   async addOrUpdateProduct(productData: any) {
     const doc = this.toSearchDoc(productData);
     if (!doc) return { ok: true, skipped: true };
-
-    // meilisearch-js 0.55: addDocuments async, không cần wait
     return this.productsIndex().addDocuments([doc], { primaryKey: 'id' });
   }
 
@@ -382,13 +384,10 @@ export class SearchService implements OnModuleInit {
     return this.productsIndex().deleteDocument(productId);
   }
 
-  // -----------------------------
-  // ✅ P0: Reindex pipeline (Mongo -> build doc -> batch addDocuments)
-  // -----------------------------
   async reindexProducts(input?: {
     batchSize?: number;
-    purge?: boolean; // deleteAllDocuments trước khi add
-    onlyActive?: boolean; // chỉ lấy product.status=active (nhanh hơn)
+    purge?: boolean;
+    onlyActive?: boolean;
   }) {
     if (input?.batchSize != null && !Number.isFinite(Number(input.batchSize))) {
       throw new BadRequestException('batchSize must be a number');
@@ -397,10 +396,7 @@ export class SearchService implements OnModuleInit {
     const purge = input?.purge !== false;
     const onlyActive = input?.onlyActive === true;
 
-    // demo-friendly: purge trước để tránh “document rác” (inactive/deleted)
-    if (purge) {
-      await this.productsIndex().deleteAllDocuments();
-    }
+    if (purge) await this.productsIndex().deleteAllDocuments();
 
     const mongoFilter: any = onlyActive ? { status: 'active' } : {};
     const cursor = this.productModel
@@ -425,13 +421,13 @@ export class SearchService implements OnModuleInit {
       .populate({ path: 'brandId', select: 'name' })
       .cursor();
 
-    let scanned = 0;
-    let indexed = 0;
-    let skipped = 0;
-    let batches = 0;
+    let scanned = 0,
+      indexed = 0,
+      skipped = 0,
+      batches = 0;
     const errors: Array<{ id?: string; error: string }> = [];
-
     let buffer: ProductSearchDoc[] = [];
+
     const flush = async () => {
       if (!buffer.length) return;
       try {
@@ -439,7 +435,6 @@ export class SearchService implements OnModuleInit {
         indexed += buffer.length;
         batches += 1;
       } catch (e: any) {
-        // best-effort: nếu batch fail, ghi nhận lỗi và tiếp
         errors.push({ error: e?.message ?? String(e) });
       } finally {
         buffer = [];
@@ -463,7 +458,6 @@ export class SearchService implements OnModuleInit {
         });
       }
     }
-
     await flush();
 
     return {
@@ -476,32 +470,22 @@ export class SearchService implements OnModuleInit {
       indexed,
       skipped,
       batches,
-      errors: errors.slice(0, 20), // tránh trả quá dài
+      errors: errors.slice(0, 20),
     };
   }
 
-  // -----------------------------
-  // ✅ Search v2: filter/sort/paging + facets + analytics logging
-  // -----------------------------
   private esc(value: string) {
     return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
   }
 
-  /**
-   * price range “đúng”: overlap range
-   * - user minPrice => maxPrice >= min
-   * - user maxPrice => minPrice <= max
-   */
   private buildMeiliFilter(
     p: SearchV2Params,
     opts?: { ignoreAttributes?: boolean },
   ): string | undefined {
     const parts: string[] = [];
-
     if (p.categoryId) parts.push(`categoryId = "${this.esc(p.categoryId)}"`);
     if (p.brandId) parts.push(`brandId = "${this.esc(p.brandId)}"`);
     if (typeof p.inStock === 'boolean') parts.push(`inStock = ${p.inStock}`);
-
     if (Number.isFinite(p.minPrice as number))
       parts.push(`maxPrice >= ${Number(p.minPrice)}`);
     if (Number.isFinite(p.maxPrice as number))
@@ -512,21 +496,18 @@ export class SearchService implements OnModuleInit {
         .split(',')
         .map((s) => s.trim())
         .filter(Boolean);
-
       for (const pair of raw) {
         const normalized = this.normalizeText(pair);
         if (!normalized.includes(':')) continue;
         parts.push(`attributePairs = "${this.esc(normalized)}"`);
       }
     }
-
     return parts.length ? parts.join(' AND ') : undefined;
   }
 
   private async mapFacetLabels(facetDistribution: any) {
     const brandFacet = facetDistribution?.brandId ?? {};
     const categoryFacet = facetDistribution?.categoryId ?? {};
-
     const brandIds = Object.keys(brandFacet);
     const categoryIds = Object.keys(categoryFacet);
 
@@ -547,7 +528,6 @@ export class SearchService implements OnModuleInit {
 
     const brandId: Record<string, string> = {};
     for (const b of brands as any[]) brandId[String(b._id)] = String(b.name);
-
     const categoryId: Record<string, string> = {};
     for (const c of categories as any[])
       categoryId[String(c._id)] = String(c.name);
@@ -558,10 +538,7 @@ export class SearchService implements OnModuleInit {
   private async suggestedQueriesByPrefix(prefix: string, limit = 5) {
     const q = this.normalizeText(prefix);
     if (!q) return [];
-
     const escaped = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-
-    // lấy query “đã từng có kết quả” để gợi ý no-result
     const rows = await this.searchLogModel.aggregate([
       {
         $match: {
@@ -574,13 +551,11 @@ export class SearchService implements OnModuleInit {
       { $limit: limit },
       { $project: { _id: 0, q: '$_id', count: 1 } },
     ]);
-
     return rows.map((r: any) => r.q);
   }
 
   private buildSort(p: SearchV2Params): string[] {
-    // ranking tuning default (boost)
-    if (!p.sort) {
+    if (!p.sort)
       return [
         'inStock:desc',
         'isFeatured:desc',
@@ -588,7 +563,6 @@ export class SearchService implements OnModuleInit {
         'reviewCount:desc',
         'createdAt:desc',
       ];
-    }
     const allowed = new Set<SearchSort>([
       'minPrice:asc',
       'minPrice:desc',
@@ -607,19 +581,59 @@ export class SearchService implements OnModuleInit {
   }
 
   private newQueryId(): string {
-    // đủ dùng cho demo (không cần uuid lib)
     return `${Date.now()}_${Math.random().toString(16).slice(2)}`;
   }
 
   async searchProductsV2(params: SearchV2Params) {
+    await this.ensureTaxonomyReady();
+
     const page = this.clampInt(params.page ?? 1, 1, 10_000);
     const limit = this.clampInt(params.limit ?? 20, 1, 60);
     const offset = (page - 1) * limit;
 
-    const q = (params.q ?? '').trim();
-    const filter = this.buildMeiliFilter(params);
+    const rawQ = (params.q ?? '').trim();
 
-    if (!q && !filter) {
+    // 1. Phân tích Intent
+    const intent = this.intentAnalyzer.analyze(rawQ);
+
+    // 2. Filter rõ ràng (Explicit)
+    const explicitFilter = this.buildMeiliFilter(params);
+
+    // 3. Filter suy luận (Inferred)
+    const inferredFilterParts: string[] = [];
+    if (!params.categoryId && intent.inferredCategoryIds.length > 0) {
+      const catList = intent.inferredCategoryIds
+        .map((id) => `"${this.esc(id)}"`)
+        .join(', ');
+      inferredFilterParts.push(`categoryId IN [${catList}]`);
+    }
+
+    if (!params.brandId && intent.inferredBrandIds.length > 0) {
+      const brandList = intent.inferredBrandIds
+        .map((id) => `"${this.esc(id)}"`)
+        .join(', ');
+      inferredFilterParts.push(`brandId IN [${brandList}]`);
+    }
+
+    const inferredFilter = inferredFilterParts.length
+      ? inferredFilterParts.join(' AND ')
+      : undefined;
+
+    // 4. Gộp Filter
+    const finalFilter = this.mergeFilterClauses(
+      explicitFilter ? [explicitFilter] : undefined,
+      inferredFilter ? [inferredFilter] : undefined,
+    );
+
+    // 5. Strategy Execution
+    const effectiveQ =
+      intent.strategy === 'filter-only' ? '' : intent.cleanQuery;
+
+    // Nếu analyzer lỡ suy được strategy filter-only nhưng không resolve ra filter nào thực sự,
+    // fallback về full-text thay vì tự trả 0 hits.
+    const safeEffectiveQ = !effectiveQ && !finalFilter ? rawQ : effectiveQ;
+
+    if (!safeEffectiveQ && !finalFilter) {
       return {
         hits: [],
         facets: {},
@@ -633,46 +647,44 @@ export class SearchService implements OnModuleInit {
     const queryId = this.newQueryId();
     const t0 = Date.now();
 
-    const doSearch = (input: {
-      filter?: string;
-      limit?: number;
-      offset?: number;
-    }) =>
-      this.productsIndex().search(q, {
-        limit: input.limit ?? limit,
-        offset: input.offset ?? offset,
-        filter: input.filter,
-        sort: this.buildSort(params),
-        facets:
-          params.facets === false
-            ? undefined
-            : ['brandId', 'categoryId', 'attributePairs'],
-        attributesToRetrieve: [
-          'id',
-          'name',
-          'slug',
-          'image',
-          'minPrice',
-          'maxPrice',
-          'inStock',
-          'totalStock',
-          'rating',
-          'reviewCount',
-          'brandId',
-          'categoryId',
-          'isFeatured',
-          'createdAt',
-        ],
+    const doSearch = (input: { filter?: string; qToUse?: string }) => {
+      const searchQuery =
+        input.qToUse !== undefined ? input.qToUse : safeEffectiveQ;
+      return this.productsIndex().search(
+        searchQuery,
+        this.buildSearchOptions({
+          q: searchQuery,
+          params,
+          filter: input.filter,
+          limit,
+          offset,
+        }),
+      );
+    };
+
+    let res: any = await doSearch({ filter: finalFilter });
+    let totalHits = res.estimatedTotalHits ?? res.nbHits ?? 0;
+
+    // 6. Fallback an toàn (nếu intent bị bắt quá chặt làm mất kết quả)
+    if (totalHits === 0 && inferredFilter) {
+      const fallbackRes: any = await doSearch({
+        filter: explicitFilter,
+        qToUse: rawQ,
       });
-    const res: any = await doSearch({ filter });
+      const fallbackTotalHits =
+        fallbackRes.estimatedTotalHits ?? fallbackRes.nbHits ?? 0;
+      if (fallbackTotalHits > 0) {
+        res = fallbackRes;
+        totalHits = fallbackTotalHits;
+      }
+    }
 
     const latencyMs = Date.now() - t0;
-    const totalHits = res.estimatedTotalHits ?? res.nbHits ?? 0;
 
-    // ✅ Analytics: log search (best-effort)
+    // 7. Ghi Log nâng cao có thông tin Intent
     void this.searchLogModel.create({
       queryId,
-      q,
+      q: rawQ,
       filters: {
         categoryId: params.categoryId,
         brandId: params.brandId,
@@ -680,6 +692,16 @@ export class SearchService implements OnModuleInit {
         minPrice: params.minPrice,
         maxPrice: params.maxPrice,
         attributes: params.attributes,
+        inferredCategoryIds:
+          intent.inferredCategoryIds.length > 0
+            ? intent.inferredCategoryIds
+            : undefined,
+        inferredBrandIds:
+          intent.inferredBrandIds.length > 0
+            ? intent.inferredBrandIds
+            : undefined,
+        inferredIntent: intent.intentGroup,
+        inferredSearchMode: intent.strategy,
       },
       ...(params.sort ? { sort: params.sort } : {}),
       totalHits,
@@ -699,18 +721,18 @@ export class SearchService implements OnModuleInit {
       ? await this.mapFacetLabels(facets)
       : undefined;
 
-    // ✅ P1 (nhẹ, dễ demo): no-result handling
-    // 1) suggestedQueries: từ analytics (prefix)
-    // 2) relaxed preview: nếu có filter attributes quá chặt -> retry bỏ attributes
     let noResult: any = undefined;
-    if (totalHits === 0 && q) {
-      const suggestedQueries = await this.suggestedQueriesByPrefix(q, 5);
-
+    if (totalHits === 0 && rawQ) {
+      const suggestedQueries = await this.suggestedQueriesByPrefix(rawQ, 5);
       let relaxed: any = undefined;
       if (params.attributes) {
-        const relaxedFilter = this.buildMeiliFilter(params, {
+        const relaxedExplicitFilter = this.buildMeiliFilter(params, {
           ignoreAttributes: true,
         });
+        const relaxedFilter = this.mergeFilterClauses(
+          relaxedExplicitFilter ? [relaxedExplicitFilter] : undefined,
+          inferredFilter ? [inferredFilter] : undefined,
+        );
         const relaxedRes: any = await doSearch({ filter: relaxedFilter });
         const relaxedTotalHits =
           relaxedRes.estimatedTotalHits ?? relaxedRes.nbHits ?? 0;
@@ -722,11 +744,7 @@ export class SearchService implements OnModuleInit {
           };
         }
       }
-
-      noResult = {
-        suggestedQueries,
-        ...(relaxed ? { relaxed } : {}),
-      };
+      noResult = { suggestedQueries, ...(relaxed ? { relaxed } : {}) };
     }
 
     return {
@@ -742,19 +760,15 @@ export class SearchService implements OnModuleInit {
     };
   }
 
-  // -----------------------------
-  // ✅ Suggest endpoint
-  // -----------------------------
   async suggest(q: string) {
     const keyword = (q ?? '').trim();
-    if (!keyword) {
+    if (!keyword)
       return {
         querySuggestions: [],
         productSuggestions: [],
         brandSuggestions: [],
         categorySuggestions: [],
       };
-    }
 
     const res: any = await this.productsIndex().search(keyword, {
       limit: 6,
@@ -767,7 +781,6 @@ export class SearchService implements OnModuleInit {
         'categoryId',
       ],
     });
-
     const products = (res.hits ?? []).map((h: any) => ({
       id: h.id,
       name: h.name,
@@ -777,10 +790,8 @@ export class SearchService implements OnModuleInit {
       categoryId: h.categoryId,
     }));
 
-    // ✅ bonus: suggest brand/category (để demo autocomplete giống ecommerce)
     const escaped = keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const rx = new RegExp(`^${escaped}`, 'i');
-
     const [brands, categories] = await Promise.all([
       this.brandModel
         .find({ isActive: true, name: rx })
@@ -812,9 +823,6 @@ export class SearchService implements OnModuleInit {
     };
   }
 
-  // -----------------------------
-  // ✅ Click log (analytics)
-  // -----------------------------
   async logClick(input: {
     productId: string;
     queryId?: string;
@@ -823,22 +831,9 @@ export class SearchService implements OnModuleInit {
     userId?: string;
     sessionId?: string;
   }) {
-    return this.clickLogModel.create({
-      productId: input.productId,
-      ...(input.queryId ? { queryId: input.queryId } : {}),
-      ...(input.q ? { q: input.q } : {}),
-      ...(typeof input.position === 'number'
-        ? { position: input.position }
-        : {}),
-      ...(input.userId ? { userId: input.userId } : {}),
-      ...(input.sessionId ? { sessionId: input.sessionId } : {}),
-      timestamp: new Date(),
-    });
+    return this.clickLogModel.create({ ...input, timestamp: new Date() });
   }
 
-  // -----------------------------
-  // ✅ Dashboard APIs (analytics)
-  // -----------------------------
   async topQueries(days = 7, limit = 20) {
     const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
     return this.searchLogModel.aggregate([
@@ -876,8 +871,6 @@ export class SearchService implements OnModuleInit {
 
   async avgLatency(days = 7) {
     const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
-
-    // 1) Avg + count (nhẹ, chạy nhanh)
     const [row] = await this.searchLogModel.aggregate([
       { $match: { timestamp: { $gte: since } } },
       {
@@ -888,36 +881,28 @@ export class SearchService implements OnModuleInit {
         },
       },
     ]);
-
     const count = Number(row?.count ?? 0);
     const avgLatencyMs = Math.round(Number(row?.avgLatency ?? 0));
-
-    // 2) P95: lấy phần tử ở vị trí ceil(0.95*n)-1 sau khi sort latency tăng dần
     let p95LatencyMs = 0;
     if (count > 0) {
       const idx = Math.max(0, Math.ceil(count * 0.95) - 1);
-
       const doc = await this.searchLogModel
         .findOne({ timestamp: { $gte: since } })
         .sort({ latencyMs: 1 })
         .skip(idx)
         .select({ latencyMs: 1, _id: 0 })
         .lean();
-
       p95LatencyMs = Math.round(Number((doc as any)?.latencyMs ?? 0));
     }
-
     return { avgLatencyMs, p95LatencyMs };
   }
 
   async ctr(days = 7) {
     const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
-
     const [searchCount, clickCount] = await Promise.all([
       this.searchLogModel.countDocuments({ timestamp: { $gte: since } }),
       this.clickLogModel.countDocuments({ timestamp: { $gte: since } }),
     ]);
-
     return {
       searches: searchCount,
       clicks: clickCount,
@@ -925,16 +910,10 @@ export class SearchService implements OnModuleInit {
     };
   }
 
-  // -----------------------------
-  // ✅ P0: Analytics nâng cấp để “đúng nghĩa search engine”
-  // -----------------------------
-
-  /** Top queries theo ngày (trend) */
   async topQueriesDaily(days = 7, limitPerDay = 10) {
     const d = this.clampInt(days, 1, 90);
     const limit = this.clampInt(limitPerDay, 1, 50);
     const since = new Date(Date.now() - d * 24 * 60 * 60 * 1000);
-
     return this.searchLogModel.aggregate([
       { $match: { timestamp: { $gte: since }, q: { $ne: '' } } },
       {
@@ -959,22 +938,14 @@ export class SearchService implements OnModuleInit {
           items: { $push: { q: '$_id.q', count: '$count' } },
         },
       },
-      {
-        $project: {
-          _id: 0,
-          day: '$_id',
-          top: { $slice: ['$items', limit] },
-        },
-      },
+      { $project: { _id: 0, day: '$_id', top: { $slice: ['$items', limit] } } },
       { $sort: { day: 1 } },
     ]);
   }
 
-  /** No-result rate (0-hit / total searches) */
   async noResultRate(days = 7) {
     const d = this.clampInt(days, 1, 90);
     const since = new Date(Date.now() - d * 24 * 60 * 60 * 1000);
-
     const [searches, noResult] = await Promise.all([
       this.searchLogModel.countDocuments({ timestamp: { $gte: since } }),
       this.searchLogModel.countDocuments({
@@ -982,7 +953,6 @@ export class SearchService implements OnModuleInit {
         totalHits: 0,
       }),
     ]);
-
     return {
       searches,
       noResult,
@@ -990,12 +960,10 @@ export class SearchService implements OnModuleInit {
     };
   }
 
-  /** CTR theo query (dựa trên q trong click log) */
   async ctrByQuery(days = 7, limit = 20) {
     const d = this.clampInt(days, 1, 90);
     const lim = this.clampInt(limit, 1, 100);
     const since = new Date(Date.now() - d * 24 * 60 * 60 * 1000);
-
     const [searchAgg, clickAgg] = await Promise.all([
       this.searchLogModel.aggregate([
         { $match: { timestamp: { $gte: since }, q: { $ne: '' } } },
@@ -1003,19 +971,14 @@ export class SearchService implements OnModuleInit {
       ]),
       this.clickLogModel.aggregate([
         {
-          $match: {
-            timestamp: { $gte: since },
-            q: { $exists: true, $ne: '' },
-          },
+          $match: { timestamp: { $gte: since }, q: { $exists: true, $ne: '' } },
         },
         { $group: { _id: '$q', clicks: { $sum: 1 } } },
       ]),
     ]);
-
     const clickMap = new Map<string, number>();
     for (const r of clickAgg as any[])
       clickMap.set(String(r._id), Number(r.clicks ?? 0));
-
     const rows = (searchAgg as any[]).map((s) => {
       const q = String(s._id);
       const searches = Number(s.searches ?? 0);
@@ -1027,7 +990,6 @@ export class SearchService implements OnModuleInit {
         ctr: searches > 0 ? Number((clicks / searches).toFixed(4)) : 0,
       };
     });
-
     rows.sort((a, b) => b.searches - a.searches);
     return rows.slice(0, lim);
   }
