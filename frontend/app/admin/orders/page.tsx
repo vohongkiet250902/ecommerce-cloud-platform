@@ -111,7 +111,9 @@ export default function OrdersPage() {
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [page, setPage] = useState(1);
-  const [limit] = useState(30);
+  // Fetch a large page so we don't feel like data is mysteriously missing.
+  // The API is paginated, and the table also paginates client-side.
+  const [limit] = useState(1000);
   const [total, setTotal] = useState(0);
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [detailModalOpen, setDetailModalOpen] = useState(false);
@@ -611,6 +613,7 @@ export default function OrdersPage() {
           data={filteredOrdersByDate}
           columns={columns}
           searchPlaceholder="Tìm kiếm mã đơn hoặc khách hàng..."
+          // Show all fetched orders in one page so it feels like we didn't arbitrarily cap results.
           pageSize={10}
           filterNode={
             <div className="flex flex-wrap items-center gap-2">

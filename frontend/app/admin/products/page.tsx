@@ -247,13 +247,15 @@ export default function ProductsPage() {
     },
   });
 
+  const adminProductFetchOpts = { limit: 1000 }; // Backend paginates admin products; fetch a large page so we can show all.
+
   // Fetch initial data
   useEffect(() => {
     const fetchData = async () => {
       try {
         setLoading(true);
         const [productsRes, categoriesRes, brandsRes] = await Promise.all([
-          productApi.getAdminProducts(),
+          productApi.getAdminProducts(adminProductFetchOpts),
           categoryApi.getAdminCategories(),
           brandApi.getAdminBrands(),
         ]);
@@ -307,7 +309,7 @@ export default function ProductsPage() {
       form.reset();
 
       // Reload product list
-      const res = await productApi.getAdminProducts();
+      const res = await productApi.getAdminProducts(adminProductFetchOpts);
       setProducts(res.data.data || res.data);
     } catch {
       toast({
@@ -348,7 +350,7 @@ export default function ProductsPage() {
         description: `Sản phẩm "${product.name}" hiện đã ${newStatus === "active" ? "được kích hoạt" : "ngừng hoạt động"}.`
       });
       // Refresh list
-      const res = await productApi.getAdminProducts();
+      const res = await productApi.getAdminProducts(adminProductFetchOpts);
       setProducts(res.data.data || res.data);
     } catch (error: any) {
       setStatusConfirmOpen(false);
@@ -799,7 +801,7 @@ export default function ProductsPage() {
         onOpenChange={setIsModalOpen}
         initialData={selectedProduct} // Pass selected product
         onSuccess={async (newProduct) => {
-          const res = await productApi.getAdminProducts();
+          const res = await productApi.getAdminProducts(adminProductFetchOpts);
           setProducts(res.data.data || res.data);
           setSelectedProduct(null);
         }}
