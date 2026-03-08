@@ -212,7 +212,7 @@ export function SearchHub() {
                        <Button 
                           variant="ghost" 
                           size="sm" 
-                          className="h-7 rounded-lg text-[10px] font-bold text-muted-foreground hover:text-primary px-2 cursor-pointer"
+                          className="h-7 rounded-lg text-[10px] font-bold text-muted-foreground hover:text-primary border border-border/40 hover:border-primary/20 hover:bg-primary/10 px-2 cursor-pointer"
                           onClick={() => setFilters({
                              categoryId: "",
                              brandId: "",
@@ -287,7 +287,7 @@ export function SearchHub() {
                        {/* Advanced Attributes Manual Input */}
                        <div className="space-y-3">
                           <div className="flex items-center justify-between px-1">
-                             <Label className="text-[11px] font-bold text-muted-foreground">Thuộc tính nâng cao</Label>
+                             <Label className="text-[11px] font-bold text-muted-foreground">Thuộc tính</Label>
                              <TooltipProvider>
                                <Tooltip>
                                   <TooltipTrigger asChild>
@@ -331,7 +331,7 @@ export function SearchHub() {
                             {[
                                { title: "Thương hiệu", data: searchResults.facets?.brandId, labels: searchResults.facetLabels?.brandId, key: "brandId" },
                                { title: "Danh mục", data: searchResults.facets?.categoryId, labels: searchResults.facetLabels?.categoryId, key: "categoryId" },
-                               { title: "Thuộc tính", data: searchResults.facets?.attributePairs, labels: null, key: "attributes" }
+                               { title: "Thông số kỹ thuật", data: searchResults.facets?.attributePairs, labels: null, key: "attributes" }
                             ].map((sec: any, idx: number) => {
                               const hasData = sec.data && Object.keys(sec.data).length > 0;
                               if (!hasData) return null;
