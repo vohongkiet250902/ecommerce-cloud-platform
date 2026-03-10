@@ -19,6 +19,7 @@ import { CouponsModule } from './modules/coupons/coupons.module';
 import { ReviewsModule } from './modules/reviews/reviews.module';
 import { CacheModule } from '@nestjs/cache-manager';
 import { redisStore } from 'cache-manager-redis-yet';
+import { AiChatModule } from './modules/ai-chat/ai-chat.module';
 
 @Module({
   imports: [
@@ -68,6 +69,7 @@ import { redisStore } from 'cache-manager-redis-yet';
         }),
       }),
     }),
+    AiChatModule,
   ],
   controllers: [AppController],
   providers: [AppService],
