@@ -59,6 +59,7 @@ export class TaxonomyResolver {
 
   private assignGroup(normalizedName: string): IntentGroup {
     if (/(dong ho|watch)/.test(normalizedName)) return 'watch';
+
     if (
       /(tai nghe|headphone|earphone|earbuds|airpods|earpods|buds|audio)/.test(
         normalizedName,
@@ -66,9 +67,11 @@ export class TaxonomyResolver {
     ) {
       return 'audio';
     }
+
     if (/(tablet|ipad|galaxy tab|may tinh bang|\btab\b)/.test(normalizedName)) {
       return 'tablet';
     }
+
     if (
       /(laptop|macbook|notebook|vivobook|inspiron|tuf|loq|may tinh xach tay)/.test(
         normalizedName,
@@ -76,6 +79,7 @@ export class TaxonomyResolver {
     ) {
       return 'laptop';
     }
+
     if (
       /(pin du phong|powerbank|cap sac|cu sac|bo sac|adapter|charger|cap & sac|cap va sac|phu kien)/.test(
         normalizedName,
@@ -84,8 +88,18 @@ export class TaxonomyResolver {
       return 'accessory';
     }
 
+    // category đặt tên theo brand nhưng thực chất là nhóm laptop
+    if (
+      /^(asus|acer|dell|hp|lenovo|msi|gigabyte|razer|huawei|lg)$/.test(
+        normalizedName,
+      )
+    ) {
+      return 'laptop';
+    }
+
     // category đặt tên theo brand nhưng thực chất là nhóm điện thoại
     if (/^(apple|samsung|xiaomi|oppo)$/.test(normalizedName)) return 'phone';
+
     if (
       /(dien thoai|phone|smartphone|mobile|iphone|galaxy s|galaxy z|reno|find x|redmi)/.test(
         normalizedName,

@@ -2,7 +2,7 @@ import { BadRequestException, Injectable, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { MeiliSearch } from 'meilisearch';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { Model, Types } from 'mongoose';
 import * as fs from 'fs';
 import * as path from 'path';
 import { SearchLog, SearchLogDocument } from './schemas/search-log.schema';
@@ -21,6 +21,17 @@ type SearchSort =
   | 'createdAt:desc'
   | 'rating:desc';
 
+type AttributeFilters = Record<string, string[]>;
+
+type CanonicalAttributeKey = 'color' | 'storage' | 'ram';
+
+type MatchedVariantPreview = {
+  sku?: string;
+  price: number;
+  stock: number;
+  attributes: Partial<Record<CanonicalAttributeKey, string>>;
+};
+
 export type SearchV2Params = {
   q?: string;
   page?: number;
@@ -30,12 +41,12 @@ export type SearchV2Params = {
   inStock?: boolean;
   minPrice?: number;
   maxPrice?: number;
-  attributes?: string;
   sort?: SearchSort;
   facets?: boolean;
   facetLabels?: boolean;
   userId?: string;
   sessionId?: string;
+  attributes?: AttributeFilters;
 };
 
 type ProductSearchDoc = {
@@ -43,6 +54,7 @@ type ProductSearchDoc = {
   name: string;
   slug: string;
   description?: string;
+  semanticText?: string;
   categoryName?: string;
   brandName?: string;
   categoryId?: string;
@@ -89,7 +101,6 @@ export class SearchService implements OnModuleInit {
 
     this.client = new MeiliSearch({ host, apiKey });
 
-    // Khởi tạo các Utilities phân tích ngữ nghĩa
     this.taxonomyResolver = new TaxonomyResolver(
       this.categoryModel,
       this.brandModel,
@@ -109,7 +120,7 @@ export class SearchService implements OnModuleInit {
 
   async onModuleInit() {
     try {
-      await this.taxonomyResolver.loadTaxonomy(); // Nạp danh mục, brand vào memory
+      await this.taxonomyResolver.loadTaxonomy();
       await this.ensureProductsIndexAndSettings();
     } catch (e: any) {
       console.error('[Meili] ensure settings failed:', e?.message ?? e);
@@ -135,7 +146,9 @@ export class SearchService implements OnModuleInit {
         const raw = fs.readFileSync(filePath, 'utf8');
         const parsed = JSON.parse(raw);
         if (parsed && typeof parsed === 'object') return parsed;
-      } catch {}
+      } catch {
+        // ignore malformed synonym file
+      }
     }
 
     return {
@@ -156,7 +169,14 @@ export class SearchService implements OnModuleInit {
     }
 
     await this.productsIndex().updateSettings({
-      searchableAttributes: ['name', 'brandName', 'categoryName', 'slug'],
+      searchableAttributes: [
+        'name',
+        'brandName',
+        'categoryName',
+        'slug',
+        'description',
+        'semanticText',
+      ],
       filterableAttributes: [
         'categoryId',
         'brandId',
@@ -192,6 +212,670 @@ export class SearchService implements OnModuleInit {
       .replace(/\s+/g, ' ');
   }
 
+  private normalizeLooseVi(s: any): string {
+    return String(s ?? '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/đ/g, 'd')
+      .replace(/Đ/g, 'D')
+      .toLowerCase()
+      .replace(/[^a-z0-9\s.,/-]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  private normalizeAttrToken(value: any): string {
+    return String(value ?? '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/đ/g, 'd')
+      .replace(/Đ/g, 'D')
+      .toLowerCase()
+      .replace(/[_/]+/g, ' ')
+      .replace(/[^a-z0-9\s.-]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  private escapeRegex(value: string): string {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
+  private slugAttrToken(value: any): string {
+    return this.normalizeAttrToken(value).replace(/\s+/g, '_');
+  }
+
+  private toPlainValue(value: any): any {
+    if (
+      value &&
+      typeof value === 'object' &&
+      typeof (value as any).toObject === 'function'
+    ) {
+      return (value as any).toObject();
+    }
+    return value;
+  }
+
+  private isKeyValueEntry(value: any): value is { key: any; value: any } {
+    const plain = this.toPlainValue(value);
+    return (
+      !!plain &&
+      typeof plain === 'object' &&
+      !Array.isArray(plain) &&
+      'key' in plain &&
+      'value' in plain
+    );
+  }
+
+  private extractKeyValueEntries(
+    input: any,
+  ): Array<{ key: string; value: any }> {
+    const plain = this.toPlainValue(input);
+    if (!plain) return [];
+
+    if (Array.isArray(plain)) {
+      return plain
+        .map((item) => this.toPlainValue(item))
+        .filter(
+          (item: any) =>
+            item &&
+            typeof item === 'object' &&
+            !Array.isArray(item) &&
+            'key' in item,
+        )
+        .map((item: any) => ({
+          key: String(item.key ?? '').trim(),
+          value: item.value,
+        }))
+        .filter((item) => item.key);
+    }
+
+    if (typeof plain === 'object') {
+      return Object.entries(plain)
+        .map(([key, value]) => ({
+          key: String(key).trim(),
+          value: this.toPlainValue(value),
+        }))
+        .filter((item) => item.key);
+    }
+
+    return [];
+  }
+
+  private canonicalAttributeKey(
+    rawKey: any,
+  ): CanonicalAttributeKey | undefined {
+    const key = this.normalizeAttrToken(rawKey);
+    if (!key) return undefined;
+
+    if (
+      /^(mau|mau sac|color|colour|finish)$/.test(key) ||
+      key.includes('mau')
+    ) {
+      return 'color';
+    }
+
+    if (/^(ram|bo nho ram|memory ram)$/.test(key) || key.includes('ram')) {
+      return 'ram';
+    }
+
+    if (
+      /^(storage|rom|ssd|hdd|capacity|dung luong|bo nho|bo nho trong|phien ban|version)$/.test(
+        key,
+      ) ||
+      key.includes('dung luong') ||
+      key.includes('storage') ||
+      key.includes('rom') ||
+      key.includes('phien ban')
+    ) {
+      return 'storage';
+    }
+
+    return undefined;
+  }
+
+  private colorAliasEntries(): Array<[string, string[]]> {
+    return [
+      ['den', ['den', 'black', 'jet black', 'midnight', 'black titanium']],
+      ['trang', ['trang', 'white', 'starlight', 'silver white']],
+      ['xam', ['xam', 'gray', 'grey', 'space gray', 'graphite']],
+      ['bac', ['bac', 'silver']],
+      ['vang', ['vang', 'gold']],
+      ['hong', ['hong', 'pink', 'rose gold']],
+      ['do', ['do', 'red']],
+      ['xanh', ['xanh', 'blue', 'xanh da troi', 'sky blue', 'light blue']],
+      ['xanh_la', ['xanh la', 'green']],
+      ['tim', ['tim', 'purple', 'violet']],
+      ['titan', ['titan', 'titanium', 'natural titanium']],
+    ];
+  }
+
+  private canonicalizeCapacityValue(rawValue: any): string | undefined {
+    const text = this.normalizeAttrToken(rawValue).replace(/\s+/g, '');
+    const match = text.match(/(\d{1,4})(gb|tb)/i);
+    if (!match) return undefined;
+
+    const num = Number(match[1]);
+    const unit = String(match[2]).toLowerCase();
+
+    if (!Number.isFinite(num) || num <= 0) return undefined;
+    return `${num}${unit}`;
+  }
+
+  private canonicalizeColorValue(rawValue: any): string | undefined {
+    const text = ` ${this.normalizeAttrToken(rawValue)} `;
+    if (!text.trim()) return undefined;
+
+    for (const [canonical, aliases] of this.colorAliasEntries()) {
+      for (const alias of aliases) {
+        const rx = new RegExp(`\\b${this.escapeRegex(alias)}\\b`, 'i');
+        if (rx.test(text)) return canonical;
+      }
+    }
+
+    return undefined;
+  }
+
+  private canonicalizeAttributeValue(
+    canonicalKey: CanonicalAttributeKey,
+    rawValue: any,
+  ): string | undefined {
+    if (rawValue == null || typeof rawValue === 'object') return undefined;
+
+    if (canonicalKey === 'color') {
+      return this.canonicalizeColorValue(rawValue);
+    }
+
+    if (canonicalKey === 'storage' || canonicalKey === 'ram') {
+      return this.canonicalizeCapacityValue(rawValue);
+    }
+
+    return undefined;
+  }
+
+  private resolveCanonicalAttribute(
+    rawKey: any,
+    rawValue: any,
+  ): { key: CanonicalAttributeKey; value: string } | undefined {
+    const key = this.normalizeAttrToken(rawKey);
+    if (!key) return undefined;
+
+    const colorValue = this.canonicalizeColorValue(rawValue);
+    const capacityValue = this.canonicalizeCapacityValue(rawValue);
+
+    if (
+      (/^(mau|mau sac|color|colour|finish)$/.test(key) ||
+        key.includes('mau')) &&
+      colorValue
+    ) {
+      return { key: 'color', value: colorValue };
+    }
+
+    if (
+      (/^(ram|bo nho ram|memory ram|unified memory)$/.test(key) ||
+        key.includes('ram') ||
+        key.includes('unified memory')) &&
+      capacityValue
+    ) {
+      return { key: 'ram', value: capacityValue };
+    }
+
+    // key mơ hồ như "bo nho" / "memory": dùng value để quyết định
+    if (
+      (key === 'bo nho' || key === 'memory' || key.includes('bo nho')) &&
+      capacityValue
+    ) {
+      const numeric = Number.parseInt(capacityValue, 10);
+
+      // 8/16/32/64GB thường là RAM
+      if (capacityValue.endsWith('gb') && numeric > 0 && numeric <= 64) {
+        return { key: 'ram', value: capacityValue };
+      }
+
+      // 128GB+ hoặc TB thường là storage
+      return { key: 'storage', value: capacityValue };
+    }
+
+    if (
+      (/^(storage|rom|ssd|hdd|capacity|dung luong|bo nho trong|phien ban|version)$/.test(
+        key,
+      ) ||
+        key.includes('dung luong') ||
+        key.includes('storage') ||
+        key.includes('rom') ||
+        key.includes('ssd') ||
+        key.includes('hdd') ||
+        key.includes('phien ban')) &&
+      capacityValue
+    ) {
+      return { key: 'storage', value: capacityValue };
+    }
+
+    return undefined;
+  }
+
+  private mergeAttributeFilters(
+    ...sources: Array<AttributeFilters | undefined>
+  ): AttributeFilters | undefined {
+    const merged: AttributeFilters = {};
+
+    for (const source of sources) {
+      if (!source) continue;
+
+      for (const [key, values] of Object.entries(source)) {
+        const arr = Array.isArray(values) ? values : [values as any];
+        merged[key] = Array.from(
+          new Set([...(merged[key] ?? []), ...arr.map((x) => String(x))]),
+        );
+      }
+    }
+
+    return Object.keys(merged).length > 0 ? merged : undefined;
+  }
+
+  private extractNaturalAttributeFilters(query: string): {
+    cleanedQuery: string;
+    attributes?: AttributeFilters;
+  } {
+    let working = ` ${this.normalizeLooseVi(query)} `;
+    const extracted: AttributeFilters = {};
+
+    const add = (key: string, value: string | undefined) => {
+      if (!value) return;
+      extracted[key] = Array.from(new Set([...(extracted[key] ?? []), value]));
+    };
+
+    const replacePattern = (
+      regex: RegExp,
+      onMatch: (...groups: string[]) => { key: string; value?: string },
+    ) => {
+      working = working.replace(regex, (...args: any[]) => {
+        const groups = args.slice(1, -2) as string[];
+        const result = onMatch(...groups);
+        add(result.key, result.value);
+        return ' ';
+      });
+    };
+
+    replacePattern(
+      /\b(?:ram\s*)?(\d{1,2}|24|32|48|64)\s*gb\s*ram\b/gi,
+      (num) => ({
+        key: 'ram',
+        value: `${Number(num)}gb`,
+      }),
+    );
+
+    replacePattern(/\bram\s*(\d{1,2}|24|32|48|64)\s*gb\b/gi, (num) => ({
+      key: 'ram',
+      value: `${Number(num)}gb`,
+    }));
+
+    replacePattern(/\b(\d{1,2}|24|32|48|64)\s*gb\s*ram\b/gi, (num) => ({
+      key: 'ram',
+      value: `${Number(num)}gb`,
+    }));
+
+    replacePattern(
+      /\b(?:ssd|rom|storage|bo nho|dung luong)\s*(\d{2,4})\s*(gb|tb)\b/gi,
+      (num, unit) => ({
+        key: 'storage',
+        value:
+          Number(num) >= 64
+            ? `${Number(num)}${String(unit).toLowerCase()}`
+            : undefined,
+      }),
+    );
+
+    replacePattern(
+      /\b(\d{2,4})\s*(gb|tb)\b(?:\s*(?:ssd|rom|storage|bo nho|dung luong))?\b/gi,
+      (num, unit) => ({
+        key: 'storage',
+        value:
+          Number(num) >= 64
+            ? `${Number(num)}${String(unit).toLowerCase()}`
+            : undefined,
+      }),
+    );
+
+    const colorAliases = this.colorAliasEntries()
+      .flatMap(([canonical, aliases]) =>
+        aliases.map((alias) => ({ canonical, alias })),
+      )
+      .sort((a, b) => b.alias.length - a.alias.length);
+
+    for (const item of colorAliases) {
+      const rx = new RegExp(`\\b${this.escapeRegex(item.alias)}\\b`, 'gi');
+      working = working.replace(rx, () => {
+        add('color', item.canonical);
+        return ' ';
+      });
+    }
+
+    if (extracted.color) {
+      working = working.replace(/\b(?:mau|mau sac|color|colour)\b/gi, ' ');
+    }
+    if (extracted.storage) {
+      working = working.replace(
+        /\b(?:ssd|rom|storage|bo nho|dung luong)\b/gi,
+        ' ',
+      );
+    }
+    if (extracted.ram) {
+      working = working.replace(/\bram\b/gi, ' ');
+    }
+
+    const cleanedQuery = working.replace(/\s+/g, ' ').trim();
+
+    return {
+      cleanedQuery,
+      attributes: Object.keys(extracted).length > 0 ? extracted : undefined,
+    };
+  }
+
+  private collectAttributePairs(productData: any): string[] {
+    const out = new Set<string>();
+
+    const pushPair = (rawKey: any, rawValue: any) => {
+      const resolved = this.resolveCanonicalAttribute(rawKey, rawValue);
+      if (!resolved) return;
+
+      out.add(`${resolved.key}:${resolved.value}`);
+    };
+
+    for (const item of this.extractKeyValueEntries(productData?.specs)) {
+      pushPair(item.key, item.value);
+    }
+
+    const activeVariants: any[] = Array.isArray(productData?.variants)
+      ? productData.variants.filter(
+          (v: any) => (v?.status || 'active') === 'active',
+        )
+      : [];
+
+    for (const variant of activeVariants) {
+      for (const item of this.extractKeyValueEntries(variant?.attributes)) {
+        pushPair(item.key, item.value);
+      }
+    }
+
+    return Array.from(out);
+  }
+
+  private buildAttributeFilter(attributes?: AttributeFilters): string[] {
+    if (!attributes) return [];
+
+    const clauses: string[] = [];
+
+    for (const [rawKey, rawValues] of Object.entries(attributes)) {
+      const key = this.canonicalAttributeKey(rawKey);
+      if (!key) continue;
+
+      const values = Array.from(
+        new Set(
+          (Array.isArray(rawValues) ? rawValues : [rawValues])
+            .map((x) => this.canonicalizeAttributeValue(key, x))
+            .filter((x): x is string => Boolean(x)),
+        ),
+      );
+
+      if (values.length === 0) continue;
+
+      const orClause = values
+        .map((value) => `attributePairs = "${this.esc(`${key}:${value}`)}"`)
+        .join(' OR ');
+
+      clauses.push(values.length > 1 ? `(${orClause})` : orClause);
+    }
+
+    return clauses;
+  }
+
+  private prettifyAttributeToken(token: string): string {
+    switch (token) {
+      case 'color':
+        return 'Màu sắc';
+      case 'storage':
+        return 'Dung lượng';
+      case 'ram':
+        return 'RAM';
+      case 'den':
+        return 'Đen';
+      case 'trang':
+        return 'Trắng';
+      case 'xam':
+        return 'Xám';
+      case 'bac':
+        return 'Bạc';
+      case 'vang':
+        return 'Vàng';
+      case 'hong':
+        return 'Hồng';
+      case 'do':
+        return 'Đỏ';
+      case 'xanh':
+        return 'Xanh';
+      case 'xanh_la':
+        return 'Xanh lá';
+      case 'tim':
+        return 'Tím';
+      case 'titan':
+        return 'Titan';
+      default:
+        return String(token ?? '')
+          .replace(/_/g, ' ')
+          .trim();
+    }
+  }
+
+  private mapAttributeFacetLabels(facetDistribution: any) {
+    const raw = facetDistribution?.attributePairs ?? {};
+    const grouped: Record<
+      string,
+      Array<{
+        value: string;
+        label: string;
+        count: number;
+        pair: string;
+      }>
+    > = {};
+
+    for (const [pair, count] of Object.entries(raw)) {
+      const text = String(pair);
+      const idx = text.indexOf(':');
+      if (idx <= 0) continue;
+
+      const key = text.slice(0, idx);
+      const value = text.slice(idx + 1);
+      if (!key || !value) continue;
+
+      if (!grouped[key]) grouped[key] = [];
+
+      grouped[key].push({
+        value,
+        label: this.prettifyAttributeToken(value),
+        count: Number(count ?? 0),
+        pair: text,
+      });
+    }
+
+    for (const key of Object.keys(grouped)) {
+      grouped[key].sort(
+        (a, b) => b.count - a.count || a.value.localeCompare(b.value),
+      );
+    }
+
+    return grouped;
+  }
+
+  private extractVariantCanonicalAttributes(
+    variant: any,
+  ): Partial<Record<CanonicalAttributeKey, string>> {
+    const result: Partial<Record<CanonicalAttributeKey, string>> = {};
+
+    for (const item of this.extractKeyValueEntries(variant?.attributes)) {
+      const resolved = this.resolveCanonicalAttribute(item.key, item.value);
+      if (!resolved) continue;
+
+      result[resolved.key] = resolved.value;
+    }
+
+    return result;
+  }
+
+  private computeVariantEffectivePrice(variant: any): number {
+    const rawPrice = Number(variant?.finalPrice ?? variant?.price ?? 0);
+    if (!Number.isFinite(rawPrice) || rawPrice <= 0) return 0;
+
+    if (variant?.finalPrice != null) return rawPrice;
+
+    const discount = Number(variant?.discountPercentage ?? 0);
+    if (Number.isFinite(discount) && discount > 0) {
+      return Math.round(rawPrice * (1 - discount / 100));
+    }
+
+    return rawPrice;
+  }
+
+  private getMatchedVariants(
+    productData: any,
+    attributes?: AttributeFilters,
+    options?: { requireInStock?: boolean; previewLimit?: number },
+  ): MatchedVariantPreview[] {
+    const previewLimit = Math.max(1, Number(options?.previewLimit ?? 3));
+    const requireInStock = options?.requireInStock === true;
+    const sourceVariants: any[] = Array.isArray(productData?.variants)
+      ? productData.variants
+      : [];
+
+    const requestedPairs: Array<[CanonicalAttributeKey, string[]]> = [];
+
+    for (const [rawKey, rawValues] of Object.entries(attributes ?? {})) {
+      const key = this.canonicalAttributeKey(rawKey);
+      if (!key) continue;
+
+      const values = Array.from(
+        new Set(
+          (Array.isArray(rawValues) ? rawValues : [rawValues])
+            .map((x) => this.canonicalizeAttributeValue(key, x))
+            .filter((x): x is string => Boolean(x)),
+        ),
+      );
+
+      if (values.length > 0) {
+        requestedPairs.push([key, values]);
+      }
+    }
+
+    if (requestedPairs.length === 0) return [];
+
+    const matched: MatchedVariantPreview[] = [];
+
+    for (const variant of sourceVariants) {
+      if (!variant) continue;
+      if ((variant.status || 'active') !== 'active') continue;
+
+      const stock = Number(variant.stock ?? 0);
+      if (requireInStock && (!Number.isFinite(stock) || stock <= 0)) continue;
+
+      const variantAttrs = this.extractVariantCanonicalAttributes(variant);
+
+      let ok = true;
+      for (const [key, wantedValues] of requestedPairs) {
+        const actual = variantAttrs[key];
+        if (!actual || !wantedValues.includes(actual)) {
+          ok = false;
+          break;
+        }
+      }
+
+      if (!ok) continue;
+
+      matched.push({
+        sku: variant?.sku ? String(variant.sku) : undefined,
+        price: this.computeVariantEffectivePrice(variant),
+        stock: Number.isFinite(stock) ? stock : 0,
+        attributes: variantAttrs,
+      });
+    }
+
+    matched.sort((a, b) => {
+      if (b.stock !== a.stock) return b.stock - a.stock;
+      return a.price - b.price;
+    });
+
+    return matched.slice(0, previewLimit);
+  }
+
+  private async applyVariantPostFilter(
+    coarseHits: any[],
+    attributes?: AttributeFilters,
+    options?: { requireInStock?: boolean; previewLimit?: number },
+  ) {
+    const hasVariantFilters =
+      !!attributes &&
+      Object.keys(attributes).some((k) => {
+        const key = this.canonicalAttributeKey(k);
+        if (!key) return false;
+        const values = Array.isArray(attributes[k]) ? attributes[k] : [];
+        return values.length > 0;
+      });
+
+    if (!hasVariantFilters) {
+      return {
+        hits: coarseHits,
+        strictVariantFiltering: false,
+      };
+    }
+
+    const ids = coarseHits
+      .map((hit) => {
+        try {
+          return new Types.ObjectId(String(hit.id));
+        } catch {
+          return null;
+        }
+      })
+      .filter((x): x is Types.ObjectId => Boolean(x));
+
+    if (ids.length === 0) {
+      return {
+        hits: [],
+        strictVariantFiltering: true,
+      };
+    }
+
+    const docs = await this.productModel
+      .find({ _id: { $in: ids }, status: 'active' })
+      .select({ variants: 1, status: 1 })
+      .lean();
+
+    const productMap = new Map<string, any>();
+    for (const doc of docs as any[]) {
+      productMap.set(String(doc._id), doc);
+    }
+
+    const filteredHits: any[] = [];
+
+    for (const hit of coarseHits) {
+      const doc = productMap.get(String(hit.id));
+      if (!doc) continue;
+
+      const matchedVariants = this.getMatchedVariants(doc, attributes, options);
+      if (matchedVariants.length === 0) continue;
+
+      filteredHits.push({
+        ...hit,
+        matchedVariantCount: matchedVariants.length,
+        matchedVariants,
+      });
+    }
+
+    return {
+      hits: filteredHits,
+      strictVariantFiltering: true,
+    };
+  }
+
   private mergeFilterClauses(
     ...groups: Array<Array<string | undefined | null> | undefined>
   ): string | undefined {
@@ -199,6 +883,34 @@ export class SearchService implements OnModuleInit {
       .flatMap((group) => group ?? [])
       .filter((x): x is string => Boolean(x && x.trim()));
     return parts.length ? parts.join(' AND ') : undefined;
+  }
+
+  private looksConversationalQuery(q: string): boolean {
+    const normalized = this.normalizeLooseVi(q);
+    if (!normalized) return false;
+
+    const conversationalSignals = [
+      'nao',
+      'phu hop',
+      'hop cho',
+      'nen mua',
+      'goi y',
+      'tu van',
+      'giup',
+      'duoi',
+      'tren',
+      'tu',
+      'nguoi lon tuoi',
+      'hoc sinh',
+      'sinh vien',
+      'choi game',
+      'van phong',
+    ];
+
+    return (
+      normalized.split(/\s+/).length >= 4 ||
+      conversationalSignals.some((signal) => normalized.includes(signal))
+    );
   }
 
   private buildSearchOptions(input: {
@@ -221,7 +933,10 @@ export class SearchService implements OnModuleInit {
         'id',
         'name',
         'slug',
+        'description',
+        'semanticText',
         'image',
+        'images',
         'minPrice',
         'maxPrice',
         'inStock',
@@ -229,13 +944,22 @@ export class SearchService implements OnModuleInit {
         'rating',
         'reviewCount',
         'brandId',
+        'brandName',
         'categoryId',
+        'categoryName',
         'isFeatured',
         'createdAt',
+        'attributePairs',
       ],
     };
 
-    if (input.q.split(' ').length > 1) {
+    const tokenCount = input.q.trim().split(/\s+/).filter(Boolean).length;
+    if (
+      input.q.trim() &&
+      tokenCount > 0 &&
+      tokenCount <= 2 &&
+      !this.looksConversationalQuery(input.q)
+    ) {
       opts.matchingStrategy = 'all';
     }
 
@@ -254,8 +978,10 @@ export class SearchService implements OnModuleInit {
     for (const v of variants) {
       if (!v) continue;
       if ((v.status || 'active') !== 'active') continue;
+
       const rawPrice = Number(v.finalPrice ?? v.price ?? 0);
       if (!Number.isFinite(rawPrice) || rawPrice <= 0) continue;
+
       const discount = Number(v.discountPercentage ?? 0);
       const effectivePrice =
         v.finalPrice != null
@@ -263,8 +989,10 @@ export class SearchService implements OnModuleInit {
           : Number.isFinite(discount) && discount > 0
             ? Math.round(rawPrice * (1 - discount / 100))
             : rawPrice;
-      if (Number.isFinite(effectivePrice) && effectivePrice > 0)
+
+      if (Number.isFinite(effectivePrice) && effectivePrice > 0) {
         prices.push(effectivePrice);
+      }
     }
 
     if (prices.length === 0) return { minPrice: 0, maxPrice: 0 };
@@ -274,9 +1002,11 @@ export class SearchService implements OnModuleInit {
   private computeTotalStock(productData: any): number {
     const totalStock = Number(productData?.totalStock ?? NaN);
     if (Number.isFinite(totalStock)) return totalStock;
+
     const variants: any[] = Array.isArray(productData?.variants)
       ? productData.variants
       : [];
+
     let sum = 0;
     for (const v of variants) {
       if (!v) continue;
@@ -284,31 +1014,200 @@ export class SearchService implements OnModuleInit {
       const s = Number(v.stock ?? 0);
       if (Number.isFinite(s) && s > 0) sum += s;
     }
+
     return sum;
   }
 
-  private buildAttributePairs(productData: any): string[] {
-    const pairs = new Set<string>();
-    const pushAttrs = (attrs: any[]) => {
-      if (!Array.isArray(attrs)) return;
-      for (const a of attrs) {
-        const key = this.normalizeText(a?.key);
-        const value = this.normalizeText(a?.value);
-        if (!key || !value) continue;
-        pairs.add(`${key}:${value}`);
+  private collectSemanticFragments(
+    value: any,
+    output: string[],
+    depth = 0,
+  ): void {
+    if (value == null || depth > 3) return;
+
+    const plain = this.toPlainValue(value);
+    if (plain == null) return;
+
+    if (
+      typeof plain === 'string' ||
+      typeof plain === 'number' ||
+      typeof plain === 'boolean'
+    ) {
+      const text = String(plain).trim();
+      if (text) output.push(text);
+      return;
+    }
+
+    if (Array.isArray(plain)) {
+      for (const item of plain) {
+        const normalizedItem = this.toPlainValue(item);
+
+        if (this.isKeyValueEntry(normalizedItem)) {
+          const key = String(normalizedItem.key ?? '').trim();
+          const val = normalizedItem.value;
+
+          if (val == null) continue;
+
+          if (
+            typeof val === 'string' ||
+            typeof val === 'number' ||
+            typeof val === 'boolean'
+          ) {
+            const text = `${key} ${String(val).trim()}`.trim();
+            if (text) output.push(text);
+          } else {
+            this.collectSemanticFragments(val, output, depth + 1);
+          }
+        } else {
+          this.collectSemanticFragments(normalizedItem, output, depth + 1);
+        }
       }
+      return;
+    }
+
+    if (typeof plain === 'object') {
+      for (const [key, val] of Object.entries(plain)) {
+        if (val == null) continue;
+
+        if (
+          typeof val === 'string' ||
+          typeof val === 'number' ||
+          typeof val === 'boolean'
+        ) {
+          const text = `${key} ${String(val).trim()}`.trim();
+          if (text) output.push(text);
+        } else {
+          this.collectSemanticFragments(val, output, depth + 1);
+        }
+      }
+    }
+  }
+
+  private buildSemanticText(
+    productData: any,
+    brandName?: string,
+    categoryName?: string,
+  ): string {
+    const parts: string[] = [];
+
+    const push = (value: any) => {
+      const text = String(value ?? '').trim();
+      if (text) parts.push(text);
     };
 
-    pushAttrs(productData?.specs);
-    const variants: any[] = Array.isArray(productData?.variants)
-      ? productData.variants
+    push(productData?.name);
+    push(brandName);
+    push(categoryName);
+    push(productData?.description);
+
+    const semanticFragments: string[] = [];
+    this.collectSemanticFragments(productData?.specs, semanticFragments);
+
+    const activeVariants: any[] = Array.isArray(productData?.variants)
+      ? productData.variants.filter(
+          (v: any) => (v?.status || 'active') === 'active',
+        )
       : [];
-    for (const v of variants) {
-      if (!v) continue;
-      if ((v.status || 'active') !== 'active') continue;
-      pushAttrs(v?.attributes);
+
+    for (const variant of activeVariants.slice(0, 3)) {
+      this.collectSemanticFragments(variant?.attributes, semanticFragments);
     }
-    return Array.from(pairs);
+
+    for (const fragment of semanticFragments.slice(0, 25)) {
+      push(fragment);
+    }
+
+    const unique: string[] = [];
+    const seen = new Set<string>();
+
+    for (const part of parts) {
+      const normalized = this.normalizeText(part);
+      if (!normalized || seen.has(normalized)) continue;
+      seen.add(normalized);
+      unique.push(part);
+    }
+
+    return unique.join('. ').slice(0, 1500);
+  }
+
+  private parsePriceToken(raw: string): number | undefined {
+    const input = this.normalizeLooseVi(raw);
+    if (!input) return undefined;
+
+    const numberMatch = input.match(/[\d]+(?:[.,][\d]+)?/);
+    if (!numberMatch) return undefined;
+
+    const numeric = Number(numberMatch[0].replace(',', '.'));
+    if (!Number.isFinite(numeric) || numeric <= 0) return undefined;
+
+    const normalized = input.replace(/\s+/g, '');
+
+    let multiplier = 1;
+    if (/(ty|ti)/.test(normalized)) multiplier = 1_000_000_000;
+    else if (/(trieu|tr|cu)/.test(normalized)) multiplier = 1_000_000;
+    else if (/(nghin|ngan|k)/.test(normalized)) multiplier = 1_000;
+    else if (numeric < 1000) return undefined;
+
+    return Math.round(numeric * multiplier);
+  }
+
+  private extractNaturalPriceRange(query: string): {
+    minPrice?: number;
+    maxPrice?: number;
+  } {
+    const q = this.normalizeLooseVi(query);
+    if (!q) return {};
+
+    const makeTokenPattern =
+      '([0-9]+(?:[.,][0-9]+)?(?:\\s*(?:ty|ti|trieu|tr|cu|nghin|ngan|k))?)';
+
+    const rangePatterns = [
+      new RegExp(
+        `\\btu\\s+${makeTokenPattern}\\s+(?:den|toi)\\s+${makeTokenPattern}\\b`,
+        'i',
+      ),
+      new RegExp(`\\b${makeTokenPattern}\\s*-\\s*${makeTokenPattern}\\b`, 'i'),
+    ];
+
+    for (const pattern of rangePatterns) {
+      const match = q.match(pattern);
+      if (!match) continue;
+
+      const min = this.parsePriceToken(match[1]);
+      const max = this.parsePriceToken(match[2]);
+      if (min != null && max != null) {
+        return min <= max
+          ? { minPrice: min, maxPrice: max }
+          : { minPrice: max, maxPrice: min };
+      }
+    }
+
+    const maxPatterns = [
+      new RegExp(
+        `\\b(?:duoi|toi da|khong qua|nho hon|re hon)\\s+${makeTokenPattern}\\b`,
+        'i',
+      ),
+    ];
+
+    for (const pattern of maxPatterns) {
+      const match = q.match(pattern);
+      if (!match) continue;
+      const max = this.parsePriceToken(match[1]);
+      if (max != null) return { maxPrice: max };
+    }
+
+    const minPatterns = [
+      new RegExp(`\\b(?:tren|tu)\\s+${makeTokenPattern}\\b`, 'i'),
+    ];
+
+    for (const pattern of minPatterns) {
+      const match = q.match(pattern);
+      if (!match) continue;
+      const min = this.parsePriceToken(match[1]);
+      if (min != null) return { minPrice: min };
+    }
+
+    return {};
   }
 
   private toSearchDoc(productData: any): ProductSearchDoc | null {
@@ -321,29 +1220,35 @@ export class SearchService implements OnModuleInit {
 
     const categoryIdRaw = productData.categoryId;
     const brandIdRaw = productData.brandId;
+
     const categoryId =
       categoryIdRaw && typeof categoryIdRaw === 'object' && categoryIdRaw._id
         ? String(categoryIdRaw._id)
         : categoryIdRaw
           ? String(categoryIdRaw)
           : undefined;
+
     const brandId =
       brandIdRaw && typeof brandIdRaw === 'object' && brandIdRaw._id
         ? String(brandIdRaw._id)
         : brandIdRaw
           ? String(brandIdRaw)
           : undefined;
+
     const categoryName =
       categoryIdRaw && typeof categoryIdRaw === 'object' && categoryIdRaw.name
         ? String(categoryIdRaw.name)
         : undefined;
+
     const brandName =
       brandIdRaw && typeof brandIdRaw === 'object' && brandIdRaw.name
         ? String(brandIdRaw.name)
         : undefined;
+
     const images = Array.isArray(productData?.images)
       ? productData.images.map((x: any) => x?.url).filter(Boolean)
       : [];
+
     const createdAt =
       productData?.createdAt instanceof Date
         ? productData.createdAt.getTime()
@@ -351,11 +1256,18 @@ export class SearchService implements OnModuleInit {
           ? Number(productData.createdAt)
           : Date.now();
 
+    const attributePairs = this.collectAttributePairs(productData);
+
     return {
-      id: productData._id.toString(),
+      id: String(productData._id),
       name: String(productData.name ?? ''),
       slug: String(productData.slug ?? ''),
-      description: productData.description ?? '',
+      description: String(productData.description ?? ''),
+      semanticText: this.buildSemanticText(
+        productData,
+        brandName,
+        categoryName,
+      ),
       categoryId,
       brandId,
       categoryName,
@@ -370,7 +1282,7 @@ export class SearchService implements OnModuleInit {
       reviewCount: Number(productData.reviewCount ?? 0) || 0,
       isFeatured: Boolean(productData.isFeatured),
       createdAt,
-      attributePairs: this.buildAttributePairs(productData),
+      attributePairs,
     };
   }
 
@@ -392,13 +1304,17 @@ export class SearchService implements OnModuleInit {
     if (input?.batchSize != null && !Number.isFinite(Number(input.batchSize))) {
       throw new BadRequestException('batchSize must be a number');
     }
+
     const batchSize = this.clampInt(input?.batchSize ?? 500, 50, 2000);
     const purge = input?.purge !== false;
     const onlyActive = input?.onlyActive === true;
 
-    if (purge) await this.productsIndex().deleteAllDocuments();
+    if (purge) {
+      await this.productsIndex().deleteAllDocuments();
+    }
 
     const mongoFilter: any = onlyActive ? { status: 'active' } : {};
+
     const cursor = this.productModel
       .find(mongoFilter)
       .select({
@@ -421,15 +1337,16 @@ export class SearchService implements OnModuleInit {
       .populate({ path: 'brandId', select: 'name' })
       .cursor();
 
-    let scanned = 0,
-      indexed = 0,
-      skipped = 0,
-      batches = 0;
+    let scanned = 0;
+    let indexed = 0;
+    let skipped = 0;
+    let batches = 0;
     const errors: Array<{ id?: string; error: string }> = [];
     let buffer: ProductSearchDoc[] = [];
 
     const flush = async () => {
       if (!buffer.length) return;
+
       try {
         await this.productsIndex().addDocuments(buffer, { primaryKey: 'id' });
         indexed += buffer.length;
@@ -443,14 +1360,18 @@ export class SearchService implements OnModuleInit {
 
     for await (const p of cursor as any) {
       scanned += 1;
+
       try {
         const doc = this.toSearchDoc(p);
         if (!doc) {
           skipped += 1;
           continue;
         }
+
         buffer.push(doc);
-        if (buffer.length >= batchSize) await flush();
+        if (buffer.length >= batchSize) {
+          await flush();
+        }
       } catch (e: any) {
         errors.push({
           id: p?._id?.toString?.(),
@@ -458,6 +1379,7 @@ export class SearchService implements OnModuleInit {
         });
       }
     }
+
     await flush();
 
     return {
@@ -478,30 +1400,23 @@ export class SearchService implements OnModuleInit {
     return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
   }
 
-  private buildMeiliFilter(
-    p: SearchV2Params,
-    opts?: { ignoreAttributes?: boolean },
-  ): string | undefined {
+  private buildMeiliFilter(p: SearchV2Params): string | undefined {
     const parts: string[] = [];
+
     if (p.categoryId) parts.push(`categoryId = "${this.esc(p.categoryId)}"`);
     if (p.brandId) parts.push(`brandId = "${this.esc(p.brandId)}"`);
     if (typeof p.inStock === 'boolean') parts.push(`inStock = ${p.inStock}`);
-    if (Number.isFinite(p.minPrice as number))
-      parts.push(`maxPrice >= ${Number(p.minPrice)}`);
-    if (Number.isFinite(p.maxPrice as number))
-      parts.push(`minPrice <= ${Number(p.maxPrice)}`);
 
-    if (!opts?.ignoreAttributes && p.attributes) {
-      const raw = String(p.attributes)
-        .split(',')
-        .map((s) => s.trim())
-        .filter(Boolean);
-      for (const pair of raw) {
-        const normalized = this.normalizeText(pair);
-        if (!normalized.includes(':')) continue;
-        parts.push(`attributePairs = "${this.esc(normalized)}"`);
-      }
+    if (Number.isFinite(p.minPrice as number)) {
+      parts.push(`maxPrice >= ${Number(p.minPrice)}`);
     }
+
+    if (Number.isFinite(p.maxPrice as number)) {
+      parts.push(`minPrice <= ${Number(p.maxPrice)}`);
+    }
+
+    parts.push(...this.buildAttributeFilter(p.attributes));
+
     return parts.length ? parts.join(' AND ') : undefined;
   }
 
@@ -528,16 +1443,23 @@ export class SearchService implements OnModuleInit {
 
     const brandId: Record<string, string> = {};
     for (const b of brands as any[]) brandId[String(b._id)] = String(b.name);
-    const categoryId: Record<string, string> = {};
-    for (const c of categories as any[])
-      categoryId[String(c._id)] = String(c.name);
 
-    return { brandId, categoryId };
+    const categoryId: Record<string, string> = {};
+    for (const c of categories as any[]) {
+      categoryId[String(c._id)] = String(c.name);
+    }
+
+    return {
+      brandId,
+      categoryId,
+      attributes: this.mapAttributeFacetLabels(facetDistribution),
+    };
   }
 
   private async suggestedQueriesByPrefix(prefix: string, limit = 5) {
     const q = this.normalizeText(prefix);
     if (!q) return [];
+
     const escaped = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const rows = await this.searchLogModel.aggregate([
       {
@@ -551,11 +1473,12 @@ export class SearchService implements OnModuleInit {
       { $limit: limit },
       { $project: { _id: 0, q: '$_id', count: 1 } },
     ]);
+
     return rows.map((r: any) => r.q);
   }
 
   private buildSort(p: SearchV2Params): string[] {
-    if (!p.sort)
+    if (!p.sort) {
       return [
         'inStock:desc',
         'isFeatured:desc',
@@ -563,12 +1486,15 @@ export class SearchService implements OnModuleInit {
         'reviewCount:desc',
         'createdAt:desc',
       ];
+    }
+
     const allowed = new Set<SearchSort>([
       'minPrice:asc',
       'minPrice:desc',
       'createdAt:desc',
       'rating:desc',
     ]);
+
     return allowed.has(p.sort)
       ? [p.sort]
       : [
@@ -592,23 +1518,36 @@ export class SearchService implements OnModuleInit {
     const offset = (page - 1) * limit;
 
     const rawQ = (params.q ?? '').trim();
-
-    // 1. Phân tích Intent
     const intent = this.intentAnalyzer.analyze(rawQ);
+    const inferredPrice = this.extractNaturalPriceRange(rawQ);
 
-    // 2. Filter rõ ràng (Explicit)
-    const explicitFilter = this.buildMeiliFilter(params);
+    const naturalAttributeExtraction =
+      this.extractNaturalAttributeFilters(rawQ);
 
-    // 3. Filter suy luận (Inferred)
+    const effectiveParams: SearchV2Params = {
+      ...params,
+      minPrice:
+        params.minPrice != null ? params.minPrice : inferredPrice.minPrice,
+      maxPrice:
+        params.maxPrice != null ? params.maxPrice : inferredPrice.maxPrice,
+      attributes: this.mergeAttributeFilters(
+        params.attributes,
+        naturalAttributeExtraction.attributes,
+      ),
+    };
+
+    const explicitFilter = this.buildMeiliFilter(effectiveParams);
+
     const inferredFilterParts: string[] = [];
-    if (!params.categoryId && intent.inferredCategoryIds.length > 0) {
+
+    if (!effectiveParams.categoryId && intent.inferredCategoryIds.length > 0) {
       const catList = intent.inferredCategoryIds
         .map((id) => `"${this.esc(id)}"`)
         .join(', ');
       inferredFilterParts.push(`categoryId IN [${catList}]`);
     }
 
-    if (!params.brandId && intent.inferredBrandIds.length > 0) {
+    if (!effectiveParams.brandId && intent.inferredBrandIds.length > 0) {
       const brandList = intent.inferredBrandIds
         .map((id) => `"${this.esc(id)}"`)
         .join(', ');
@@ -619,19 +1558,21 @@ export class SearchService implements OnModuleInit {
       ? inferredFilterParts.join(' AND ')
       : undefined;
 
-    // 4. Gộp Filter
     const finalFilter = this.mergeFilterClauses(
       explicitFilter ? [explicitFilter] : undefined,
       inferredFilter ? [inferredFilter] : undefined,
     );
 
-    // 5. Strategy Execution
-    const effectiveQ =
-      intent.strategy === 'filter-only' ? '' : intent.cleanQuery;
+    const cleanedNaturalQ =
+      naturalAttributeExtraction.cleanedQuery?.trim() ?? '';
+    const fallbackTextQ =
+      cleanedNaturalQ ||
+      (intent.strategy === 'filter-only'
+        ? ''
+        : intent.cleanQuery?.trim() || '') ||
+      rawQ;
 
-    // Nếu analyzer lỡ suy được strategy filter-only nhưng không resolve ra filter nào thực sự,
-    // fallback về full-text thay vì tự trả 0 hits.
-    const safeEffectiveQ = !effectiveQ && !finalFilter ? rawQ : effectiveQ;
+    const safeEffectiveQ = fallbackTextQ;
 
     if (!safeEffectiveQ && !finalFilter) {
       return {
@@ -644,54 +1585,119 @@ export class SearchService implements OnModuleInit {
       };
     }
 
+    const hasVariantLevelFilters = Boolean(
+      effectiveParams.attributes &&
+      Object.keys(effectiveParams.attributes).length > 0,
+    );
+
+    const candidateLimit = hasVariantLevelFilters
+      ? Math.min(Math.max(offset + limit * 4, 80), 240)
+      : limit;
+
+    const candidateOffset = hasVariantLevelFilters ? 0 : offset;
+
     const queryId = this.newQueryId();
     const t0 = Date.now();
 
     const doSearch = (input: { filter?: string; qToUse?: string }) => {
       const searchQuery =
         input.qToUse !== undefined ? input.qToUse : safeEffectiveQ;
+
       return this.productsIndex().search(
         searchQuery,
         this.buildSearchOptions({
           q: searchQuery,
-          params,
+          params: effectiveParams,
           filter: input.filter,
-          limit,
-          offset,
+          limit: candidateLimit,
+          offset: candidateOffset,
         }),
       );
     };
 
-    let res: any = await doSearch({ filter: finalFilter });
-    let totalHits = res.estimatedTotalHits ?? res.nbHits ?? 0;
+    const attempts: Array<{ qToUse: string; filter?: string }> = [];
+    const seenAttempts = new Set<string>();
 
-    // 6. Fallback an toàn (nếu intent bị bắt quá chặt làm mất kết quả)
-    if (totalHits === 0 && inferredFilter) {
-      const fallbackRes: any = await doSearch({
-        filter: explicitFilter,
-        qToUse: rawQ,
-      });
-      const fallbackTotalHits =
-        fallbackRes.estimatedTotalHits ?? fallbackRes.nbHits ?? 0;
-      if (fallbackTotalHits > 0) {
-        res = fallbackRes;
-        totalHits = fallbackTotalHits;
+    const pushAttempt = (qToUse: string, filter?: string) => {
+      const key = `${qToUse}__${filter ?? ''}`;
+      if (seenAttempts.has(key)) return;
+      seenAttempts.add(key);
+      attempts.push({ qToUse, filter });
+    };
+
+    pushAttempt(safeEffectiveQ, finalFilter);
+
+    if (rawQ && rawQ !== safeEffectiveQ) {
+      pushAttempt(rawQ, finalFilter);
+    }
+
+    if (explicitFilter && explicitFilter !== finalFilter) {
+      pushAttempt(safeEffectiveQ || rawQ, explicitFilter);
+      if (rawQ && rawQ !== safeEffectiveQ) {
+        pushAttempt(rawQ, explicitFilter);
       }
     }
 
+    if (finalFilter && safeEffectiveQ) {
+      pushAttempt('', finalFilter);
+    }
+
+    if (
+      explicitFilter &&
+      explicitFilter !== finalFilter &&
+      (safeEffectiveQ || rawQ)
+    ) {
+      pushAttempt('', explicitFilter);
+    }
+    let res: any = null;
+    let coarseTotalHits = 0;
+
+    for (const attempt of attempts) {
+      const currentRes: any = await doSearch(attempt);
+      const currentTotalHits =
+        currentRes.estimatedTotalHits ?? currentRes.nbHits ?? 0;
+
+      if (!res) {
+        res = currentRes;
+        coarseTotalHits = currentTotalHits;
+      }
+
+      if (currentTotalHits > 0) {
+        res = currentRes;
+        coarseTotalHits = currentTotalHits;
+        break;
+      }
+    }
+
+    const postFiltered = await this.applyVariantPostFilter(
+      res?.hits ?? [],
+      effectiveParams.attributes,
+      {
+        requireInStock: effectiveParams.inStock === true,
+        previewLimit: 3,
+      },
+    );
+
+    const finalHits = hasVariantLevelFilters
+      ? postFiltered.hits.slice(offset, offset + limit)
+      : postFiltered.hits;
+
+    const totalHits = hasVariantLevelFilters
+      ? postFiltered.hits.length
+      : coarseTotalHits;
+
     const latencyMs = Date.now() - t0;
 
-    // 7. Ghi Log nâng cao có thông tin Intent
     void this.searchLogModel.create({
       queryId,
       q: rawQ,
       filters: {
-        categoryId: params.categoryId,
-        brandId: params.brandId,
-        inStock: params.inStock,
-        minPrice: params.minPrice,
-        maxPrice: params.maxPrice,
-        attributes: params.attributes,
+        categoryId: effectiveParams.categoryId,
+        brandId: effectiveParams.brandId,
+        inStock: effectiveParams.inStock,
+        minPrice: effectiveParams.minPrice,
+        maxPrice: effectiveParams.maxPrice,
+        attributes: effectiveParams.attributes,
         inferredCategoryIds:
           intent.inferredCategoryIds.length > 0
             ? intent.inferredCategoryIds
@@ -703,20 +1709,22 @@ export class SearchService implements OnModuleInit {
         inferredIntent: intent.intentGroup,
         inferredSearchMode: intent.strategy,
       },
-      ...(params.sort ? { sort: params.sort } : {}),
+      ...(effectiveParams.sort ? { sort: effectiveParams.sort } : {}),
       totalHits,
       latencyMs,
-      ...(res.processingTimeMs != null
+      ...(res?.processingTimeMs != null
         ? { processingTimeMs: res.processingTimeMs }
         : {}),
-      ...(params.userId ? { userId: params.userId } : {}),
-      ...(params.sessionId ? { sessionId: params.sessionId } : {}),
+      ...(effectiveParams.userId ? { userId: effectiveParams.userId } : {}),
+      ...(effectiveParams.sessionId
+        ? { sessionId: effectiveParams.sessionId }
+        : {}),
       timestamp: new Date(),
     });
 
-    const facets = res.facetDistribution ?? {};
+    const facets = res?.facetDistribution ?? {};
     const includeFacetLabels =
-      params.facets !== false && (params.facetLabels ?? true);
+      effectiveParams.facets !== false && (effectiveParams.facetLabels ?? true);
     const facetLabels = includeFacetLabels
       ? await this.mapFacetLabels(facets)
       : undefined;
@@ -724,51 +1732,90 @@ export class SearchService implements OnModuleInit {
     let noResult: any = undefined;
     if (totalHits === 0 && rawQ) {
       const suggestedQueries = await this.suggestedQueriesByPrefix(rawQ, 5);
-      let relaxed: any = undefined;
-      if (params.attributes) {
-        const relaxedExplicitFilter = this.buildMeiliFilter(params, {
-          ignoreAttributes: true,
-        });
-        const relaxedFilter = this.mergeFilterClauses(
-          relaxedExplicitFilter ? [relaxedExplicitFilter] : undefined,
-          inferredFilter ? [inferredFilter] : undefined,
-        );
-        const relaxedRes: any = await doSearch({ filter: relaxedFilter });
-        const relaxedTotalHits =
-          relaxedRes.estimatedTotalHits ?? relaxedRes.nbHits ?? 0;
-        if (relaxedTotalHits > 0) {
-          relaxed = {
-            removedFilters: ['attributes'],
-            totalHits: relaxedTotalHits,
-            hits: (relaxedRes.hits ?? []).slice(0, 6),
-          };
-        }
-      }
-      noResult = { suggestedQueries, ...(relaxed ? { relaxed } : {}) };
+      noResult = { suggestedQueries };
     }
 
     return {
       queryId,
-      hits: res.hits ?? [],
+      hits: finalHits,
       facets,
       ...(facetLabels ? { facetLabels } : {}),
       ...(noResult ? { noResult } : {}),
-      processingTimeMs: res.processingTimeMs ?? 0,
+      processingTimeMs: res?.processingTimeMs ?? 0,
       totalHits,
       page,
       limit,
+      strictVariantFiltering: postFiltered.strictVariantFiltering,
+      coarseTotalHits,
+    };
+  }
+
+  async retrieveForAi(input: {
+    message: string;
+    limit?: number;
+    userId?: string;
+    sessionId?: string;
+  }) {
+    await this.ensureTaxonomyReady();
+
+    const limit = this.clampInt(input.limit ?? 5, 1, 12);
+    const message = String(input.message ?? '').trim();
+    const intent = this.intentAnalyzer.analyze(message);
+
+    const result = await this.searchProductsV2({
+      q: message,
+      page: 1,
+      limit,
+      facets: false,
+      facetLabels: false,
+      userId: input.userId,
+      sessionId: input.sessionId,
+    });
+
+    return {
+      originalMessage: message,
+      normalizedQuery: intent.normalizedQuery,
+      cleanQuery: intent.cleanQuery,
+      inferredCategoryIds: intent.inferredCategoryIds,
+      inferredBrandIds: intent.inferredBrandIds,
+      inferredIntentGroup: intent.intentGroup,
+      retrievalStrategy: intent.strategy,
+      totalHits: result.totalHits,
+      products: (result.hits ?? []).map((hit: any) => ({
+        id: hit.id,
+        name: hit.name,
+        slug: hit.slug,
+        description: hit.description ?? '',
+        semanticText: hit.semanticText ?? '',
+        image: hit.image ?? null,
+        minPrice: hit.minPrice ?? 0,
+        maxPrice: hit.maxPrice ?? 0,
+        inStock: hit.inStock ?? false,
+        totalStock: hit.totalStock ?? 0,
+        rating: hit.rating ?? 0,
+        reviewCount: hit.reviewCount ?? 0,
+        brandId: hit.brandId,
+        brandName: hit.brandName,
+        categoryId: hit.categoryId,
+        categoryName: hit.categoryName,
+        isFeatured: hit.isFeatured ?? false,
+        createdAt: hit.createdAt ?? 0,
+        matchedVariantCount: hit.matchedVariantCount ?? 0,
+        matchedVariants: hit.matchedVariants ?? [],
+      })),
     };
   }
 
   async suggest(q: string) {
     const keyword = (q ?? '').trim();
-    if (!keyword)
+    if (!keyword) {
       return {
         querySuggestions: [],
         productSuggestions: [],
         brandSuggestions: [],
         categorySuggestions: [],
       };
+    }
 
     const res: any = await this.productsIndex().search(keyword, {
       limit: 6,
@@ -781,6 +1828,7 @@ export class SearchService implements OnModuleInit {
         'categoryId',
       ],
     });
+
     const products = (res.hits ?? []).map((h: any) => ({
       id: h.id,
       name: h.name,
@@ -792,6 +1840,7 @@ export class SearchService implements OnModuleInit {
 
     const escaped = keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const rx = new RegExp(`^${escaped}`, 'i');
+
     const [brands, categories] = await Promise.all([
       this.brandModel
         .find({ isActive: true, name: rx })
@@ -811,13 +1860,13 @@ export class SearchService implements OnModuleInit {
       brandSuggestions: (brands as any[]).map((b: any) => ({
         id: String(b._id),
         name: String(b.name),
-        slug: String(b.slug),
+        slug: String((b as any).slug ?? ''),
         logo: (b as any).logo ?? null,
       })),
       categorySuggestions: (categories as any[]).map((c: any) => ({
         id: String(c._id),
         name: String(c.name),
-        slug: String(c.slug),
+        slug: String((c as any).slug ?? ''),
         parentId: (c as any).parentId ? String((c as any).parentId) : null,
       })),
     };
@@ -871,6 +1920,7 @@ export class SearchService implements OnModuleInit {
 
   async avgLatency(days = 7) {
     const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+
     const [row] = await this.searchLogModel.aggregate([
       { $match: { timestamp: { $gte: since } } },
       {
@@ -881,8 +1931,10 @@ export class SearchService implements OnModuleInit {
         },
       },
     ]);
+
     const count = Number(row?.count ?? 0);
     const avgLatencyMs = Math.round(Number(row?.avgLatency ?? 0));
+
     let p95LatencyMs = 0;
     if (count > 0) {
       const idx = Math.max(0, Math.ceil(count * 0.95) - 1);
@@ -892,17 +1944,21 @@ export class SearchService implements OnModuleInit {
         .skip(idx)
         .select({ latencyMs: 1, _id: 0 })
         .lean();
+
       p95LatencyMs = Math.round(Number((doc as any)?.latencyMs ?? 0));
     }
+
     return { avgLatencyMs, p95LatencyMs };
   }
 
   async ctr(days = 7) {
     const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+
     const [searchCount, clickCount] = await Promise.all([
       this.searchLogModel.countDocuments({ timestamp: { $gte: since } }),
       this.clickLogModel.countDocuments({ timestamp: { $gte: since } }),
     ]);
+
     return {
       searches: searchCount,
       clicks: clickCount,
@@ -914,6 +1970,7 @@ export class SearchService implements OnModuleInit {
     const d = this.clampInt(days, 1, 90);
     const limit = this.clampInt(limitPerDay, 1, 50);
     const since = new Date(Date.now() - d * 24 * 60 * 60 * 1000);
+
     return this.searchLogModel.aggregate([
       { $match: { timestamp: { $gte: since }, q: { $ne: '' } } },
       {
@@ -946,6 +2003,7 @@ export class SearchService implements OnModuleInit {
   async noResultRate(days = 7) {
     const d = this.clampInt(days, 1, 90);
     const since = new Date(Date.now() - d * 24 * 60 * 60 * 1000);
+
     const [searches, noResult] = await Promise.all([
       this.searchLogModel.countDocuments({ timestamp: { $gte: since } }),
       this.searchLogModel.countDocuments({
@@ -953,6 +2011,7 @@ export class SearchService implements OnModuleInit {
         totalHits: 0,
       }),
     ]);
+
     return {
       searches,
       noResult,
@@ -964,6 +2023,7 @@ export class SearchService implements OnModuleInit {
     const d = this.clampInt(days, 1, 90);
     const lim = this.clampInt(limit, 1, 100);
     const since = new Date(Date.now() - d * 24 * 60 * 60 * 1000);
+
     const [searchAgg, clickAgg] = await Promise.all([
       this.searchLogModel.aggregate([
         { $match: { timestamp: { $gte: since }, q: { $ne: '' } } },
@@ -976,9 +2036,12 @@ export class SearchService implements OnModuleInit {
         { $group: { _id: '$q', clicks: { $sum: 1 } } },
       ]),
     ]);
+
     const clickMap = new Map<string, number>();
-    for (const r of clickAgg as any[])
+    for (const r of clickAgg as any[]) {
       clickMap.set(String(r._id), Number(r.clicks ?? 0));
+    }
+
     const rows = (searchAgg as any[]).map((s) => {
       const q = String(s._id);
       const searches = Number(s.searches ?? 0);
@@ -990,6 +2053,7 @@ export class SearchService implements OnModuleInit {
         ctr: searches > 0 ? Number((clicks / searches).toFixed(4)) : 0,
       };
     });
+
     rows.sort((a, b) => b.searches - a.searches);
     return rows.slice(0, lim);
   }

@@ -2,6 +2,13 @@ import { TaxonomyResolver, IntentGroup } from './taxonomy-resolver.util';
 
 export type RetrievalStrategy = 'filter-only' | 'query+filter' | 'full-text';
 
+export type ChatIntent =
+  | 'product_search'
+  | 'product_recommendation'
+  | 'product_comparison'
+  | 'policy_question'
+  | 'mixed';
+
 export interface AnalyzedIntent {
   originalQuery: string;
   normalizedQuery: string;
@@ -10,6 +17,96 @@ export interface AnalyzedIntent {
   intentGroup?: IntentGroup;
   strategy: RetrievalStrategy;
   cleanQuery: string;
+}
+
+function normalizeLoose(input: string): string {
+  return String(input ?? '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/đ/g, 'd')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function includesAny(source: string, keywords: string[]): boolean {
+  return keywords.some((kw) => source.includes(kw));
+}
+
+export function detectChatIntent(rawMessage: string): ChatIntent {
+  const q = normalizeLoose(rawMessage);
+
+  const comparisonKeywords = [
+    'so sanh',
+    'khac nhau',
+    'hon',
+    'vs',
+    'versus',
+    'giua',
+    'doi chieu',
+    'chon con nao',
+    'chon may nao',
+  ];
+
+  const recommendationKeywords = [
+    'goi y',
+    'tu van',
+    'phu hop',
+    'nen mua',
+    'de xuat',
+    'chon giup',
+    'loai nao hop',
+    'mau nao hop',
+  ];
+
+  const policyKeywords = [
+    'doi tra',
+    'bao hanh',
+    'ship',
+    'giao hang',
+    'thanh toan',
+    'cod',
+    'tra gop',
+    'hoan tien',
+    'doi size',
+    'chinh sach',
+  ];
+
+  const productKeywords = [
+    'dien thoai',
+    'iphone',
+    'samsung',
+    'xiaomi',
+    'oppo',
+    'vivo',
+    'realme',
+    'tai nghe',
+    'headphone',
+    'earbuds',
+    'airpods',
+    'dong ho',
+    'watch',
+    'laptop',
+    'macbook',
+    'tablet',
+    'ipad',
+    'phu kien',
+    'sac',
+    'cap',
+    'powerbank',
+  ];
+
+  const hasComparison = includesAny(q, comparisonKeywords);
+  const hasRecommendation = includesAny(q, recommendationKeywords);
+  const hasPolicy = includesAny(q, policyKeywords);
+  const hasProductSignal =
+    includesAny(q, productKeywords) || hasComparison || hasRecommendation;
+
+  if (hasPolicy && hasProductSignal) return 'mixed';
+  if (hasPolicy) return 'policy_question';
+  if (hasComparison) return 'product_comparison';
+  if (hasRecommendation) return 'product_recommendation';
+  return 'product_search';
 }
 
 export class QueryIntentAnalyzer {
@@ -70,6 +167,35 @@ export class QueryIntentAnalyzer {
     unknown: [],
   };
 
+  private conversationalStopWords = [
+    'nao',
+    'loai',
+    'mau',
+    'con',
+    'cai',
+    'giup',
+    'toi',
+    'minh',
+    'voi',
+    'nhe',
+    'a',
+    'ah',
+    'ha',
+    'nhi',
+    'khong',
+    'can',
+    'muon',
+    'tim',
+    'nen',
+    'mua',
+    'goi',
+    'y',
+    'tu',
+    'van',
+    'tham',
+    'khao',
+  ];
+
   private escapeRegex(value: string): string {
     return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   }
@@ -88,6 +214,46 @@ export class QueryIntentAnalyzer {
     return output.replace(/\s+/g, ' ').trim();
   }
 
+  private removeStopWords(source: string): string {
+    let output = ` ${source} `;
+
+    for (const word of this.conversationalStopWords) {
+      const escaped = this.escapeRegex(this.taxonomy.normalize(word));
+      output = output.replace(new RegExp(`\\b${escaped}\\b`, 'ig'), ' ');
+    }
+
+    return output.replace(/\s+/g, ' ').trim();
+  }
+
+  private cleanupQueryForRetrieval(source: string): string {
+    const cleaned = this.removeStopWords(source);
+    return cleaned || source;
+  }
+
+  private isPureTaxonomyQuery(input: {
+    normalizedQuery: string;
+    intentGroup?: IntentGroup;
+    matchedBrandAliases: string[];
+  }): boolean {
+    let remainder = input.normalizedQuery;
+
+    if (input.intentGroup) {
+      remainder = this.removePhrases(
+        remainder,
+        this.groupKeywords[input.intentGroup],
+      );
+    }
+
+    remainder = this.removePhrases(remainder, input.matchedBrandAliases);
+    remainder = this.removeStopWords(remainder);
+
+    return remainder.trim() === '';
+  }
+
+  detectChatIntent(rawMessage: string): ChatIntent {
+    return detectChatIntent(rawMessage);
+  }
+
   analyze(rawQuery: string): AnalyzedIntent {
     const normalizedQuery = this.taxonomy.normalize(rawQuery);
     let strategy: RetrievalStrategy = 'full-text';
@@ -97,7 +263,9 @@ export class QueryIntentAnalyzer {
 
     const matchedBrands = this.taxonomy.findBrandsInQuery(normalizedQuery);
     const inferredBrandIds = matchedBrands.map((b) => b.id);
-    const matchedBrandAliases = matchedBrands.flatMap((b) => b.aliases ?? []);
+    const matchedBrandAliases = Array.from(
+      new Set(matchedBrands.flatMap((b) => b.aliases ?? [])),
+    );
 
     for (const [group, keywords] of Object.entries(this.groupKeywords)) {
       if (
@@ -113,33 +281,47 @@ export class QueryIntentAnalyzer {
 
     if (intentGroup) {
       inferredCategoryIds = this.taxonomy.getCategoryIdsByGroup(intentGroup);
-      cleanQuery = this.removePhrases(cleanQuery, [
-        ...this.groupKeywords[intentGroup],
-        ...matchedBrandAliases,
-      ]);
 
       const hasAnyResolvedFilter =
         inferredCategoryIds.length > 0 || inferredBrandIds.length > 0;
 
       if (hasAnyResolvedFilter) {
-        strategy = cleanQuery === '' ? 'filter-only' : 'query+filter';
+        cleanQuery = this.cleanupQueryForRetrieval(normalizedQuery);
+        strategy = this.isPureTaxonomyQuery({
+          normalizedQuery,
+          intentGroup,
+          matchedBrandAliases,
+        })
+          ? 'filter-only'
+          : 'query+filter';
       } else {
-        // Không suy ra được taxonomy thật sự thì tuyệt đối không được ép về filter-only,
-        // nếu không backend sẽ tự trả về 0 hits.
         strategy = 'full-text';
-        cleanQuery = normalizedQuery;
+        cleanQuery = this.cleanupQueryForRetrieval(normalizedQuery);
         intentGroup = undefined;
       }
     } else {
       const exactCatIds =
         this.taxonomy.getCategoryIdsByExactName(normalizedQuery);
+
       if (exactCatIds.length > 0) {
         inferredCategoryIds = exactCatIds;
-        cleanQuery = this.removePhrases(cleanQuery, matchedBrandAliases);
-        strategy = cleanQuery === '' ? 'filter-only' : 'query+filter';
+        cleanQuery = this.cleanupQueryForRetrieval(normalizedQuery);
+        strategy = this.isPureTaxonomyQuery({
+          normalizedQuery,
+          matchedBrandAliases,
+        })
+          ? 'filter-only'
+          : 'query+filter';
       } else if (matchedBrands.length > 0) {
-        cleanQuery = this.removePhrases(cleanQuery, matchedBrandAliases);
-        strategy = cleanQuery === '' ? 'filter-only' : 'query+filter';
+        cleanQuery = this.cleanupQueryForRetrieval(normalizedQuery);
+        strategy = this.isPureTaxonomyQuery({
+          normalizedQuery,
+          matchedBrandAliases,
+        })
+          ? 'filter-only'
+          : 'query+filter';
+      } else {
+        cleanQuery = this.cleanupQueryForRetrieval(normalizedQuery);
       }
     }
 

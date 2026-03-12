@@ -1,13 +1,78 @@
 import { Body, Controller, Get, Post, Query } from '@nestjs/common';
 import { SearchService } from './search.service';
 
+type AttributeFilters = Record<string, string[]>;
+
 @Controller('search')
 export class SearchController {
   constructor(private readonly searchService: SearchService) {}
 
-  /**
-   * ✅ v2: /search/products?q=iphone&page=1&limit=20&minPrice=...&maxPrice=...&attributes=color:black,storage:128gb&sort=minPrice:asc
-   */
+  private splitMultiValue(input: any): string[] {
+    if (Array.isArray(input)) {
+      return input.flatMap((x) => this.splitMultiValue(x)).filter(Boolean);
+    }
+
+    return String(input ?? '')
+      .split(',')
+      .map((x) => x.trim())
+      .filter(Boolean);
+  }
+
+  private parseAttributeFilters(query: any): AttributeFilters | undefined {
+    const out: AttributeFilters = {};
+
+    const push = (rawKey: any, rawValue: any) => {
+      const key = String(rawKey ?? '').trim();
+      if (!key) return;
+
+      const values = this.splitMultiValue(rawValue);
+      if (values.length === 0) return;
+
+      out[key] = Array.from(new Set([...(out[key] ?? []), ...values]));
+    };
+
+    if (
+      query.attributes &&
+      typeof query.attributes === 'object' &&
+      !Array.isArray(query.attributes)
+    ) {
+      for (const [k, v] of Object.entries(query.attributes)) {
+        push(k, v);
+      }
+    }
+
+    if (typeof query.attributes === 'string') {
+      const segments = String(query.attributes)
+        .split(';')
+        .map((x) => x.trim())
+        .filter(Boolean);
+
+      for (const segment of segments) {
+        const idx = segment.indexOf(':');
+        if (idx <= 0) continue;
+
+        const key = segment.slice(0, idx).trim();
+        const value = segment.slice(idx + 1).trim();
+        push(key, value);
+      }
+    }
+
+    for (const [k, v] of Object.entries(query)) {
+      const bracketMatch = k.match(/^attributes\[(.+)\]$/i);
+      if (bracketMatch) {
+        push(bracketMatch[1], v);
+        continue;
+      }
+
+      const flatMatch = k.match(/^attr(?:ibute)?_(.+)$/i);
+      if (flatMatch) {
+        push(flatMatch[1], v);
+      }
+    }
+
+    return Object.keys(out).length > 0 ? out : undefined;
+  }
+
   @Get('products')
   async searchProducts(@Query() query: any) {
     const q = (query.q ?? query.keyword ?? '').toString();
@@ -27,7 +92,6 @@ export class SearchController {
     const maxPrice =
       query.maxPrice !== undefined ? Number(query.maxPrice) : undefined;
 
-    const attributes = query.attributes ? String(query.attributes) : undefined;
     const sort = query.sort ? String(query.sort) : undefined;
 
     const facets =
@@ -40,9 +104,10 @@ export class SearchController {
         ? true
         : String(query.facetLabels).toLowerCase() !== 'false';
 
-    // optional analytics (demo): userId/sessionId nếu bạn có auth middleware thì lấy từ req.user / header
     const userId = query.userId ? String(query.userId) : undefined;
     const sessionId = query.sessionId ? String(query.sessionId) : undefined;
+
+    const attributes = this.parseAttributeFilters(query);
 
     return this.searchService.searchProductsV2({
       q,
@@ -53,26 +118,20 @@ export class SearchController {
       inStock,
       minPrice,
       maxPrice,
-      attributes,
       sort: sort as any,
       facets,
       facetLabels,
       userId,
       sessionId,
+      attributes,
     });
   }
 
-  /** ✅ /search/suggest?q=ip */
   @Get('suggest')
   async suggest(@Query('q') q: string) {
     return this.searchService.suggest(q);
   }
 
-  /**
-   * ✅ click log
-   * POST /search/events/click
-   * { productId, queryId, position, q? }
-   */
   @Post('events/click')
   async click(@Body() body: any) {
     return this.searchService.logClick({
@@ -83,5 +142,10 @@ export class SearchController {
       userId: body.userId ? String(body.userId) : undefined,
       sessionId: body.sessionId ? String(body.sessionId) : undefined,
     });
+  }
+
+  @Get('debug/retrieve-for-ai')
+  async retrieveForAi(@Query('message') message: string) {
+    return this.searchService.retrieveForAi({ message, limit: 5 });
   }
 }
