@@ -193,7 +193,7 @@ export function SearchHub() {
                  <div className="p-6 space-y-6">
                     <div className="flex items-center justify-between pb-4 border-b border-border/40">
                        <p className="text-[11px] font-bold text-muted-foreground/70 flex items-center gap-2">
-                          <SlidersHorizontal className="h-3.5 w-3.5 text-primary" /> Bộ lọc nhanh
+                           <SlidersHorizontal className="h-3.5 w-3.5 text-primary" /> Bộ lọc nhanh
                        </p>
                        <Button 
                           variant="ghost" 
@@ -266,8 +266,6 @@ export function SearchHub() {
                              className="data-[state=checked]:bg-primary scale-90"
                           />
                        </div>
-
-
 
                        {/* Dynamic Facets or Search Results */}
                        {searchResults ? (
@@ -437,6 +435,7 @@ export function SearchHub() {
                                          apiClient.post("/search/events/click", {
                                             productId: p.id || p._id,
                                             queryId: searchResults?.queryId,
+                                            q: searchQuery,
                                             position: idx + 1,
                                             userId: user?.id,
                                             sessionId: localStorage.getItem('sessionId')

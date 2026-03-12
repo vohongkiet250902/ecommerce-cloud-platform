@@ -626,6 +626,7 @@ export default function AdminLayout({
                                                   apiClient.post("/search/events/click", {
                                                      productId: p.id || p._id,
                                                      queryId: searchResults?.queryId,
+                                                     q: searchQuery,
                                                      position: idx + 1,
                                                      userId: user?.id,
                                                      sessionId: localStorage.getItem('sessionId')
