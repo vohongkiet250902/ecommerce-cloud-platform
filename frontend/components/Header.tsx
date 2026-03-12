@@ -126,6 +126,21 @@ export default function Header({
               )}
             </Button>
 
+            {/* Cart */}
+            <Button
+              variant="ghost"
+              size="icon"
+              className="rounded-full relative"
+              onClick={handleCartClick}
+            >
+              <ShoppingCart className="w-5 h-5" />
+              {mounted && cartItemCount > 0 && (
+                <Badge className="absolute -top-1 -right-1 w-5 h-5 p-0 flex items-center justify-center bg-destructive text-destructive-foreground text-xs">
+                  {cartItemCount}
+                </Badge>
+              )}
+            </Button>
+
             {/* Account/User Menu */}
             {isAuthenticated && user ? (
               <DropdownMenu>
@@ -206,28 +221,17 @@ export default function Header({
             ) : (
               <Button
                 variant="ghost"
-                size="icon"
-                className="rounded-full hidden sm:flex"
+                className="hidden sm:flex items-center gap-2 pl-2 pr-4 h-11 rounded-full border border-border/40 hover:border-primary/30 hover:bg-primary/5 hover:shadow-md hover:shadow-primary/5 transition-all duration-300 group"
                 onClick={() => router.push("/auth")}
               >
-                <User className="w-5 h-5" />
+                <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-primary group-hover:bg-primary group-hover:text-primary-foreground transition-all duration-300">
+                  <User className="w-4 h-4" />
+                </div>
+                <span className="text-sm font-bold text-foreground/80 group-hover:text-primary transition-colors">Đăng nhập</span>
               </Button>
             )}
 
-            {/* Cart */}
-            <Button
-              variant="ghost"
-              size="icon"
-              className="rounded-full relative"
-              onClick={handleCartClick}
-            >
-              <ShoppingCart className="w-5 h-5" />
-              {mounted && cartItemCount > 0 && (
-                <Badge className="absolute -top-1 -right-1 w-5 h-5 p-0 flex items-center justify-center bg-destructive text-destructive-foreground text-xs">
-                  {cartItemCount}
-                </Badge>
-              )}
-            </Button>
+
 
             {/* Mobile Menu Toggle */}
             <Button
@@ -235,6 +239,7 @@ export default function Header({
               size="icon"
               className="lg:hidden rounded-full"
               onClick={() => setIsMenuOpen(!isMenuOpen)}
+              title="Menu"
             >
               {isMenuOpen ? (
                 <X className="w-5 h-5" />

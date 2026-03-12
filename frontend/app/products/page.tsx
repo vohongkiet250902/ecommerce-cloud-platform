@@ -507,7 +507,7 @@ function ProductsContent() {
                     Không tìm thấy sản phẩm phù hợp
                   </p>
                   {isMounted && (
-                    <Button variant="outline" onClick={clearFilters}>
+                    <Button variant="outline" className="rounded-xl px-6 border-border/10 hover:border-primary/10 hover:bg-primary/10 hover:text-primary cursor-pointer" onClick={clearFilters}>
                       Xóa bộ lọc
                     </Button>
                   )}

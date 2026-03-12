@@ -29,6 +29,7 @@ import {
 } from "@/components/ui/tooltip";
 import apiClient, { categoryApi, brandApi } from "@/services/api";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/hooks/useAuth";
 
 export function SearchHub() {
   const router = useRouter();
@@ -45,33 +46,27 @@ export function SearchHub() {
     inStock: false,
     minPrice: "",
     maxPrice: "",
-    attributes: "",
-    attrKey: "",
-    attrValue: "",
     sort: "default"
   });
+  const [trendingQueries, setTrendingQueries] = useState<string[]>([]);
+  const { user } = useAuth();
   const searchRef = useRef<HTMLDivElement>(null);
-
-  // Helper for attribute toggle
-  const toggleAttribute = (pair: string) => {
-    setFilters((prev: any) => {
-      const current = prev.attributes.split(',').map((s: string) => s.trim()).filter(Boolean);
-      const isThere = current.includes(pair);
-      const next = isThere ? current.filter((s: string) => s !== pair) : [...current, pair];
-      return { ...prev, attributes: next.join(',') };
-    });
-  };
 
   // Fetch Metadata
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [catRes, brandRes] = await Promise.all([
+        const [catRes, brandRes, trendRes] = await Promise.all([
           categoryApi.getCategories(),
-          brandApi.getBrands()
+          brandApi.getBrands(),
+          apiClient.get("/admin/search-analytics/top-queries?limit=6&days=7").catch(() => ({ data: [] }))
         ]);
         setCategories(catRes.data.data || catRes.data);
         setBrands(brandRes.data.data || brandRes.data);
+        
+        if (trendRes.data && Array.isArray(trendRes.data)) {
+          setTrendingQueries(trendRes.data.map((q: any) => q.q));
+        }
       } catch (e) { console.error("Metadata fetch error", e); }
     };
     fetchData();
@@ -133,24 +128,10 @@ export function SearchHub() {
           facets: true,
           facetLabels: true,
           ...Object.fromEntries(
-            Object.entries(filters)
-              .map(([k, v]) => {
-                if (k === 'attributes' && typeof v === 'string') {
-                   let manual = "";
-                   if (filters.attrKey?.trim() && filters.attrValue?.trim()) {
-                      manual = `${filters.attrKey.trim()}:${filters.attrValue.trim()}`;
-                   }
-                   const raw = v + (manual ? (v ? `,${manual}` : manual) : "");
-                   const normalized = raw.split(',')
-                      .map(p => p.split(':').map(part => part.trim().toLowerCase()).join(':'))
-                      .filter(p => p.includes(':'))
-                      .join(',');
-                   return [k, normalized];
-                }
-                return [k, v];
-              })
-              .filter(([k, v]) => v !== "" && v !== "default" && v !== false && k !== 'attrKey' && k !== 'attrValue')
-          )
+            Object.entries(filters).filter(([k, v]) => v !== "" && v !== "default" && v !== false)
+          ),
+          userId: user?.id,
+          sessionId: typeof window !== 'undefined' ? localStorage.getItem('sessionId') : undefined
         }
       });
       setSearchResults(res.data);
@@ -170,7 +151,12 @@ export function SearchHub() {
           className="pl-11 h-11 bg-secondary/40 border-border focus-visible:ring-2 focus-visible:ring-primary/20 rounded-full text-sm font-medium transition-all"
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
-          onFocus={() => setShowResults(true)}
+          onFocus={() => {
+            setShowResults(true);
+            if (!localStorage.getItem('sessionId')) {
+              localStorage.setItem('sessionId', 'sess_' + Math.random().toString(36).substring(2, 15));
+            }
+          }}
           onKeyDown={(e) => {
             if (e.key === "Enter" && searchQuery.trim()) {
                router.push(`/products?q=${encodeURIComponent(searchQuery.trim())}`);
@@ -207,7 +193,7 @@ export function SearchHub() {
                  <div className="p-6 space-y-6">
                     <div className="flex items-center justify-between pb-4 border-b border-border/40">
                        <p className="text-[11px] font-bold text-muted-foreground/70 flex items-center gap-2">
-                          <SlidersHorizontal className="h-3.5 w-3.5 text-primary" /> Bộ lọc thông minh
+                          <SlidersHorizontal className="h-3.5 w-3.5 text-primary" /> Bộ lọc nhanh
                        </p>
                        <Button 
                           variant="ghost" 
@@ -219,9 +205,6 @@ export function SearchHub() {
                              inStock: false,
                              minPrice: "",
                              maxPrice: "",
-                             attributes: "",
-                             attrKey: "",
-                             attrValue: "",
                              sort: "default"
                           })}
                        >
@@ -284,54 +267,14 @@ export function SearchHub() {
                           />
                        </div>
 
-                       {/* Advanced Attributes Manual Input */}
-                       <div className="space-y-3">
-                          <div className="flex items-center justify-between px-1">
-                             <Label className="text-[11px] font-bold text-muted-foreground">Thuộc tính</Label>
-                             <TooltipProvider>
-                               <Tooltip>
-                                  <TooltipTrigger asChild>
-                                     <div className="h-4 w-4 rounded-full bg-muted/50 flex items-center justify-center cursor-help transition-colors hover:bg-muted">
-                                        <Settings className="h-2.5 w-2.5 text-muted-foreground" />
-                                     </div>
-                                  </TooltipTrigger>
-                                  <TooltipPortal>
-                                    <TooltipContent side="top" sideOffset={8} className="z-[110] text-[10px] font-medium max-w-[200px] p-3 rounded-xl border-none shadow-2xl bg-slate-900 text-white">
-                                       Nhập Key (VD: RAM) và Value (VD: 16GB) để tìm chính xác hơn.
-                                    </TooltipContent>
-                                  </TooltipPortal>
-                               </Tooltip>
-                             </TooltipProvider>
-                          </div>
-                          <div className="space-y-2">
-                             <div className="relative group">
-                                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[8px] font-black text-muted-foreground/40 group-focus-within:text-primary transition-colors uppercase">Key</span>
-                                <Input 
-                                   placeholder="Tên thuộc tính (VD: color)..." 
-                                   className="h-10 rounded-xl bg-background border-border text-[11px] font-medium pl-4 pr-12 focus-visible:ring-primary/20 shadow-sm transition-all group-hover:border-primary/20"
-                                   value={filters.attrKey}
-                                   onChange={(e) => setFilters((f: any) => ({...f, attrKey: e.target.value}))}
-                                />
-                             </div>
-                             <div className="relative group">
-                                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[8px] font-black text-muted-foreground/40 group-focus-within:text-primary transition-colors uppercase">Value</span>
-                                <Input 
-                                   placeholder="Giá trị (VD: blue)..." 
-                                   className="h-10 rounded-xl bg-background border-border text-[11px] font-medium pl-4 pr-12 focus-visible:ring-primary/20 shadow-sm transition-all group-hover:border-primary/20"
-                                   value={filters.attrValue}
-                                   onChange={(e) => setFilters((f: any) => ({...f, attrValue: e.target.value}))}
-                                />
-                             </div>
-                          </div>
-                       </div>
+
 
                        {/* Dynamic Facets or Search Results */}
                        {searchResults ? (
                          <div className="space-y-6 pt-4 border-t border-border/40">
                             {[
                                { title: "Thương hiệu", data: searchResults.facets?.brandId, labels: searchResults.facetLabels?.brandId, key: "brandId" },
-                               { title: "Danh mục", data: searchResults.facets?.categoryId, labels: searchResults.facetLabels?.categoryId, key: "categoryId" },
-                               { title: "Thông số kỹ thuật", data: searchResults.facets?.attributePairs, labels: null, key: "attributes" }
+                               { title: "Danh mục", data: searchResults.facets?.categoryId, labels: searchResults.facetLabels?.categoryId, key: "categoryId" }
                             ].map((sec: any, idx: number) => {
                               const hasData = sec.data && Object.keys(sec.data).length > 0;
                               if (!hasData) return null;
@@ -343,19 +286,13 @@ export function SearchHub() {
                                   </div>
                                   <div className="grid grid-cols-1 gap-1.5 max-h-[160px] overflow-y-auto scrollbar-hide pr-1">
                                      {Object.entries(sec.data as Record<string, number>).slice(0, 10).map(([facetId, facetCount], idx) => {
-                                        const isSelected = sec.key === 'attributes' 
-                                          ? filters.attributes.split(',').map((s: string) => s.trim()).filter(Boolean).includes(facetId)
-                                          : (filters as any)[sec.key] === facetId;
+                                        const isSelected = (filters as any)[sec.key] === facetId;
                                           
                                         return (
                                           <button 
                                              key={`${sec.key}-${facetId}-${idx}`} 
                                              onClick={() => {
-                                               if (sec.key === 'attributes') {
-                                                 toggleAttribute(facetId);
-                                               } else {
-                                                 setFilters((prev: any) => ({ ...prev, [sec.key]: (prev as any)[sec.key] === facetId ? "" : facetId }));
-                                               }
+                                               setFilters((prev: any) => ({ ...prev, [sec.key]: (prev as any)[sec.key] === facetId ? "" : facetId }));
                                              }}
                                              className={cn(
                                                "group flex items-center justify-between px-3 py-2 rounded-xl border transition-all text-left",
@@ -499,8 +436,10 @@ export function SearchHub() {
                                       onClick={() => {
                                          apiClient.post("/search/events/click", {
                                             productId: p.id || p._id,
-                                            q: searchQuery,
-                                            position: idx + 1
+                                            queryId: searchResults?.queryId,
+                                            position: idx + 1,
+                                            userId: user?.id,
+                                            sessionId: localStorage.getItem('sessionId')
                                          }).catch(() => {});
                                          setShowResults(false);
                                          setSearchQuery("");
@@ -540,6 +479,24 @@ export function SearchHub() {
                                 <div className="py-20 flex flex-col items-center justify-center gap-3 bg-muted/5 rounded-3xl border border-dashed border-border/60">
                                    <Activity className="h-8 w-8 text-muted-foreground/20" />
                                    <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest opacity-40">Không tìm thấy sản phẩm phù hợp</p>
+                                   
+                                   {searchResults?.noResult?.suggestedQueries?.length > 0 && (
+                                     <div className="mt-4 space-y-3 animate-in fade-in slide-in-from-bottom-2 duration-700">
+                                       <p className="text-[10px] font-bold text-primary/60 uppercase">Ý bạn là:</p>
+                                       <div className="flex flex-wrap justify-center gap-2">
+                                         {searchResults.noResult.suggestedQueries.map((sq: string, idx: number) => (
+                                           <Badge 
+                                              key={idx} 
+                                              variant="outline" 
+                                              className="cursor-pointer hover:bg-primary hover:text-white transition-all border-primary/20"
+                                              onClick={() => setSearchQuery(sq)}
+                                           >
+                                             {sq}
+                                           </Badge>
+                                         ))}
+                                       </div>
+                                     </div>
+                                   )}
                                 </div>
                              )
                           ) : (
@@ -560,7 +517,7 @@ export function SearchHub() {
                                       <TrendingUp className="h-3 w-3" /> Xu hướng hôm nay
                                    </p>
                                    <div className="flex flex-wrap gap-2">
-                                      {["iPhone", "MacBook", "Samsung", "iPad", "Tai nghe", "Đồng hồ"].map((tag, idx) => (
+                                      {(trendingQueries.length > 0 ? trendingQueries : ["iPhone", "MacBook", "Samsung", "iPad", "Tai nghe", "Đồng hồ"]).map((tag, idx) => (
                                          <button 
                                             key={`${tag}-${idx}`} 
                                             className="bg-muted/30 hover:bg-primary hover:text-white transition-all px-5 py-3 rounded-full text-xs font-bold border border-border/40 flex items-center gap-2 group shadow-sm active:scale-95"

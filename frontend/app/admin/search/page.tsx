@@ -25,6 +25,7 @@ import {
   Plus,
   Cpu,
   ArrowRight,
+  Target,
 } from "lucide-react";
 import Image from "next/image";
 import { Button } from "@/components/ui/button";
@@ -140,6 +141,11 @@ export default function SearchManagement() {
     onlyActive: false,
   });
   const [lastReindex, setLastReindex] = useState<ReindexResult | null>(null);
+  
+  // AI Debug State
+  const [aiMessage, setAiMessage] = useState("");
+  const [aiResult, setAiResult] = useState<any>(null);
+  const [isAiProcessing, setIsAiProcessing] = useState(false);
 
   // Search Sandbox State
   const [searchQuery, setSearchQuery] = useState("");
@@ -153,9 +159,6 @@ export default function SearchManagement() {
     inStock: false,
     minPrice: "",
     maxPrice: "",
-    attributes: "", // Facet pairs
-    attrKey: "",    // Manual Key
-    attrValue: "",  // Manual Value
     sort: "", // minPrice:asc
   });
 
@@ -175,17 +178,7 @@ export default function SearchManagement() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  // Toggle attribute safely
-  const toggleAttribute = (pair: string) => {
-    setFilters(prev => {
-      const current = prev.attributes.split(',').map(s => s.trim()).filter(Boolean);
-      const isThere = current.includes(pair);
-      const next = isThere 
-        ? current.filter(s => s !== pair) 
-        : [...current, pair];
-      return { ...prev, attributes: next.join(',') };
-    });
-  };
+
 
   // Fetch Analytics
   const fetchAnalytics = async () => {
@@ -286,23 +279,7 @@ export default function SearchManagement() {
           facets: true, 
           facetLabels: true,
           ...Object.fromEntries(
-            Object.entries(filters)
-              .map(([k, v]) => {
-                if (k === 'attributes' && typeof v === 'string') {
-                   let manual = "";
-                   if (filters.attrKey?.trim() && filters.attrValue?.trim()) {
-                      manual = `${filters.attrKey.trim()}:${filters.attrValue.trim()}`;
-                   }
-                   const raw = v + (manual ? (v ? `,${manual}` : manual) : "");
-                   const normalized = raw.split(',')
-                      .map(p => p.split(':').map(part => part.trim().toLowerCase()).join(':'))
-                      .filter(p => p.includes(':'))
-                      .join(',');
-                   return [k, normalized];
-                }
-                return [k, v];
-              })
-              .filter(([k, v]) => v !== "" && v !== "default" && v !== false && k !== 'attrKey' && k !== 'attrValue')
+            Object.entries(filters).filter(([k, v]) => v !== "" && v !== "default" && v !== false)
           )
         },
       });
@@ -329,13 +306,32 @@ export default function SearchManagement() {
       count: d.top.reduce((acc, curr) => acc + curr.count, 0),
     })).reverse();
   }, [topDaily]);
+  
+  const handleAiRetrieve = async () => {
+    if (!aiMessage.trim()) return;
+    try {
+      setIsAiProcessing(true);
+      const res = await apiClient.get("/search/debug/retrieve-for-ai", {
+        params: { message: aiMessage }
+      });
+      setAiResult(res.data);
+    } catch (error) {
+       toast({
+         title: "Lỗi AI Retrieval",
+         description: "Không thể thực hiện phân tích AI vào lúc này.",
+         variant: "destructive"
+       });
+    } finally {
+      setIsAiProcessing(false);
+    }
+  };
 
   return (
     <div className="space-y-8 pb-10">
       {/* Premium Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 p-6 md:p-8 rounded-3xl bg-gradient-to-br from-indigo-600 via-indigo-700 to-violet-800 text-white shadow-xl relative overflow-hidden">
-        <div className="absolute top-0 right-0 p-8 opacity-10 pointer-events-none">
-          <Zap className="h-32 w-32 rotate-12" />
+        <div className="absolute top-0 right-0 p-8 opacity-10 pointer-events-none animate-pulse">
+          <Zap className="h-32 w-32 rotate-12 animate-bounce duration-[3000ms]" />
         </div>
         <div className="space-y-1 relative z-10 max-w-2xl">
           <Badge className="bg-white/10 hover:bg-white/20 text-white border-white/20 px-3 py-1 rounded-full backdrop-blur-md font-bold text-[10px] mb-2">
@@ -440,75 +436,86 @@ export default function SearchManagement() {
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-        <TabsList className="bg-slate-900/5 dark:bg-slate-900/40 p-1 rounded-2xl border border-slate-200/50 dark:border-slate-800/50 h-auto gap-0.5 self-start">
-          <TabsTrigger value="dashboard" className="rounded-xl px-8 py-3 data-[state=active]:bg-white data-[state=active]:text-indigo-600 data-[state=active]:shadow-sm font-bold text-xs flex items-center gap-2.5 transition-all">
+        <TabsList className="bg-slate-900/5 dark:bg-slate-900/40 p-1.5 rounded-2xl border border-slate-200/50 dark:border-slate-800/50 h-auto gap-1 self-start shadow-inner">
+          <TabsTrigger value="dashboard" className="rounded-xl px-8 py-3 data-[state=active]:bg-white data-[state=active]:text-indigo-600 data-[state=active]:shadow-[0_8px_20px_-6px_rgba(79,70,229,0.2)] font-bold text-xs flex items-center gap-2.5 transition-all duration-300">
             <BarChart3 className="h-4 w-4" /> Tổng quan
           </TabsTrigger>
-          <TabsTrigger value="queries" className="rounded-xl px-8 py-3 data-[state=active]:bg-white data-[state=active]:text-indigo-600 data-[state=active]:shadow-sm font-bold text-xs flex items-center gap-2.5 transition-all">
+          <TabsTrigger value="queries" className="rounded-xl px-8 py-3 data-[state=active]:bg-white data-[state=active]:text-indigo-600 data-[state=active]:shadow-[0_8px_20px_-6px_rgba(79,70,229,0.2)] font-bold text-xs flex items-center gap-2.5 transition-all duration-300">
             <TrendingUp className="h-4 w-4" /> Phân tích Từ khóa
           </TabsTrigger>
-          <TabsTrigger value="sandbox" className="rounded-xl px-8 py-3 data-[state=active]:bg-white data-[state=active]:text-indigo-600 data-[state=active]:shadow-sm font-bold text-xs flex items-center gap-2.5 transition-all">
-            <Search className="h-4 w-4" /> Tìm kiếm (Sandbox) thử nghiệm
+          <TabsTrigger value="sandbox" className="rounded-xl px-8 py-3 data-[state=active]:bg-white data-[state=active]:text-indigo-600 data-[state=active]:shadow-[0_8px_20px_-6px_rgba(79,70,229,0.2)] font-bold text-xs flex items-center gap-2.5 transition-all duration-300">
+            <Search className="h-4 w-4" /> Tìm kiếm (Sandbox)
+          </TabsTrigger>
+          <TabsTrigger value="ai" className="rounded-xl px-8 py-3 data-[state=active]:bg-white data-[state=active]:text-indigo-600 data-[state=active]:shadow-[0_8px_20px_-6px_rgba(79,70,229,0.2)] font-bold text-xs flex items-center gap-2.5 transition-all duration-300">
+            <Cpu className="h-4 w-4" /> AI Intelligence
           </TabsTrigger>
         </TabsList>
 
         <TabsContent value="dashboard" className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
           {/* Quick Stats Grid */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-            <Card className="rounded-[1.5rem] border border-border shadow-sm bg-background overflow-hidden group hover:border-indigo-200 transition-all duration-300">
+            <Card className="rounded-[1.5rem] border border-border/60 shadow-sm bg-background/50 backdrop-blur-sm overflow-hidden group hover:border-indigo-400 hover:shadow-indigo-500/10 hover:-translate-y-1 transition-all duration-500">
               <CardContent className="p-5 relative">
                 <div className="flex items-start gap-4">
-                  <div className="shrink-0 h-10 w-10 rounded-xl bg-indigo-50 flex items-center justify-center text-indigo-600">
+                  <div className="shrink-0 h-10 w-10 rounded-xl bg-indigo-50 flex items-center justify-center text-indigo-600 group-hover:scale-110 group-hover:rotate-3 transition-transform duration-500">
                     <Search className="h-5 w-5" />
                   </div>
                   <div className="space-y-1">
                     <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Tổng lượt tìm kiếm</p>
-                    <h3 className="text-2xl font-bold text-foreground leading-none">{ctrStats?.searches.toLocaleString() ?? "0"}</h3>
+                    <h3 className={cn("text-2xl font-bold text-foreground leading-none tracking-tight", loading && "animate-pulse bg-muted h-6 w-20 rounded")}>
+                      {!loading ? (ctrStats?.searches.toLocaleString() ?? "0") : ""}
+                    </h3>
                     <p className="text-[10px] text-muted-foreground leading-tight pt-1">Tổng quan quy mô nhu cầu khách hàng</p>
                   </div>
                 </div>
               </CardContent>
             </Card>
 
-            <Card className="rounded-[1.5rem] border border-border shadow-sm bg-background overflow-hidden group hover:border-emerald-200 transition-all duration-300">
+            <Card className="rounded-[1.5rem] border border-border/60 shadow-sm bg-background/50 backdrop-blur-sm overflow-hidden group hover:border-emerald-400 hover:shadow-emerald-500/10 hover:-translate-y-1 transition-all duration-500">
               <CardContent className="p-5 relative">
                 <div className="flex items-start gap-4">
-                  <div className="shrink-0 h-10 w-10 rounded-xl bg-emerald-50 flex items-center justify-center text-emerald-600">
+                  <div className="shrink-0 h-10 w-10 rounded-xl bg-emerald-50 flex items-center justify-center text-emerald-600 group-hover:scale-110 group-hover:-rotate-3 transition-transform duration-500">
                     <TrendingUp className="h-5 w-5" />
                   </div>
                   <div className="space-y-1">
                     <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Hiệu suất CTR</p>
-                    <h3 className="text-2xl font-bold text-foreground leading-none">{((ctrStats?.ctr ?? 0) * 100).toFixed(1)}%</h3>
+                    <h3 className={cn("text-2xl font-bold text-foreground leading-none tracking-tight", loading && "animate-pulse bg-muted h-6 w-16 rounded")}>
+                      {!loading ? (`${((ctrStats?.ctr ?? 0) * 100).toFixed(1)}%`) : ""}
+                    </h3>
                     <p className="text-[10px] text-muted-foreground leading-tight pt-1">Độ liên quan giữa kết quả và kỳ vọng</p>
                   </div>
                 </div>
               </CardContent>
             </Card>
 
-            <Card className="rounded-[1.5rem] border border-border shadow-sm bg-background overflow-hidden group hover:border-amber-200 transition-all duration-300">
+            <Card className="rounded-[1.5rem] border border-border/60 shadow-sm bg-background/50 backdrop-blur-sm overflow-hidden group hover:border-amber-400 hover:shadow-amber-500/10 hover:-translate-y-1 transition-all duration-500">
               <CardContent className="p-5 relative">
                 <div className="flex items-start gap-4">
-                  <div className="shrink-0 h-10 w-10 rounded-xl bg-amber-50 flex items-center justify-center text-amber-600">
+                  <div className="shrink-0 h-10 w-10 rounded-xl bg-amber-50 flex items-center justify-center text-amber-600 group-hover:scale-110 group-hover:rotate-6 transition-transform duration-500">
                     <AlertCircle className="h-5 w-5" />
                   </div>
                   <div className="space-y-1">
                     <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Tỷ lệ không kết quả</p>
-                    <h3 className="text-2xl font-bold text-foreground leading-none">{(noResultStats?.noResultRate ?? 0).toFixed(1)}%</h3>
+                    <h3 className={cn("text-2xl font-bold text-foreground leading-none tracking-tight", loading && "animate-pulse bg-muted h-6 w-16 rounded")}>
+                      {!loading ? (`${(noResultStats?.noResultRate ?? 0).toFixed(1)}%`) : ""}
+                    </h3>
                     <p className="text-[10px] text-muted-foreground leading-tight pt-1">Khoảng cách dữ liệu cần được bổ sung</p>
                   </div>
                 </div>
               </CardContent>
             </Card>
 
-            <Card className="rounded-[1.5rem] border border-border shadow-sm bg-background overflow-hidden group hover:border-rose-200 transition-all duration-300">
+            <Card className="rounded-[1.5rem] border border-border/60 shadow-sm bg-background/50 backdrop-blur-sm overflow-hidden group hover:border-rose-400 hover:shadow-rose-500/10 hover:-translate-y-1 transition-all duration-500">
               <CardContent className="p-5 relative">
                 <div className="flex items-start gap-4">
-                  <div className="shrink-0 h-10 w-10 rounded-xl bg-rose-50 flex items-center justify-center text-rose-600">
+                  <div className="shrink-0 h-10 w-10 rounded-xl bg-rose-50 flex items-center justify-center text-rose-600 group-hover:scale-110 group-hover:-rotate-12 transition-transform duration-500">
                     <Timer className="h-5 w-5" />
                   </div>
                   <div className="space-y-1">
                     <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Độ trễ P95</p>
-                    <h3 className="text-2xl font-bold text-foreground leading-none">{latencyStats?.p95LatencyMs?.toFixed(0) ?? "0"}ms</h3>
+                    <h3 className={cn("text-2xl font-bold text-foreground leading-none tracking-tight", loading && "animate-pulse bg-muted h-6 w-20 rounded")}>
+                      {!loading ? (`${latencyStats?.p95LatencyMs?.toFixed(0) ?? "0"}ms`) : ""}
+                    </h3>
                     <p className="text-[10px] text-muted-foreground leading-tight pt-1">Sức khỏe hệ thống và tốc độ phản hồi</p>
                   </div>
                 </div>
@@ -518,13 +525,16 @@ export default function SearchManagement() {
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             {/* Chart Area */}
-            <Card className="lg:col-span-2 rounded-[2rem] border border-border shadow-sm overflow-hidden">
+            <Card className="lg:col-span-2 rounded-[2rem] border border-border shadow-sm overflow-hidden hover:shadow-xl transition-shadow duration-500">
               <CardHeader className="flex flex-row items-center justify-between p-8 border-b border-border bg-muted/20">
                 <div className="space-y-1">
                   <CardTitle className="text-xl font-bold tracking-tight">Xu hướng tìm kiếm</CardTitle>
-                  <CardDescription className="font-medium text-[11px] uppercase tracking-wider">Lưu lượng request theo thời gian</CardDescription>
+                  <CardDescription className="font-semibold text-[11px] uppercase tracking-wider">Lưu lượng request theo thời gian</CardDescription>
                 </div>
-                <Badge variant="outline" className="bg-background text-[10px] font-bold py-1 px-3">Real-time Data</Badge>
+                <div className="relative">
+                  <div className="absolute inset-0 bg-emerald-400 blur-sm opacity-20 animate-pulse rounded-full" />
+                  <Badge variant="outline" className="bg-background text-[10px] font-bold py-1 px-3 relative">Real-time Data</Badge>
+                </div>
               </CardHeader>
               <CardContent className="p-8">
                 <div className="h-[300px] w-full mt-4">
@@ -592,9 +602,9 @@ export default function SearchManagement() {
                       const maxCount = topQueries[0]?.count || 1;
                       const percentage = (q.count || 0) / maxCount * 100;
                       return (
-                        <div key={i} className="px-8 py-5 hover:bg-muted/50 transition-all group relative overflow-hidden">
-                          <div className="absolute left-0 top-0 bottom-0 w-1 bg-indigo-500 opacity-0 group-hover:opacity-100 transition-opacity" />
-                          <div className="flex items-center justify-between relative z-10">
+                        <div key={i} className="px-8 py-5 hover:bg-muted/50 transition-all group relative overflow-hidden cursor-default">
+                          <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-indigo-500 scale-y-0 group-hover:scale-y-100 transition-transform duration-300 transform-gpu" />
+                          <div className="flex items-center justify-between relative z-10 group-hover:translate-x-1 transition-transform duration-300">
                             <div className="flex items-center gap-4">
                               <span className="text-xs font-medium text-muted-foreground group-hover:text-indigo-600 transition-colors">#{i+1}</span>
                               <p className="font-semibold text-sm text-foreground">{q.q}</p>
@@ -726,7 +736,7 @@ export default function SearchManagement() {
               
               {/* Left Sidebar: Tìm kiếm (Sandbox) thử nghiệm */}
                <div className="xl:col-span-1 space-y-6 sticky top-6">
-                  <Card className="rounded-2xl border border-border shadow-sm bg-background/80 backdrop-blur-xl sticky top-6 overflow-hidden">
+                  <Card className="rounded-[2rem] border border-border/60 shadow-xl shadow-indigo-500/5 bg-background/60 backdrop-blur-3xl sticky top-6 overflow-hidden">
                      <CardHeader className="p-6 border-b border-border">
                         <div className="flex items-center justify-between">
                            <CardTitle className="text-lg font-bold flex items-center gap-2">
@@ -743,9 +753,6 @@ export default function SearchManagement() {
                                  inStock: false,
                                  minPrice: "",
                                  maxPrice: "",
-                                 attributes: "",
-                                 attrKey: "",
-                                 attrValue: "",
                                  sort: "default"
                                })}
                            >
@@ -760,7 +767,7 @@ export default function SearchManagement() {
                            <Label className="text-xs font-bold text-muted-foreground ml-1">Chiến lược xếp hạng</Label>
                            <Select value={filters.sort} onValueChange={(v) => setFilters(f => ({...f, sort: v}))}>
                               <SelectTrigger className="h-11 rounded-xl bg-background border-border shadow-sm font-semibold text-sm group transition-all">
-                                 <SelectValue placeholder="Mặc định (AI)" />
+                                 <SelectValue placeholder="Độ tương quan" />
                               </SelectTrigger>
                               <SelectContent className="rounded-xl border-border shadow-lg">
                                  <SelectItem value="default" className="text-sm font-medium py-2.5">Độ tương quan</SelectItem>
@@ -812,55 +819,12 @@ export default function SearchManagement() {
                           </div>
                        </div>
 
-                        {/* Advanced Attributes Manual Field */}
-                        <div className="space-y-3 pt-5 border-t border-border">
-                           <div className="flex items-center justify-between px-1">
-                              <Label className="text-xs font-bold text-muted-foreground">Thuộc tính sản phẩm</Label>
-                              <TooltipProvider>
-                                 <ShadcnTooltip>
-                                    <TooltipTrigger asChild>
-                                       <div className="h-4.5 w-4.5 rounded-full bg-muted/50 flex items-center justify-center cursor-help transition-colors hover:bg-muted relative z-20">
-                                          <Box className="h-3 w-3 text-muted-foreground" />
-                                       </div>
-                                    </TooltipTrigger>
-                                    <TooltipPortal>
-                                       <TooltipContent side="top" sideOffset={8} className="z-[100] text-[10px] font-medium max-w-[200px] p-3 rounded-xl bg-slate-900 text-white border-none shadow-2xl">
-                                          <p>Nhập Key và Value để lọc thuộc tính tùy chỉnh.</p>
-                                          <p className="mt-1 opacity-60 italic">VD: RAM (Key), 8GB (Value)</p>
-                                       </TooltipContent>
-                                    </TooltipPortal>
-                                 </ShadcnTooltip>
-                              </TooltipProvider>
-                           </div>
-                           <div className="space-y-2">
-                              <div className="relative group">
-                                 <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-bold text-muted-foreground/40 group-focus-within:text-indigo-500 transition-colors uppercase">Key</span>
-                                 <Input 
-                                    placeholder="Tên thuộc tính (VD: color)..." 
-                                    className="h-11 rounded-xl bg-background border-border text-sm font-semibold pl-4 pr-12 focus-visible:ring-indigo-500/20 shadow-sm transition-all group-hover:border-indigo-200"
-                                    value={filters.attrKey}
-                                    onChange={(e) => setFilters(f => ({...f, attrKey: e.target.value}))}
-                                 />
-                              </div>
-                              <div className="relative group">
-                                 <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-bold text-muted-foreground/40 group-focus-within:text-indigo-500 transition-colors uppercase">Value</span>
-                                 <Input 
-                                    placeholder="Giá trị (VD: red)..." 
-                                    className="h-11 rounded-xl bg-background border-border text-sm font-semibold pl-4 pr-12 focus-visible:ring-indigo-500/20 shadow-sm transition-all group-hover:border-indigo-200"
-                                    value={filters.attrValue}
-                                    onChange={(e) => setFilters(f => ({...f, attrValue: e.target.value}))}
-                                 />
-                              </div>
-                           </div>
-                        </div>
-
                        {/* Facets Preview */}
                        {searchResults && (
                          <div className="space-y-6 pt-6 border-t border-border animate-in fade-in duration-500">
-                            {[
-                               { title: "Thương hiệu", data: searchResults.facets?.brandId, labels: searchResults.facetLabels?.brandId, key: "brandId" },
-                               { title: "Danh mục", data: searchResults.facets?.categoryId, labels: searchResults.facetLabels?.categoryId, key: "categoryId" },
-                               { title: "Thuộc tính (Phổ biến)", data: searchResults.facets?.attributePairs, labels: null, key: "attributes" }
+                             {[
+                                { title: "Thương hiệu", data: searchResults.facets?.brandId, labels: searchResults.facetLabels?.brandId, key: "brandId" },
+                                { title: "Danh mục", data: searchResults.facets?.categoryId, labels: searchResults.facetLabels?.categoryId, key: "categoryId" }
                             ].map((sec: any) => sec.data && (
                                <div key={sec.key} className="space-y-3">
                                   <div className="flex items-center justify-between">
@@ -869,19 +833,13 @@ export default function SearchManagement() {
                                   </div>
                                   <div className="grid grid-cols-1 gap-1.5 max-h-[200px] overflow-y-auto scrollbar-hide pr-1">
                                      {Object.entries(sec.data).slice(0, 12).map(([id, count]) => {
-                                        const isSelected = sec.key === 'attributes' 
-                                          ? filters.attributes.split(',').map(s => s.trim()).filter(Boolean).includes(id)
-                                          : (filters as any)[sec.key] === id;
+                                        const isSelected = (filters as any)[sec.key] === id;
                                           
                                         return (
                                           <button 
                                              key={id} 
                                              onClick={() => {
-                                               if (sec.key === 'attributes') {
-                                                 toggleAttribute(id);
-                                               } else {
                                                  setFilters(prev => ({ ...prev, [sec.key]: (prev as any)[sec.key] === id ? "" : id }));
-                                               }
                                              }}
                                              className={cn(
                                                "group flex items-center justify-between px-3 py-2 rounded-lg border transition-all",
@@ -951,7 +909,7 @@ export default function SearchManagement() {
                     </div>
 
                      {/* Integrated Suggestions (Push mode) */}
-                     {showSuggestions && (
+                     {showSuggestions && suggestions && (
                         <div className="bg-background/80 backdrop-blur-2xl rounded-3xl border border-border shadow-2xl animate-in fade-in slide-in-from-top-4 duration-500 overflow-hidden mb-8">
                            <div className="absolute top-4 right-6 z-10">
                               <Button 
@@ -964,115 +922,27 @@ export default function SearchManagement() {
                               </Button>
                            </div>
                            
-                           {suggestions ? (
-                              <div className="grid grid-cols-1 md:grid-cols-12 min-h-[300px]">
-                                 {suggestions.querySuggestions?.length > 0 && (
-                                    <div className="md:col-span-4 p-8 border-r border-border bg-muted/20">
-                                       <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-6 flex items-center gap-2">
-                                          <Activity className="h-3 w-3" /> Xu hướng hiện tại
-                                       </p>
-                                       <div className="space-y-1.5">
-                                          {suggestions.querySuggestions.map((s: string) => (
-                                            <div 
-                                               key={s} 
-                                               className="px-5 py-3.5 hover:bg-background hover:shadow-sm rounded-xl cursor-pointer text-xs font-semibold flex items-center justify-between group transition-all"
-                                               onClick={() => { setSearchQuery(s); setShowSuggestions(false); }}
-                                            >
-                                              <span className="group-hover:text-indigo-600 transition-colors">{s}</span>
-                                              <ArrowUpRight className="h-3.5 w-3.5 text-muted-foreground group-hover:text-indigo-400" />
-                                            </div>
-                                          ))}
-                                       </div>
-                                    </div>
-                                 )}
-                                 <div className="md:col-span-8 p-8 flex flex-col">
-                                    <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-6 flex items-center gap-2">
-                                       <Box className="h-3 w-3" /> Sản phẩm gợi ý
-                                    </p>
-                                    <div className="grid grid-cols-1 gap-2.5 max-h-[350px] overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-indigo-200 scrollbar-track-transparent">
-                                       {suggestions.productSuggestions?.map((p: any) => (
-                                         <div 
-                                            key={p.id} 
-                                            className="p-3 h-20 hover:bg-muted/50 rounded-2xl cursor-pointer flex items-center gap-5 transition-all group border border-transparent hover:border-indigo-100 flex-shrink-0"
-                                            onClick={() => { setSearchQuery(p.name); setShowSuggestions(false); }}
-                                         >
-                                           <div className="h-14 w-14 rounded-xl bg-slate-100 relative overflow-hidden shrink-0 border border-border group-hover:border-indigo-200 shadow-sm">
-                                             {p.image && <Image src={p.image} alt={p.name} fill className="object-cover transition-transform duration-500 group-hover:scale-110" />}
-                                           </div>
-                                           <div className="min-w-0 flex-1 space-y-1">
-                                              <p className="text-sm font-bold truncate text-foreground group-hover:text-indigo-600 transition-colors">{p.name}</p>
-                                              <div className="flex items-center gap-3">
-                                                 <p className="text-[11px] font-bold text-indigo-600 font-mono bg-indigo-50 px-2 py-0.5 rounded-md">
-                                                    {new Intl.NumberFormat('vi-VN').format(p.minPrice || p.price)}đ
-                                                 </p>
-                                                 {p.category && (
-                                                   <span className="text-[10px] font-bold text-muted-foreground/50 uppercase tracking-tighter">
-                                                      ID: {p.id.substring(0,6)}
-                                                   </span>
-                                                 )}
-                                              </div>
-                                           </div>
-                                           <ArrowRight className="h-4 w-4 text-muted-foreground opacity-0 group-hover:opacity-100 -translate-x-2 group-hover:translate-x-0 transition-all mr-2" />
-                                         </div>
-                                       ))}
-                                    </div>
+                           {suggestions && (
+                              <div className="p-8 min-h-[200px] animate-in fade-in zoom-in-95 duration-300">
+                                 <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-6 flex items-center gap-2 px-1">
+                                    <Activity className="h-3.5 w-3.5 text-indigo-500" /> Xu hướng hiện tại
+                                 </p>
+                                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
+                                    {suggestions.querySuggestions?.map((s: string) => (
+                                      <div 
+                                         key={s} 
+                                         className="px-5 py-4 bg-muted/30 hover:bg-white hover:shadow-md hover:shadow-indigo-500/5 rounded-2xl cursor-pointer text-xs font-bold flex items-center justify-between group transition-all border border-transparent hover:border-indigo-100"
+                                         onClick={() => { setSearchQuery(s); setShowSuggestions(false); }}
+                                      >
+                                        <span className="group-hover:text-indigo-600 transition-colors uppercase tracking-tight">{s}</span>
+                                        <ArrowUpRight className="h-4 w-4 text-muted-foreground group-hover:text-indigo-400 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-all" />
+                                      </div>
+                                    ))}
                                  </div>
-                              </div>
-                           ) : (
-                              <div className="p-10 space-y-10">
-                                 <div className="flex flex-col items-center text-center gap-3">
-                                    <div className="h-12 w-12 rounded-2xl bg-indigo-50 flex items-center justify-center text-indigo-600 mb-2">
-                                       <Zap className="h-6 w-6" />
-                                    </div>
-                                    <h3 className="text-lg font-bold text-foreground">Bắt đầu tìm kiếm với AI</h3>
-                                    <p className="text-xs font-medium text-muted-foreground max-w-sm">Dữ liệu được xử lý bởi Engine Meilisearch kết hợp Neural Ranking để trả về kết quả chính xác nhất.</p>
-                                 </div>
-
-                                 <div className="space-y-4">
-                                    <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-2 px-2">
-                                       <Activity className="h-3 w-3 text-indigo-500" /> Từ khóa xu hướng
-                                    </p>
-                                    <div className="flex flex-wrap gap-2.5">
-                                       {["iphone", "laptop", "tai nghe", "macbook", "tablet", "ipad"].map((tag) => (
-                                          <button 
-                                             key={tag} 
-                                             className="bg-muted/50 hover:bg-indigo-600 hover:text-white transition-all px-5 py-2.5 rounded-full text-xs font-bold shadow-sm border border-border/50 flex items-center gap-2 group"
-                                             onClick={() => { setSearchQuery(tag); setShowSuggestions(false); }}
-                                          >
-                                             <TrendingUp className="h-3 w-3 opacity-40 group-hover:opacity-100" />
-                                             {tag}
-                                          </button>
-                                       ))}
-                                    </div>
-                                 </div>
-
-                                 {topQueries.length > 0 && (
-                                    <div className="space-y-4">
-                                       <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-2 px-2">
-                                          <Search className="h-3 w-3 text-indigo-500" /> Tìm kiếm gần đây
-                                       </p>
-                                       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                                          {topQueries.slice(0, 4).map((q) => (
-                                             <div 
-                                                key={q.q} 
-                                                className="p-4 rounded-2xl bg-muted/20 border border-border hover:border-indigo-200 hover:bg-white transition-all cursor-pointer group"
-                                                onClick={() => { setSearchQuery(q.q); setShowSuggestions(false); }}
-                                             >
-                                                <p className="text-xs font-bold truncate group-hover:text-indigo-600">{q.q}</p>
-                                                <p className="text-[10px] text-muted-foreground font-medium mt-1">{q.count} lượt tìm</p>
-                                             </div>
-                                          ))}
-                                       </div>
-                                    </div>
-                                 )}
                               </div>
                            )}
-
-
                         </div>
                      )}
-
-
                  </div>
 
                  {/* Results Flow */}
@@ -1133,7 +1003,7 @@ export default function SearchManagement() {
                                             key={q} 
                                             variant="outline" 
                                             className="px-4 py-2 bg-background rounded-xl border-amber-200 text-amber-800 cursor-pointer hover:bg-amber-100 transition-colors font-bold text-xs"
-                                             onClick={() => {
+                                            onClick={() => {
                                                setSearchQuery(q);
                                                setFilters({
                                                   categoryId: "",
@@ -1141,9 +1011,6 @@ export default function SearchManagement() {
                                                   inStock: false,
                                                   minPrice: "",
                                                   maxPrice: "",
-                                                  attributes: "",
-                                                  attrKey: "",
-                                                  attrValue: "",
                                                   sort: "default"
                                                });
                                              }}
@@ -1262,6 +1129,132 @@ export default function SearchManagement() {
               </div>
            </div>
         </TabsContent>
+         <TabsContent value="ai" className="animate-in fade-in slide-in-from-bottom-4 duration-500 mt-6">
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+               <div className="lg:col-span-4 sticky top-8 self-start space-y-6">
+                  <Card className="rounded-[2rem] border-none shadow-xl bg-gradient-to-b from-slate-900 to-indigo-950 text-white overflow-hidden">
+                     <CardHeader className="p-8">
+                        <div className="h-12 w-12 rounded-2xl bg-white/10 flex items-center justify-center mb-4 backdrop-blur-md">
+                           <Cpu className="h-6 w-6 text-indigo-400" />
+                        </div>
+                        <CardTitle className="text-xl font-bold tracking-tight">Kiểm thử Ngữ nghĩa AI</CardTitle>
+                        <CardDescription className="text-indigo-300/60 font-normal">Thử nghiệm cách mô hình ngôn ngữ hiểu và truy xuất dữ liệu từ warehouse.</CardDescription>
+                     </CardHeader>
+                     <CardContent className="p-8 pt-0 space-y-6">
+                        <div className="space-y-4">
+                           <Label className="text-sm font-semibold text-indigo-200 ml-1">Câu lệnh tự nhiên (Prompt)</Label>
+                           <textarea 
+                              className="w-full h-40 rounded-2xl bg-white/5 border border-white/10 p-4 text-sm font-normal focus:ring-2 focus:ring-indigo-500/40 transition-all outline-none resize-none placeholder:text-white/20"
+                              placeholder="Nhập câu truy vấn của bạn..."
+                              value={aiMessage}
+                              onChange={(e) => setAiMessage(e.target.value)}
+                           />
+                        </div>
+                        <Button 
+                           className="w-full h-14 rounded-2xl bg-white text-indigo-950 hover:bg-indigo-50 font-bold text-sm shadow-lg shadow-indigo-500/10 transition-all active:scale-95 group"
+                           onClick={handleAiRetrieve}
+                           disabled={isAiProcessing}
+                        >
+                           {isAiProcessing ? (
+                              <div className="flex items-center justify-center gap-2">
+                                 <Loader2 className="h-5 w-5 animate-spin" />
+                                 <span>Đang phân tích...</span>
+                              </div>
+                           ) : (
+                              <div className="flex items-center justify-center gap-2 group">
+                                 Phân tích <ArrowRight className="h-4 w-4 group-hover:translate-x-1 transition-transform" />
+                              </div>
+                           )}
+                        </Button>
+                     </CardContent>
+                  </Card>
+               </div>
+
+               <div className="lg:col-span-8">
+                  {aiResult ? (
+                     <div className="space-y-6 animate-in zoom-in-95 duration-500">
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                           {[
+                              { label: "Chế độ Tìm kiếm", value: aiResult.retrievalStrategy, icon: Target, color: "text-emerald-500", bg: "bg-emerald-500/10" },
+                              { label: "Nhóm Ý định", value: aiResult.inferredIntentGroup, icon: Zap, color: "text-amber-500", bg: "bg-amber-500/10" },
+                              { label: "Độ khớp", value: `${aiResult.totalHits} kết quả`, icon: Activity, color: "text-indigo-500", bg: "bg-indigo-500/10" }
+                           ].map((stat, i) => (
+                              <Card key={i} className="rounded-3xl border-border shadow-sm overflow-hidden">
+                                 <CardContent className="p-4 flex items-center gap-4">
+                                    <div className={cn("h-10 w-10 rounded-xl flex items-center justify-center", stat.bg, stat.color)}>
+                                       {i === 0 ? <Activity className="h-5 w-5" /> : i === 1 ? <Zap className="h-5 w-5" /> : <Box className="h-5 w-5" />}
+                                    </div>
+                                    <div>
+                                       <p className="text-[10px] font-semibold text-muted-foreground">{stat.label}</p>
+                                       <p className="text-sm font-bold whitespace-nowrap">{stat.value || "General"}</p>
+                                    </div>
+                                 </CardContent>
+                              </Card>
+                           ))}
+                        </div>
+
+                        <Card className="rounded-[2rem] border-border shadow-sm overflow-hidden">
+                           <CardHeader className="p-6 border-b bg-muted/20">
+                              <CardTitle className="text-lg font-bold">Dữ liệu phân tích (Inferred Metadata)</CardTitle>
+                           </CardHeader>
+                           <CardContent className="p-6">
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                                 <div className="space-y-4">
+                                    <div className="text-[11px] font-bold text-muted-foreground flex items-center gap-2">
+                                       <div className="h-1.5 w-1.5 rounded-full bg-indigo-500" /> Chuẩn hóa Query
+                                    </div>
+                                    <div className="p-4 rounded-2xl bg-indigo-50/50 border border-indigo-100 text-sm font-bold text-indigo-900">
+                                       "{aiResult.normalizedQuery}"
+                                    </div>
+                                 </div>
+                                 <div className="space-y-4">
+                                    <div className="text-[11px] font-bold text-muted-foreground flex items-center gap-2">
+                                       <div className="h-1.5 w-1.5 rounded-full bg-emerald-500" /> Từ khóa sạch
+                                    </div>
+                                    <div className="p-4 rounded-2xl bg-emerald-50/50 border border-emerald-100 text-sm font-bold text-emerald-900">
+                                       "{aiResult.cleanQuery}"
+                                    </div>
+                                 </div>
+                              </div>
+                           </CardContent>
+                        </Card>
+
+                        <div className="space-y-4">
+                           <p className="text-xs font-bold text-muted-foreground flex items-center gap-2 ml-1">
+                              <ArrowDownRight className="h-4 w-4" /> Sản phẩm AI đề xuất ({aiResult.products?.length || 0})
+                           </p>
+                           <div className="grid grid-cols-1 gap-3">
+                              {aiResult.products?.map((p: any) => (
+                                 <div key={p.id} className="flex items-center gap-4 p-4 rounded-3xl bg-white border border-border hover:border-indigo-400 hover:shadow-[0_10px_30px_-10px_rgba(79,70,229,0.15)] hover:-translate-y-1 transition-all duration-300 group">
+                                    <div className="h-14 w-14 rounded-2xl border border-border overflow-hidden bg-muted/10 relative group-hover:scale-105 transition-transform duration-500">
+                                       {p.image ? <Image src={p.image} alt={p.name} fill className="object-cover" /> : null}
+                                    </div>
+                                    <div className="flex-1 min-w-0">
+                                       <h4 className="text-sm font-bold truncate group-hover:text-indigo-600 transition-colors tracking-tight">{p.name}</h4>
+                                       <div className="flex items-center gap-3 mt-1">
+                                          <p className="text-xs font-bold text-indigo-600">{new Intl.NumberFormat('vi-VN').format(p.minPrice)}đ</p>
+                                          <Badge variant="secondary" className="text-[9px] font-bold h-4 px-1.5 bg-slate-100 group-hover:bg-indigo-50 transition-colors">{p.brandName}</Badge>
+                                       </div>
+                                    </div>
+                                 </div>
+                              ))}
+                           </div>
+                        </div>
+                     </div>
+                  ) : (
+                     <div className="h-full min-h-[580px] rounded-[2rem] border-2 border-dashed border-border/60 flex flex-col items-center justify-center text-center p-10 space-y-4 bg-muted/5 group transition-all duration-500">
+                        <div className="h-16 w-16 rounded-3xl bg-muted/10 flex items-center justify-center text-muted-foreground/30 group-hover:scale-110 group-hover:text-indigo-400/50 transition-all duration-700">
+                           <Activity className="h-8 w-8 animate-pulse" />
+                        </div>
+                        <div className="space-y-1">
+                           <h3 className="text-lg font-bold text-muted-foreground">Sẵn sàng phân tích</h3>
+                           <p className="text-xs text-muted-foreground/60 max-w-sm">Nhập một câu truy vấn tự nhiên ở bên trái để xem cách hệ thống xử lý ngôn ngữ.</p>
+                        </div>
+                     </div>
+                  )}
+               </div>
+            </div>
+         </TabsContent>
       </Tabs>
     </div>
   );

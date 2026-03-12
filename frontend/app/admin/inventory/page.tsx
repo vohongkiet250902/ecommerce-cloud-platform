@@ -65,6 +65,7 @@ export default function InventoryPage() {
   const [isUpdateOpen, setIsUpdateOpen] = useState(false);
   const [selectedItem, setSelectedItem] = useState<InventoryItem | null>(null);
   const [importQuantity, setImportQuantity] = useState<number>(0);
+  const [updateMode, setUpdateMode] = useState<"add" | "set">("add");
   const [updating, setUpdating] = useState(false);
   const [statusFilter, setStatusFilter] = useState<"all" | "out_of_stock" | "low_stock" | "in_stock">("all");
 
@@ -126,6 +127,7 @@ export default function InventoryPage() {
   const handleOpenUpdate = (item: InventoryItem) => {
       setSelectedItem(item);
       setImportQuantity(0);
+      setUpdateMode("add");
       setIsUpdateOpen(true);
   }
 
@@ -143,18 +145,26 @@ export default function InventoryPage() {
           if (selectedItem.rawVariantIndex >= 0 && updatedVariants[selectedItem.rawVariantIndex]) {
               // Cập nhật tồn kho cho riêng một biến thể
               const currentStock = Number(updatedVariants[selectedItem.rawVariantIndex].stock) || 0;
-              const newTotalStock = currentStock + Number(importQuantity);
+              const newTotalStock = updateMode === "add" 
+                ? currentStock + Number(importQuantity)
+                : Number(importQuantity);
+
               updatedVariants[selectedItem.rawVariantIndex] = {
                   ...updatedVariants[selectedItem.rawVariantIndex],
-                  stock: newTotalStock
+                  stock: Math.max(0, newTotalStock)
               };
 
               const totalStock = updatedVariants.reduce((acc: number, v: any) => acc + (Number(v.stock) || 0), 0);
               updatePayload = { variants: updatedVariants, totalStock };
           } else {
               // Cập nhật tồn kho trực tiếp vào sản phẩm (nếu là mặt hàng đơn giản, không biến thể)
-              const newTotalStock = (Number(product.stock ?? product.totalStock) || 0) + Number(importQuantity);
-              updatePayload = { totalStock: newTotalStock, stock: newTotalStock };
+              const currentStock = (Number(product.stock ?? product.totalStock) || 0);
+              const newTotalStock = updateMode === "add"
+                ? currentStock + Number(importQuantity)
+                : Number(importQuantity);
+                
+              const finalStock = Math.max(0, newTotalStock);
+              updatePayload = { totalStock: finalStock, stock: finalStock };
           }
 
           await productApi.updateProduct(selectedItem.productId, updatePayload);
@@ -440,6 +450,34 @@ export default function InventoryPage() {
                   </div>
 
                   <div className="p-6 space-y-6">
+                      {/* Mode Toggle */}
+                      <div className="flex p-1 bg-muted rounded-xl border border-border/50">
+                          <button 
+                              className={cn(
+                                  "flex-1 py-2 text-xs font-bold rounded-lg transition-all",
+                                  updateMode === "add" ? "bg-background shadow-sm text-primary" : "text-muted-foreground hover:text-foreground"
+                              )}
+                              onClick={() => {
+                                  setUpdateMode("add");
+                                  setImportQuantity(0);
+                              }}
+                          >
+                              Nhập thêm (+)
+                          </button>
+                          <button 
+                              className={cn(
+                                  "flex-1 py-2 text-xs font-bold rounded-lg transition-all",
+                                  updateMode === "set" ? "bg-background shadow-sm text-primary" : "text-muted-foreground hover:text-foreground"
+                              )}
+                              onClick={() => {
+                                  setUpdateMode("set");
+                                  setImportQuantity(selectedItem?.stock || 0);
+                              }}
+                          >
+                              Điều chỉnh tổng (=)
+                          </button>
+                      </div>
+
                       {/* Stock Comparison Cards */}
                       <div className="grid grid-cols-2 gap-4">
                           <div className="p-4 rounded-xl bg-muted/50 border border-border/50 text-center">
@@ -448,16 +486,28 @@ export default function InventoryPage() {
                           </div>
                           <div className="p-4 rounded-xl bg-primary/5 border border-primary/20 text-center relative overflow-hidden">
                               <div className="absolute top-0 right-0 p-1 opacity-10">
-                                  <TrendingDown className="h-8 w-8 rotate-180" />
+                                  {updateMode === "add" ? (
+                                      <Plus className="h-8 w-8" />
+                                  ) : (
+                                      <RefreshCw className="h-8 w-8" />
+                                  )}
                               </div>
-                              <p className="text-xs font-semibold text-primary mb-1">Dự kiến</p>
-                              <p className="text-xl font-bold text-primary">{(selectedItem?.stock || 0) + importQuantity}</p>
+                              <p className="text-xs font-semibold text-primary mb-1">
+                                  {updateMode === "add" ? "Dự kiến" : "Số lượng mới"}
+                              </p>
+                              <p className="text-xl font-bold text-primary">
+                                  {updateMode === "add" 
+                                      ? (selectedItem?.stock || 0) + importQuantity 
+                                      : importQuantity}
+                              </p>
                           </div>
                       </div>
 
                       {/* Input Section */}
                       <div className="space-y-3">
-                          <Label className="text-sm font-semibold ml-1">Số lượng nhập thêm</Label>
+                          <Label className="text-sm font-semibold ml-1">
+                              {updateMode === "add" ? "Số lượng nhập thêm" : "Tổng số lượng thực tế trong kho"}
+                          </Label>
                           <div className="relative group">
                               <Button 
                                   variant="ghost" 

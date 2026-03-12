@@ -83,7 +83,7 @@ import "./admin.css";
 
 /* =======================
    Nav Item
-======================= */
+ ======================= */
 interface NavItemProps {
   href: string;
   icon: React.ElementType;
@@ -130,7 +130,7 @@ const NavItem = ({ href, icon: Icon, label, collapsed }: NavItemProps) => {
 
 /* =======================
    Menu config
-======================= */
+ ======================= */
 const navItems = [
   { href: "/admin/dashboard", icon: LayoutDashboard, label: "Dashboard" },
   { href: "/admin/products", icon: Package, label: "Sản phẩm" },
@@ -181,34 +181,27 @@ export default function AdminLayout({
     inStock: false,
     minPrice: "",
     maxPrice: "",
-    attributes: "",
-    attrKey: "",
-    attrValue: "",
     sort: "default"
   });
+  const [trendingQueries, setTrendingQueries] = useState<string[]>([]);
   const searchRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
-
-  // Helper for attribute toggle
-  const toggleAttribute = (pair: string) => {
-    setFilters(prev => {
-      const current = prev.attributes.split(',').map(s => s.trim()).filter(Boolean);
-      const isThere = current.includes(pair);
-      const next = isThere ? current.filter(s => s !== pair) : [...current, pair];
-      return { ...prev, attributes: next.join(',') };
-    });
-  };
 
   // Fetch Metadata
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [catRes, brandRes] = await Promise.all([
+        const [catRes, brandRes, trendRes] = await Promise.all([
           categoryApi.getAdminCategories(),
-          brandApi.getAdminBrands()
+          brandApi.getAdminBrands(),
+          apiClient.get("/admin/search-analytics/top-queries?limit=6&days=7").catch(() => ({ data: [] }))
         ]);
         setCategories(catRes.data.data || catRes.data);
         setBrands(brandRes.data.data || brandRes.data);
+        
+        if (trendRes.data && Array.isArray(trendRes.data)) {
+          setTrendingQueries(trendRes.data.map((q: any) => q.q));
+        }
       } catch (e) { console.error("Metadata fetch error", e); }
     };
     fetchData();
@@ -272,24 +265,10 @@ export default function AdminLayout({
           facets: true,
           facetLabels: true,
           ...Object.fromEntries(
-            Object.entries(filters)
-              .map(([k, v]) => {
-                if (k === 'attributes' && typeof v === 'string') {
-                   let manual = "";
-                   if (filters.attrKey?.trim() && filters.attrValue?.trim()) {
-                      manual = `${filters.attrKey.trim()}:${filters.attrValue.trim()}`;
-                   }
-                   const raw = v + (manual ? (v ? `,${manual}` : manual) : "");
-                   const normalized = raw.split(',')
-                      .map(p => p.split(':').map(part => part.trim().toLowerCase()).join(':'))
-                      .filter(p => p.includes(':'))
-                      .join(',');
-                   return [k, normalized];
-                }
-                return [k, v];
-              })
-              .filter(([k, v]) => v !== "" && v !== "default" && v !== false && k !== 'attrKey' && k !== 'attrValue')
-          )
+            Object.entries(filters).filter(([k, v]) => v !== "" && v !== "default" && v !== false)
+          ),
+          userId: user?.id,
+          sessionId: typeof window !== 'undefined' ? localStorage.getItem('sessionId') : undefined
         }
       });
       setSearchResults(res.data);
@@ -428,7 +407,12 @@ export default function AdminLayout({
                   className="pl-11 h-11 bg-secondary/40 border-border/40 focus-visible:ring-2 focus-visible:ring-indigo-500/20 rounded-2xl text-sm font-medium transition-all"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  onFocus={() => setShowResults(true)}
+                  onFocus={() => {
+                    setShowResults(true);
+                    if (!localStorage.getItem('sessionId')) {
+                      localStorage.setItem('sessionId', 'sess_' + Math.random().toString(36).substring(2, 15));
+                    }
+                  }}
                   onClick={() => setShowResults(true)}
                 />
                 
@@ -460,7 +444,7 @@ export default function AdminLayout({
                          <div className="p-6 space-y-6">
                             <div className="flex items-center justify-between pb-4 border-b border-border/40">
                                <p className="text-[11px] font-bold text-muted-foreground/70 flex items-center gap-2">
-                                  <Settings2 className="h-3.5 w-3.5 text-indigo-500" /> Cấu hình Sandbox
+                                  <Settings2 className="h-3.5 w-3.5 text-indigo-500" /> Bộ lọc nhanh
                                </p>
                                <Button 
                                   variant="ghost" 
@@ -472,9 +456,6 @@ export default function AdminLayout({
                                      inStock: false,
                                      minPrice: "",
                                      maxPrice: "",
-                                     attributes: "",
-                                     attrKey: "",
-                                     attrValue: "",
                                      sort: "default"
                                   })}
                                >
@@ -485,7 +466,7 @@ export default function AdminLayout({
                             <div className="space-y-6">
                                {/* Sorting */}
                                <div className="space-y-2.5">
-                                  <Label className="text-[11px] font-bold text-muted-foreground ml-1">Chiến lược xếp hạng</Label>
+                                  <Label className="text-[11px] font-bold text-muted-foreground ml-1">Sắp xếp theo</Label>
                                   <Select value={filters.sort} onValueChange={(v) => setFilters(f => ({...f, sort: v}))}>
                                      <SelectTrigger className="h-10 rounded-xl bg-background border-border shadow-sm font-semibold text-xs">
                                         <SelectValue placeholder="Mặc định (AI)" />
@@ -537,52 +518,12 @@ export default function AdminLayout({
                                   />
                                </div>
 
-                               {/* Advanced Attributes Manual Input */}
-                               <div className="space-y-3">
-                                  <div className="flex items-center justify-between px-1">
-                                     <Label className="text-[11px] font-bold text-muted-foreground">Thuộc tính sản phẩm</Label>
-                                     <Tooltip>
-                                        <TooltipTrigger asChild>
-                                           <div className="h-4 w-4 rounded-full bg-muted/50 flex items-center justify-center cursor-help relative z-20">
-                                              <Settings className="h-2.5 w-2.5 text-muted-foreground" />
-                                           </div>
-                                        </TooltipTrigger>
-                                        <TooltipPortal>
-                                           <TooltipContent side="top" sideOffset={8} className="z-[100] text-[10px] font-medium max-w-[200px] p-3 rounded-xl border-none shadow-2xl bg-slate-900 text-white">
-                                              Nhập Key (VD: RAM) và Value (VD: 16GB) để lọc chính xác.
-                                           </TooltipContent>
-                                        </TooltipPortal>
-                                     </Tooltip>
-                                  </div>
-                                  <div className="space-y-2">
-                                     <div className="relative group">
-                                        <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[8px] font-black text-muted-foreground/40 group-focus-within:text-indigo-500 transition-colors uppercase">Key</span>
-                                        <Input 
-                                           placeholder="Tên thuộc tính (VD: color)..." 
-                                           className="h-10 rounded-xl bg-background border-border text-[11px] font-bold pl-4 pr-12 focus-visible:ring-indigo-500/20 shadow-sm transition-all group-hover:border-indigo-200"
-                                           value={filters.attrKey}
-                                           onChange={(e) => setFilters(f => ({...f, attrKey: e.target.value}))}
-                                        />
-                                     </div>
-                                     <div className="relative group">
-                                        <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[8px] font-black text-muted-foreground/40 group-focus-within:text-indigo-500 transition-colors uppercase">Value</span>
-                                        <Input 
-                                           placeholder="Giá trị (VD: blue)..." 
-                                           className="h-10 rounded-xl bg-background border-border text-[11px] font-bold pl-4 pr-12 focus-visible:ring-indigo-500/20 shadow-sm transition-all group-hover:border-indigo-200"
-                                           value={filters.attrValue}
-                                           onChange={(e) => setFilters(f => ({...f, attrValue: e.target.value}))}
-                                        />
-                                     </div>
-                                  </div>
-                               </div>
-
                                {/* Dynamic Facets from Results */}
                                {searchResults && (
                                  <div className="space-y-6 pt-4 border-t border-border/40">
                                     {[
                                        { title: "Thương hiệu", data: searchResults.facets?.brandId, labels: searchResults.facetLabels?.brandId, key: "brandId" },
-                                       { title: "Danh mục", data: searchResults.facets?.categoryId, labels: searchResults.facetLabels?.categoryId, key: "categoryId" },
-                                       { title: "Thuộc tính", data: searchResults.facets?.attributePairs, labels: null, key: "attributes" }
+                                       { title: "Danh mục", data: searchResults.facets?.categoryId, labels: searchResults.facetLabels?.categoryId, key: "categoryId" }
                                     ].map((sec: any) => {
                                       const hasData = sec.data && Object.keys(sec.data).length > 0;
                                       if (!hasData) return null;
@@ -594,19 +535,13 @@ export default function AdminLayout({
                                           </div>
                                           <div className="grid grid-cols-1 gap-1.5 max-h-[160px] overflow-y-auto scrollbar-hide pr-1">
                                              {Object.entries(sec.data as Record<string, number>).slice(0, 8).map(([facetId, facetCount]) => {
-                                                const isSelected = sec.key === 'attributes' 
-                                                  ? filters.attributes.split(',').map(s => s.trim()).filter(Boolean).includes(facetId)
-                                                  : (filters as any)[sec.key] === facetId;
+                                                const isSelected = (filters as any)[sec.key] === facetId;
                                                   
                                                 return (
                                                   <button 
                                                      key={facetId} 
                                                      onClick={() => {
-                                                       if (sec.key === 'attributes') {
-                                                         toggleAttribute(facetId);
-                                                       } else {
                                                          setFilters(prev => ({ ...prev, [sec.key]: (prev as any)[sec.key] === facetId ? "" : facetId }));
-                                                       }
                                                      }}
                                                      className={cn(
                                                        "group flex items-center justify-between px-3 py-2 rounded-xl border transition-all text-left",
@@ -688,13 +623,15 @@ export default function AdminLayout({
                                                href={`/admin/products/${p.id || p._id}`}
                                                className="flex items-center gap-4 p-3 rounded-2xl bg-muted/10 border border-transparent hover:border-indigo-100 hover:bg-white cursor-pointer transition-all group shadow-sm no-underline text-foreground"
                                                onClick={() => {
-                                                 apiClient.post("/search/events/click", {
-                                                    productId: p.id || p._id,
-                                                    q: searchQuery,
-                                                    position: idx + 1
-                                                 }).catch(() => {});
-                                                 setShowResults(false);
-                                                 setSearchQuery("");
+                                                  apiClient.post("/search/events/click", {
+                                                     productId: p.id || p._id,
+                                                     queryId: searchResults?.queryId,
+                                                     position: idx + 1,
+                                                     userId: user?.id,
+                                                     sessionId: localStorage.getItem('sessionId')
+                                                  }).catch(() => {});
+                                                  setShowResults(false);
+                                                  setSearchQuery("");
                                                }}
                                             >
                                               <div className="h-14 w-14 relative rounded-xl overflow-hidden shrink-0 border border-border/50 bg-white group-hover:scale-105 transition-transform duration-500 shadow-sm">
@@ -715,8 +652,8 @@ export default function AdminLayout({
                                               </div>
                                            </div>
                                               <ArrowUpRight className="h-4 w-4 text-muted-foreground opacity-0 -translate-x-2 group-hover:opacity-100 group-hover:translate-x-0 transition-all mr-2" />
-                                           </Link>
-                                        ))
+                                            </Link>
+                                         ))
                                      ) : isSearching ? (
                                         <div className="py-20 flex flex-col items-center justify-center gap-4 bg-muted/5 rounded-3xl border border-dashed border-border/60">
                                            <div className="h-10 w-10 relative">
@@ -726,10 +663,28 @@ export default function AdminLayout({
                                            <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest animate-pulse">Neural Ranking đang tìm kiếm...</p>
                                         </div>
                                      ) : (
-                                        <div className="py-20 flex flex-col items-center justify-center gap-3 bg-muted/5 rounded-3xl border border-dashed border-border/60">
-                                           <Activity className="h-8 w-8 text-muted-foreground/20" />
-                                           <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest opacity-40">Không tìm thấy sản phẩm phù hợp</p>
-                                        </div>
+                                         <div className="py-20 flex flex-col items-center justify-center gap-3 bg-muted/5 rounded-3xl border border-dashed border-border/60">
+                                            <Activity className="h-8 w-8 text-muted-foreground/20" />
+                                            <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest opacity-40">Không tìm thấy sản phẩm phù hợp</p>
+                                            
+                                            {searchResults?.noResult?.suggestedQueries?.length > 0 && (
+                                              <div className="mt-4 space-y-3 animate-in fade-in slide-in-from-bottom-2 duration-700">
+                                                <p className="text-[10px] font-bold text-indigo-600/60 uppercase">Ý bạn là:</p>
+                                                <div className="flex flex-wrap justify-center gap-2 px-6">
+                                                  {searchResults.noResult.suggestedQueries.map((sq: string, idx: number) => (
+                                                    <Badge 
+                                                      key={idx} 
+                                                      variant="outline" 
+                                                      className="cursor-pointer hover:bg-indigo-600 hover:text-white transition-all border-indigo-200"
+                                                      onClick={() => setSearchQuery(sq)}
+                                                    >
+                                                      {sq}
+                                                    </Badge>
+                                                  ))}
+                                                </div>
+                                              </div>
+                                            )}
+                                         </div>
                                      )
                                   ) : (
                                      <div className="py-12 space-y-10">
@@ -747,17 +702,17 @@ export default function AdminLayout({
                                               <TrendingUp className="h-3 w-3" /> Xu hướng tìm kiếm
                                            </p>
                                            <div className="flex flex-wrap gap-2">
-                                              {["iphone", "laptop", "tai nghe", "macbook", "tablet", "ipad"].map((tag) => (
-                                                 <button 
-                                                    key={tag} 
-                                                    className="bg-muted/30 hover:bg-indigo-600 hover:text-white transition-all px-5 py-2.5 rounded-full text-xs font-bold border border-border/40 flex items-center gap-2 group shadow-sm"
-                                                    onClick={() => setSearchQuery(tag)}
-                                                 >
-                                                    <TrendingUp className="h-3 w-3 opacity-40 group-hover:opacity-100 transition-opacity" />
-                                                    {tag}
-                                                 </button>
-                                              ))}
-                                           </div>
+                                               {(trendingQueries.length > 0 ? trendingQueries : ["iphone", "laptop", "tai nghe", "macbook", "tablet", "ipad"]).map((tag) => (
+                                                  <button 
+                                                     key={tag} 
+                                                     className="bg-muted/30 hover:bg-indigo-600 hover:text-white transition-all px-5 py-2.5 rounded-full text-xs font-bold border border-border/40 flex items-center gap-2 group shadow-sm"
+                                                     onClick={() => setSearchQuery(tag)}
+                                                  >
+                                                     <TrendingUp className="h-3 w-3 opacity-40 group-hover:opacity-100 transition-opacity" />
+                                                     {tag}
+                                                  </button>
+                                               ))}
+                                            </div>
                                         </div>
                                      </div>
                                   )}

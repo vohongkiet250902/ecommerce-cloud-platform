@@ -17,6 +17,7 @@ export default function Dashboard() {
     totalOrders: 0,
     totalProducts: 0,
     totalCustomers: 0,
+    successfulOrders: 0,
   });
   const [orderStatusData, setOrderStatusData] = useState<any[]>([]);
   const [revenueChartData, setRevenueChartData] = useState<any[]>([]);
@@ -92,6 +93,7 @@ export default function Dashboard() {
           totalOrders: orderRes.data?.total || allOrders.length,
           totalProducts: productRes.data?.total || allProducts.length,
           totalCustomers: customerCount,
+          successfulOrders: statusCounts.completed,
         });
 
       } catch (error) {
@@ -140,7 +142,7 @@ export default function Dashboard() {
         />
         <StatCard
           title="Đơn hàng"
-          value={stats.totalOrders.toLocaleString()}
+          value={stats.successfulOrders.toLocaleString()}
           icon={ShoppingCart}
           iconColor="text-primary"
           iconBg="bg-primary/10"

@@ -362,7 +362,7 @@ export default function Settings() {
                     <SelectTrigger className="rounded-xl h-12 bg-muted/40 border-border/40 focus:bg-background transition-all">
                       <SelectValue placeholder="Chọn Tỉnh / Thành" />
                     </SelectTrigger>
-                    <SelectContent>
+                    <SelectContent className="rounded-xl max-h-[200px] overflow-y-auto border-border/40">
                       {provinces.map((p) => (
                         <SelectItem key={p.code} value={p.code.toString()}>
                           {p.name}
@@ -382,7 +382,7 @@ export default function Settings() {
                     <SelectTrigger className="rounded-xl h-12 bg-muted/40 border-border/40 focus:bg-background transition-all">
                       <SelectValue placeholder="Chọn Quận / Huyện" />
                     </SelectTrigger>
-                    <SelectContent>
+                    <SelectContent className="rounded-xl max-h-[200px] overflow-y-auto border-border/40">
                       {districts.map((d) => (
                         <SelectItem key={d.code} value={d.code.toString()}>
                           {d.name}
@@ -402,7 +402,7 @@ export default function Settings() {
                     <SelectTrigger className="rounded-xl h-12 bg-muted/40 border-border/40 focus:bg-background transition-all">
                       <SelectValue placeholder="Chọn Phường / Xã" />
                     </SelectTrigger>
-                    <SelectContent>
+                    <SelectContent className="rounded-xl max-h-[200px] overflow-y-auto border-border/40">
                       {wards.map((w) => (
                         <SelectItem key={w.code} value={w.code.toString()}>
                           {w.name}
