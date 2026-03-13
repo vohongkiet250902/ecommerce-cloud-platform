@@ -27,6 +27,11 @@ export interface BrandNode {
   aliases: string[];
 }
 
+type CategoryMatch = {
+  category: CategoryNode;
+  matchedAlias: string;
+};
+
 export class TaxonomyResolver {
   private categories: CategoryNode[] = [];
   private brands: BrandNode[] = [];
@@ -169,7 +174,9 @@ export class TaxonomyResolver {
         break;
     }
 
-    return Array.from(aliases);
+    return Array.from(aliases)
+      .map((x) => this.normalize(x))
+      .filter(Boolean);
   }
 
   private buildBrandAliases(normalizedName: string): string[] {
@@ -177,41 +184,34 @@ export class TaxonomyResolver {
 
     switch (normalizedName) {
       case 'apple':
-        [
-          'iphone',
-          'ipad',
-          'macbook',
-          'airpods',
-          'apple watch',
-          'earpods',
-        ].forEach((x) => aliases.add(x));
-        break;
-      case 'samsung':
-        [
-          'galaxy',
-          'galaxy s',
-          'galaxy z',
-          'galaxy watch',
-          'galaxy tab',
-          'buds',
-        ].forEach((x) => aliases.add(x));
-        break;
-      case 'xiaomi':
-        ['redmi', 'redmi note', 'xiaomi watch', 'redmi watch'].forEach((x) =>
+        ['iphone', 'ipad', 'macbook', 'airpods', 'earpods'].forEach((x) =>
           aliases.add(x),
         );
         break;
+
+      case 'samsung':
+        ['galaxy s', 'galaxy z', 'buds'].forEach((x) => aliases.add(x));
+        break;
+
+      case 'xiaomi':
+        ['redmi', 'redmi note'].forEach((x) => aliases.add(x));
+        break;
+
       case 'oppo':
         ['reno', 'find x'].forEach((x) => aliases.add(x));
         break;
+
       case 'anker':
         ['maggo'].forEach((x) => aliases.add(x));
         break;
+
       default:
         break;
     }
 
-    return Array.from(aliases);
+    return Array.from(aliases)
+      .map((x) => this.normalize(x))
+      .filter(Boolean);
   }
 
   private computeInheritedGroup(
@@ -253,6 +253,45 @@ export class TaxonomyResolver {
     }
   }
 
+  private findBestMatchedAlias(
+    aliases: string[],
+    query: string,
+  ): string | undefined {
+    const normalizedQuery = ` ${this.normalize(query)} `;
+    const sortedAliases = Array.from(new Set(aliases))
+      .map((x) => this.normalize(x))
+      .filter(Boolean)
+      .sort((a, b) => b.length - a.length);
+
+    for (const alias of sortedAliases) {
+      const rx = new RegExp(`\\b${this.escapeRegex(alias)}\\b`, 'i');
+      if (rx.test(normalizedQuery)) return alias;
+    }
+
+    return undefined;
+  }
+
+  private filterToMostSpecificCategoryMatches(
+    matches: CategoryMatch[],
+  ): CategoryMatch[] {
+    if (matches.length === 0) return [];
+
+    const sorted = [...matches].sort((a, b) => {
+      const aliasDiff = b.matchedAlias.length - a.matchedAlias.length;
+      if (aliasDiff !== 0) return aliasDiff;
+
+      const nameDiff =
+        b.category.normalizedName.length - a.category.normalizedName.length;
+      if (nameDiff !== 0) return nameDiff;
+
+      return a.category.name.localeCompare(b.category.name);
+    });
+
+    const maxAliasLength = sorted[0].matchedAlias.length;
+
+    return sorted.filter((m) => m.matchedAlias.length === maxAliasLength);
+  }
+
   expandCategoryIds(ids: string[]): string[] {
     const out = new Set<string>();
     const queue = [...ids];
@@ -283,14 +322,14 @@ export class TaxonomyResolver {
 
     for (const c of cats as any[]) {
       const id = String(c._id);
-      const normalizedName = this.normalize(c.name);
+      const normalizedName = this.normalize(String(c.name ?? '').trim());
       ownGroupById.set(id, this.assignGroup(normalizedName));
       parentById.set(id, c.parentId ? String(c.parentId) : null);
     }
 
     this.categories = (cats as any[]).map((c) => {
       const id = String(c._id);
-      const normalizedName = this.normalize(c.name);
+      const normalizedName = this.normalize(String(c.name ?? '').trim());
       const inheritedGroup = this.computeInheritedGroup(
         id,
         ownGroupById,
@@ -299,7 +338,7 @@ export class TaxonomyResolver {
 
       return {
         id,
-        name: String(c.name),
+        name: String(c.name ?? '').trim(),
         normalizedName,
         group: inheritedGroup,
         aliases: this.buildCategoryAliases(normalizedName),
@@ -310,10 +349,10 @@ export class TaxonomyResolver {
     this.rebuildCategoryGraph();
 
     this.brands = (brds as any[]).map((b) => {
-      const normalizedName = this.normalize(b.name);
+      const normalizedName = this.normalize(String(b.name ?? '').trim());
       return {
         id: String(b._id),
-        name: String(b.name),
+        name: String(b.name ?? '').trim(),
         normalizedName,
         aliases: this.buildBrandAliases(normalizedName),
       };
@@ -330,36 +369,58 @@ export class TaxonomyResolver {
     );
   }
 
+  getCategoryGroupById(categoryId?: string): IntentGroup | undefined {
+    if (!categoryId) return undefined;
+    return this.categoriesById.get(String(categoryId))?.group;
+  }
+
   getCategoryIdsByExactName(normalizedQuery: string): string[] {
     const q = this.normalize(normalizedQuery);
     if (!q) return [];
 
-    const matchedIds = this.categories
-      .filter((c) =>
-        c.aliases.some(
-          (alias) =>
-            this.normalize(alias) === q ||
-            this.containsPhrase(this.normalize(alias), q),
-        ),
-      )
-      .map((c) => c.id);
+    const matches: CategoryMatch[] = this.categories
+      .map((category) => {
+        const exactAlias = category.aliases.find((alias) => alias === q);
+        if (exactAlias) {
+          return { category, matchedAlias: exactAlias };
+        }
 
-    return this.expandCategoryIds(matchedIds);
+        const phraseAlias = category.aliases.find((alias) =>
+          this.containsPhrase(alias, q),
+        );
+        if (phraseAlias) {
+          return { category, matchedAlias: phraseAlias };
+        }
+
+        return null;
+      })
+      .filter((x): x is CategoryMatch => Boolean(x));
+
+    const filtered = this.filterToMostSpecificCategoryMatches(matches);
+
+    return this.expandCategoryIds(filtered.map((m) => m.category.id));
   }
 
   findCategoriesInQuery(normalizedQuery: string): CategoryNode[] {
     const q = this.normalize(normalizedQuery);
+    if (!q) return [];
 
-    return this.categories.filter((category) =>
-      category.aliases.some((alias) => {
-        const escaped = this.escapeRegex(this.normalize(alias));
-        return new RegExp(`\\b${escaped}\\b`, 'i').test(q);
-      }),
-    );
+    const matches: CategoryMatch[] = this.categories
+      .map((category) => {
+        const matchedAlias = this.findBestMatchedAlias(category.aliases, q);
+        if (!matchedAlias) return null;
+        return { category, matchedAlias };
+      })
+      .filter((x): x is CategoryMatch => Boolean(x));
+
+    const filtered = this.filterToMostSpecificCategoryMatches(matches);
+
+    return filtered.map((m) => m.category);
   }
 
   findBrandsInQuery(normalizedQuery: string): BrandNode[] {
     const q = this.normalize(normalizedQuery);
+
     return this.brands.filter((brand) =>
       brand.aliases.some((alias) => {
         const escaped = this.escapeRegex(this.normalize(alias));

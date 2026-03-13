@@ -20,11 +20,37 @@ export class ChatSourcesDto {
   knowledgeIds: string[];
 }
 
+export class ChatSessionStateDto {
+  lastIntent?: string;
+  inferredIntentGroup?: string;
+  categoryNames?: string[];
+  brandNames?: string[];
+  lastProductNames?: string[];
+}
+
 export class ChatMetaDto {
   totalHits: number;
   retrievalStrategy?: string;
   normalizedQuery?: string;
   cleanQuery?: string;
+
+  queryId?: string;
+  suggestedQueries?: string[];
+
+  inferredIntentGroup?: string;
+  inferredCategoryIds?: string[];
+  inferredBrandIds?: string[];
+
+  resolvedMessage?: string;
+  sessionStateUsed?: boolean;
+  sessionState?: ChatSessionStateDto;
+
+  processingTimeMs?: number;
+
+  llmUsed?: boolean;
+  llmModel?: string;
+  llmErrorReason?: string;
+
   knowledgeEnabled: boolean;
   fallbackUsed?: boolean;
 }

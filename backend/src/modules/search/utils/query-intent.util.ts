@@ -29,8 +29,22 @@ function normalizeLoose(input: string): string {
     .trim();
 }
 
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 function includesAny(source: string, keywords: string[]): boolean {
-  return keywords.some((kw) => source.includes(kw));
+  const normalizedSource = normalizeLoose(source);
+  if (!normalizedSource) return false;
+
+  return keywords.some((kw) => {
+    const normalizedKw = normalizeLoose(kw);
+    if (!normalizedKw) return false;
+
+    return new RegExp(`\\b${escapeRegex(normalizedKw)}\\b`, 'i').test(
+      normalizedSource,
+    );
+  });
 }
 
 export function detectChatIntent(rawMessage: string): ChatIntent {
@@ -94,6 +108,9 @@ export function detectChatIntent(rawMessage: string): ChatIntent {
     'sac',
     'cap',
     'powerbank',
+    'power bank',
+    'pin du phong',
+    'sac du phong',
   ];
 
   const hasComparison = includesAny(q, comparisonKeywords);

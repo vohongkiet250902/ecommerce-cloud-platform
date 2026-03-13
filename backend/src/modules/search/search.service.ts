@@ -49,6 +49,22 @@ export type SearchV2Params = {
   attributes?: AttributeFilters;
 };
 
+type SearchProductsV2Result = {
+  queryId: string;
+  hits: any[];
+  facets: Record<string, any>;
+  facetLabels?: any;
+  noResult?: {
+    suggestedQueries: string[];
+  };
+  processingTimeMs: number;
+  totalHits: number;
+  page: number;
+  limit: number;
+  strictVariantFiltering: boolean;
+  coarseTotalHits: number;
+};
+
 type ProductSearchDoc = {
   id: string;
   name: string;
@@ -1066,39 +1082,143 @@ export class SearchService implements OnModuleInit {
 
   private rerankHits(
     hits: any[],
-    rawQuery: string,
-    intent: AnalyzedIntent,
+    rawQ: string,
+    intent?: AnalyzedIntent,
   ): any[] {
-    const tokens = this.precisionTokens(rawQuery);
-    if (tokens.length === 0) return hits;
+    if (!Array.isArray(hits) || hits.length <= 1) {
+      return Array.isArray(hits) ? hits : [];
+    }
 
-    const brandIds = new Set(intent.inferredBrandIds);
-    const categoryIds = new Set(intent.inferredCategoryIds);
+    const exactLike = this.looksLikeExactProductQuery(rawQ);
+    const conversationalLike = this.looksConversationalQuery(rawQ);
 
-    return [...hits]
+    const baseHits = exactLike ? this.strictExactNameFilter(hits, rawQ) : hits;
+
+    const normalizedRawQ = this.normalizeLooseVi(rawQ);
+    const tokens = this.precisionTokens(rawQ);
+
+    const inferredBrandIds = new Set(
+      (intent?.inferredBrandIds ?? []).map((x) => String(x)),
+    );
+    const inferredCategoryIds = new Set(
+      (intent?.inferredCategoryIds ?? []).map((x) => String(x)),
+    );
+
+    const toNumber = (value: any, fallback = 0) => {
+      const n = Number(value);
+      return Number.isFinite(n) ? n : fallback;
+    };
+
+    return [...baseHits]
       .map((hit, index) => {
+        const name = String(hit?.name ?? '');
+        const brandName = String(hit?.brandName ?? '');
+        const categoryName = String(hit?.categoryName ?? '');
+        const slug = String(hit?.slug ?? '');
+
+        const haystack = [name, brandName, categoryName, slug]
+          .filter(Boolean)
+          .join(' ');
+        const normalizedHaystack = this.normalizeLooseVi(haystack);
+
         let score = 0;
 
-        score += this.computeLexicalScore(hit?.name ?? '', tokens) * 5;
-        score += this.computeLexicalScore(hit?.slug ?? '', tokens) * 4;
-        score += this.computeLexicalScore(hit?.brandName ?? '', tokens) * 2;
-        score += this.computeLexicalScore(hit?.categoryName ?? '', tokens) * 2;
-        score += this.computeLexicalScore(hit?.semanticText ?? '', tokens);
+        // lexical relevance
+        score += this.computeLexicalScore(haystack, tokens);
 
-        if (brandIds.has(String(hit?.brandId ?? ''))) score += 50;
-        if (categoryIds.has(String(hit?.categoryId ?? ''))) score += 30;
-        if (hit?.inStock) score += 15;
-        if (hit?.isFeatured) score += 5;
+        // exact phrase / near exact name boost
+        if (
+          normalizedRawQ &&
+          this.normalizeLooseVi(name).includes(normalizedRawQ)
+        ) {
+          score += 160;
+        }
+        if (
+          normalizedRawQ &&
+          this.normalizeLooseVi(slug).includes(normalizedRawQ)
+        ) {
+          score += 80;
+        }
 
-        score += Math.min(Number(hit?.rating ?? 0), 5) * 3;
-        score += Math.min(Number(hit?.reviewCount ?? 0), 100) / 10;
+        // exact product-like query => phạt item thiếu token
+        if (exactLike && tokens.length > 0) {
+          const matchedCount = tokens.filter((token) => {
+            const rx = new RegExp(`\\b${this.escapeRegex(token)}\\b`, 'i');
+            return (
+              rx.test(normalizedHaystack) || normalizedHaystack.includes(token)
+            );
+          }).length;
 
-        return { hit, index, score };
+          if (matchedCount === tokens.length) {
+            score += 180;
+          } else {
+            score -= (tokens.length - matchedCount) * 40;
+          }
+        }
+
+        // brand/category intent boost
+        const hitBrandId = String(hit?.brandId ?? '');
+        const hitCategoryId = String(hit?.categoryId ?? '');
+        const hitCategoryGroup =
+          this.taxonomyResolver.getCategoryGroupById(hitCategoryId);
+
+        if (inferredBrandIds.size > 0) {
+          score += inferredBrandIds.has(hitBrandId) ? 120 : -25;
+        }
+
+        if (inferredCategoryIds.size > 0) {
+          score += inferredCategoryIds.has(hitCategoryId) ? 100 : -20;
+        }
+
+        if (intent?.intentGroup && hitCategoryGroup === intent.intentGroup) {
+          score += 60;
+        }
+
+        // business quality signals
+        const inStock = Boolean(hit?.inStock);
+        const isFeatured = Boolean(hit?.isFeatured);
+        const rating = toNumber(hit?.rating, 0);
+        const reviewCount = toNumber(hit?.reviewCount, 0);
+        const createdAt = toNumber(hit?.createdAt, 0);
+        const minPrice = toNumber(hit?.minPrice, Number.MAX_SAFE_INTEGER);
+
+        if (inStock) score += conversationalLike ? 45 : 20;
+        if (isFeatured) score += conversationalLike ? 25 : 10;
+
+        score += Math.min(rating, 5) * 6;
+        score += Math.min(Math.log10(reviewCount + 1) * 10, 18);
+
+        const ageDays =
+          createdAt > 0
+            ? (Date.now() - createdAt) / (1000 * 60 * 60 * 24)
+            : Number.MAX_SAFE_INTEGER;
+
+        if (ageDays <= 30) score += 12;
+        else if (ageDays <= 90) score += 8;
+        else if (ageDays <= 180) score += 4;
+
+        return {
+          hit,
+          index,
+          score,
+          inStock,
+          createdAt,
+          minPrice,
+          reviewCount,
+        };
       })
-      .sort((a, b) => b.score - a.score || a.index - b.index)
+      .sort((a, b) => {
+        return (
+          b.score - a.score ||
+          Number(b.inStock) - Number(a.inStock) ||
+          b.createdAt - a.createdAt ||
+          a.minPrice - b.minPrice ||
+          b.reviewCount - a.reviewCount ||
+          a.index - b.index
+        );
+      })
       .map((x) => x.hit);
   }
-
   private buildFacetDistributionFromHits(hits: any[]) {
     const out: Record<string, Record<string, number>> = {
       brandId: {},
@@ -1513,12 +1633,12 @@ export class SearchService implements OnModuleInit {
 
     const categoryName =
       categoryIdRaw && typeof categoryIdRaw === 'object' && categoryIdRaw.name
-        ? String(categoryIdRaw.name)
+        ? String(categoryIdRaw.name).trim()
         : undefined;
 
     const brandName =
       brandIdRaw && typeof brandIdRaw === 'object' && brandIdRaw.name
-        ? String(brandIdRaw.name)
+        ? String(brandIdRaw.name).trim()
         : undefined;
 
     const images = Array.isArray(productData?.images)
@@ -1776,7 +1896,9 @@ export class SearchService implements OnModuleInit {
     return `${Date.now()}_${Math.random().toString(16).slice(2)}`;
   }
 
-  async searchProductsV2(params: SearchV2Params) {
+  async searchProductsV2(
+    params: SearchV2Params,
+  ): Promise<SearchProductsV2Result> {
     await this.ensureTaxonomyReady();
 
     const page = this.clampInt(params.page ?? 1, 1, 10_000);
@@ -1829,17 +1951,24 @@ export class SearchService implements OnModuleInit {
       inferredFilter ? [inferredFilter] : undefined,
     );
 
-    const cleanedNaturalQ =
-      naturalAttributeExtraction.cleanedQuery?.trim() ?? '';
+    const hasInferredScope = Boolean(inferredFilter);
 
-    // FIX 1: nếu là taxonomy/filter-only thì KHÔNG fallback về rawQ
+    const cleanedNaturalQ =
+      naturalAttributeExtraction.attributes &&
+      Object.keys(naturalAttributeExtraction.attributes).length > 0
+        ? (naturalAttributeExtraction.cleanedQuery?.trim() ?? '')
+        : '';
+
     const safeEffectiveQ =
       intent.strategy === 'filter-only'
         ? ''
-        : cleanedNaturalQ || intent.cleanQuery?.trim() || rawQ;
+        : intent.cleanQuery?.trim() || cleanedNaturalQ || rawQ;
+
+    const queryId = this.newQueryId();
 
     if (!safeEffectiveQ && !finalFilter) {
       return {
+        queryId,
         hits: [],
         facets: {},
         processingTimeMs: 0,
@@ -1866,7 +1995,6 @@ export class SearchService implements OnModuleInit {
     const candidateOffset =
       hasVariantLevelFilters || hasExplicitSort ? 0 : offset;
 
-    const queryId = this.newQueryId();
     const t0 = Date.now();
 
     const doSearch = (input: { filter?: string; qToUse?: string }) => {
@@ -1895,24 +2023,26 @@ export class SearchService implements OnModuleInit {
       attempts.push({ qToUse, filter });
     };
 
-    // FIX 2: taxonomy query như "dien thoai" phải ưu tiên filter-only thật sự
     if (intent.strategy === 'filter-only' && finalFilter) {
       pushAttempt('', finalFilter);
     } else {
       pushAttempt(safeEffectiveQ, finalFilter);
+
+      if (finalFilter) {
+        pushAttempt('', finalFilter);
+      }
+
+      if (
+        intent.strategy !== 'filter-only' &&
+        rawQ &&
+        safeEffectiveQ &&
+        rawQ !== safeEffectiveQ
+      ) {
+        pushAttempt(rawQ, finalFilter);
+      }
     }
 
-    // Chỉ fallback rawQ khi KHÔNG phải filter-only
-    if (
-      intent.strategy !== 'filter-only' &&
-      rawQ &&
-      safeEffectiveQ &&
-      rawQ !== safeEffectiveQ
-    ) {
-      pushAttempt(rawQ, finalFilter);
-    }
-
-    if (explicitFilter && explicitFilter !== finalFilter) {
+    if (!hasInferredScope && explicitFilter && explicitFilter !== finalFilter) {
       if (intent.strategy !== 'filter-only' && safeEffectiveQ) {
         pushAttempt(safeEffectiveQ, explicitFilter);
       }
@@ -1927,11 +2057,6 @@ export class SearchService implements OnModuleInit {
       }
 
       pushAttempt('', explicitFilter);
-    }
-
-    // luôn có thêm một attempt filter-only nếu có filter
-    if (finalFilter) {
-      pushAttempt('', finalFilter);
     }
 
     if (attempts.length === 0) {
@@ -1969,8 +2094,10 @@ export class SearchService implements OnModuleInit {
 
     let orderedHits = postFiltered.hits;
 
-    // FIX 3: nếu user truyền sort explicit thì chốt lại sort ở app layer
-    // để không bị sai thứ tự do Meili / relevance / candidate window
+    if (!hasExplicitSort) {
+      orderedHits = this.rerankHits(orderedHits, rawQ, intent);
+    }
+
     if (hasExplicitSort) {
       orderedHits = this.applyExplicitSort(orderedHits, effectiveParams.sort);
     }
@@ -2074,6 +2201,7 @@ export class SearchService implements OnModuleInit {
     });
 
     return {
+      queryId: result.queryId,
       originalMessage: message,
       normalizedQuery: intent.normalizedQuery,
       cleanQuery: intent.cleanQuery,
@@ -2082,6 +2210,8 @@ export class SearchService implements OnModuleInit {
       inferredIntentGroup: intent.intentGroup,
       retrievalStrategy: intent.strategy,
       totalHits: result.totalHits,
+      processingTimeMs: result.processingTimeMs ?? 0,
+      suggestedQueries: result?.noResult?.suggestedQueries ?? [],
       products: (result.hits ?? []).map((hit: any) => ({
         id: hit.id,
         name: hit.name,
