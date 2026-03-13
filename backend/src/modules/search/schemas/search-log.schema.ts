@@ -11,10 +11,12 @@ export class SearchLog {
   @Prop({ type: String, default: '' })
   q: string;
 
+  @Prop({ type: String, required: false })
+  appliedQuery?: string;
+
   @Prop({ type: Object, default: {} })
   filters: Record<string, any>;
 
-  // ✅ optional string (KHÔNG dùng string | null)
   @Prop({ type: String, required: false })
   sort?: string;
 
@@ -22,10 +24,22 @@ export class SearchLog {
   totalHits: number;
 
   @Prop({ type: Number, default: 0 })
+  coarseTotalHits: number;
+
+  @Prop({ type: Boolean, default: false })
+  strictVariantFiltering: boolean;
+
+  @Prop({ type: Number, default: 0 })
   latencyMs: number;
 
   @Prop({ type: Number, required: false })
   processingTimeMs?: number;
+
+  @Prop({ type: String, required: false })
+  retrievalStrategy?: string;
+
+  @Prop({ type: String, required: false })
+  queryType?: string;
 
   @Prop({ type: String, required: false })
   userId?: string;
@@ -41,3 +55,5 @@ export const SearchLogSchema = SchemaFactory.createForClass(SearchLog);
 SearchLogSchema.index({ timestamp: -1 });
 SearchLogSchema.index({ q: 1, timestamp: -1 });
 SearchLogSchema.index({ totalHits: 1, timestamp: -1 });
+SearchLogSchema.index({ retrievalStrategy: 1, timestamp: -1 });
+SearchLogSchema.index({ queryType: 1, timestamp: -1 });

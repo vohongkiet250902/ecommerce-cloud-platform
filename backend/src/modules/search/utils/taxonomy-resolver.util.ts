@@ -16,6 +16,8 @@ export interface CategoryNode {
   name: string;
   normalizedName: string;
   group: IntentGroup;
+  aliases: string[];
+  parentId?: string | null;
 }
 
 export interface BrandNode {
@@ -29,6 +31,9 @@ export class TaxonomyResolver {
   private categories: CategoryNode[] = [];
   private brands: BrandNode[] = [];
   private isLoaded = false;
+
+  private categoriesById = new Map<string, CategoryNode>();
+  private childrenByParent = new Map<string, string[]>();
 
   constructor(
     private readonly categoryModel: Model<Category>,
@@ -88,7 +93,6 @@ export class TaxonomyResolver {
       return 'accessory';
     }
 
-    // category đặt tên theo brand nhưng thực chất là nhóm laptop
     if (
       /^(asus|acer|dell|hp|lenovo|msi|gigabyte|razer|huawei|lg)$/.test(
         normalizedName,
@@ -97,8 +101,13 @@ export class TaxonomyResolver {
       return 'laptop';
     }
 
-    // category đặt tên theo brand nhưng thực chất là nhóm điện thoại
-    if (/^(apple|samsung|xiaomi|oppo)$/.test(normalizedName)) return 'phone';
+    if (
+      /^(apple|samsung|xiaomi|oppo|vivo|realme|honor|oneplus|nokia)$/.test(
+        normalizedName,
+      )
+    ) {
+      return 'phone';
+    }
 
     if (
       /(dien thoai|phone|smartphone|mobile|iphone|galaxy s|galaxy z|reno|find x|redmi)/.test(
@@ -109,6 +118,58 @@ export class TaxonomyResolver {
     }
 
     return 'unknown';
+  }
+
+  private buildCategoryAliases(normalizedName: string): string[] {
+    const aliases = new Set<string>([normalizedName]);
+
+    switch (normalizedName) {
+      case 'pin du phong':
+        ['sac du phong', 'pin sac du phong', 'power bank', 'powerbank'].forEach(
+          (x) => aliases.add(x),
+        );
+        break;
+
+      case 'cap & sac':
+      case 'cap va sac':
+        ['cap sac', 'cu sac', 'bo sac', 'charger', 'adapter', 'cable'].forEach(
+          (x) => aliases.add(x),
+        );
+        break;
+
+      case 'tai nghe':
+        ['headphone', 'earphone', 'earbuds', 'buds', 'airpods'].forEach((x) =>
+          aliases.add(x),
+        );
+        break;
+
+      case 'apple watch':
+        ['dong ho apple', 'watch apple'].forEach((x) => aliases.add(x));
+        break;
+
+      case 'galaxy watch':
+        ['dong ho samsung', 'samsung watch'].forEach((x) => aliases.add(x));
+        break;
+
+      case 'xiaomi watch':
+        ['dong ho xiaomi', 'redmi watch'].forEach((x) => aliases.add(x));
+        break;
+
+      case 'dien thoai':
+        [
+          'smartphone',
+          'phone',
+          'mobile',
+          'dien thoai thong minh',
+          'dt',
+        ].forEach((x) => aliases.add(x));
+        break;
+
+      default:
+        break;
+    }
+
+    return Array.from(aliases);
   }
 
   private buildBrandAliases(normalizedName: string): string[] {
@@ -153,21 +214,100 @@ export class TaxonomyResolver {
     return Array.from(aliases);
   }
 
+  private computeInheritedGroup(
+    categoryId: string,
+    ownGroupById: Map<string, IntentGroup>,
+    parentById: Map<string, string | null>,
+    visiting = new Set<string>(),
+  ): IntentGroup {
+    const own = ownGroupById.get(categoryId) ?? 'unknown';
+    if (own !== 'unknown') return own;
+
+    if (visiting.has(categoryId)) return 'unknown';
+    visiting.add(categoryId);
+
+    const parentId = parentById.get(categoryId);
+    if (!parentId) return 'unknown';
+
+    return this.computeInheritedGroup(
+      parentId,
+      ownGroupById,
+      parentById,
+      visiting,
+    );
+  }
+
+  private rebuildCategoryGraph() {
+    this.categoriesById = new Map();
+    this.childrenByParent = new Map();
+
+    for (const cat of this.categories) {
+      this.categoriesById.set(cat.id, cat);
+
+      const parentId = cat.parentId ?? null;
+      if (!parentId) continue;
+
+      const current = this.childrenByParent.get(parentId) ?? [];
+      current.push(cat.id);
+      this.childrenByParent.set(parentId, current);
+    }
+  }
+
+  expandCategoryIds(ids: string[]): string[] {
+    const out = new Set<string>();
+    const queue = [...ids];
+
+    while (queue.length > 0) {
+      const current = String(queue.shift() ?? '');
+      if (!current || out.has(current)) continue;
+
+      out.add(current);
+
+      const children = this.childrenByParent.get(current) ?? [];
+      for (const childId of children) {
+        if (!out.has(childId)) queue.push(childId);
+      }
+    }
+
+    return Array.from(out);
+  }
+
   async loadTaxonomy() {
     const [cats, brds] = await Promise.all([
-      this.categoryModel.find().select('name').lean(),
+      this.categoryModel.find().select('name parentId').lean(),
       this.brandModel.find().select('name').lean(),
     ]);
 
-    this.categories = (cats as any[]).map((c) => {
+    const ownGroupById = new Map<string, IntentGroup>();
+    const parentById = new Map<string, string | null>();
+
+    for (const c of cats as any[]) {
+      const id = String(c._id);
       const normalizedName = this.normalize(c.name);
+      ownGroupById.set(id, this.assignGroup(normalizedName));
+      parentById.set(id, c.parentId ? String(c.parentId) : null);
+    }
+
+    this.categories = (cats as any[]).map((c) => {
+      const id = String(c._id);
+      const normalizedName = this.normalize(c.name);
+      const inheritedGroup = this.computeInheritedGroup(
+        id,
+        ownGroupById,
+        parentById,
+      );
+
       return {
-        id: String(c._id),
+        id,
         name: String(c.name),
         normalizedName,
-        group: this.assignGroup(normalizedName),
+        group: inheritedGroup,
+        aliases: this.buildCategoryAliases(normalizedName),
+        parentId: c.parentId ? String(c.parentId) : null,
       };
     });
+
+    this.rebuildCategoryGraph();
 
     this.brands = (brds as any[]).map((b) => {
       const normalizedName = this.normalize(b.name);
@@ -183,18 +323,39 @@ export class TaxonomyResolver {
   }
 
   getCategoryIdsByGroup(group: IntentGroup): string[] {
-    return this.categories.filter((c) => c.group === group).map((c) => c.id);
+    return Array.from(
+      new Set(
+        this.categories.filter((c) => c.group === group).map((c) => c.id),
+      ),
+    );
   }
 
   getCategoryIdsByExactName(normalizedQuery: string): string[] {
     const q = this.normalize(normalizedQuery);
     if (!q) return [];
-    return this.categories
-      .filter(
-        (c) =>
-          c.normalizedName === q || this.containsPhrase(c.normalizedName, q),
+
+    const matchedIds = this.categories
+      .filter((c) =>
+        c.aliases.some(
+          (alias) =>
+            this.normalize(alias) === q ||
+            this.containsPhrase(this.normalize(alias), q),
+        ),
       )
       .map((c) => c.id);
+
+    return this.expandCategoryIds(matchedIds);
+  }
+
+  findCategoriesInQuery(normalizedQuery: string): CategoryNode[] {
+    const q = this.normalize(normalizedQuery);
+
+    return this.categories.filter((category) =>
+      category.aliases.some((alias) => {
+        const escaped = this.escapeRegex(this.normalize(alias));
+        return new RegExp(`\\b${escaped}\\b`, 'i').test(q);
+      }),
+    );
   }
 
   findBrandsInQuery(normalizedQuery: string): BrandNode[] {

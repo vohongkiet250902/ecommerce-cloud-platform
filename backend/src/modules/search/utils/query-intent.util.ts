@@ -234,6 +234,7 @@ export class QueryIntentAnalyzer {
     normalizedQuery: string;
     intentGroup?: IntentGroup;
     matchedBrandAliases: string[];
+    matchedCategoryAliases?: string[];
   }): boolean {
     let remainder = input.normalizedQuery;
 
@@ -242,6 +243,10 @@ export class QueryIntentAnalyzer {
         remainder,
         this.groupKeywords[input.intentGroup],
       );
+    }
+
+    if (input.matchedCategoryAliases?.length) {
+      remainder = this.removePhrases(remainder, input.matchedCategoryAliases);
     }
 
     remainder = this.removePhrases(remainder, input.matchedBrandAliases);
@@ -267,61 +272,106 @@ export class QueryIntentAnalyzer {
       new Set(matchedBrands.flatMap((b) => b.aliases ?? [])),
     );
 
-    for (const [group, keywords] of Object.entries(this.groupKeywords)) {
-      if (
-        group !== 'unknown' &&
-        keywords.some((kw) =>
-          normalizedQuery.includes(this.taxonomy.normalize(kw)),
-        )
-      ) {
-        intentGroup = group as IntentGroup;
-        break;
-      }
-    }
+    const matchedCategories =
+      this.taxonomy.findCategoriesInQuery(normalizedQuery);
+    const matchedCategoryAliases = Array.from(
+      new Set(matchedCategories.flatMap((c) => c.aliases ?? [])),
+    );
 
-    if (intentGroup) {
-      inferredCategoryIds = this.taxonomy.getCategoryIdsByGroup(intentGroup);
+    if (matchedCategories.length > 0) {
+      inferredCategoryIds = this.taxonomy.expandCategoryIds(
+        matchedCategories.map((c) => c.id),
+      );
+      intentGroup = matchedCategories[0]?.group;
 
-      const hasAnyResolvedFilter =
-        inferredCategoryIds.length > 0 || inferredBrandIds.length > 0;
+      const stripped = this.removePhrases(normalizedQuery, [
+        ...matchedCategoryAliases,
+        ...matchedBrandAliases,
+      ]);
 
-      if (hasAnyResolvedFilter) {
-        cleanQuery = this.cleanupQueryForRetrieval(normalizedQuery);
-        strategy = this.isPureTaxonomyQuery({
-          normalizedQuery,
-          intentGroup,
-          matchedBrandAliases,
-        })
-          ? 'filter-only'
-          : 'query+filter';
-      } else {
-        strategy = 'full-text';
-        cleanQuery = this.cleanupQueryForRetrieval(normalizedQuery);
-        intentGroup = undefined;
-      }
+      cleanQuery = this.cleanupQueryForRetrieval(stripped);
+
+      strategy = this.isPureTaxonomyQuery({
+        normalizedQuery,
+        intentGroup,
+        matchedBrandAliases,
+        matchedCategoryAliases,
+      })
+        ? 'filter-only'
+        : 'query+filter';
     } else {
-      const exactCatIds =
-        this.taxonomy.getCategoryIdsByExactName(normalizedQuery);
+      for (const [group, keywords] of Object.entries(this.groupKeywords)) {
+        if (
+          group !== 'unknown' &&
+          keywords.some((kw) =>
+            normalizedQuery.includes(this.taxonomy.normalize(kw)),
+          )
+        ) {
+          intentGroup = group as IntentGroup;
+          break;
+        }
+      }
 
-      if (exactCatIds.length > 0) {
-        inferredCategoryIds = exactCatIds;
-        cleanQuery = this.cleanupQueryForRetrieval(normalizedQuery);
-        strategy = this.isPureTaxonomyQuery({
-          normalizedQuery,
-          matchedBrandAliases,
-        })
-          ? 'filter-only'
-          : 'query+filter';
-      } else if (matchedBrands.length > 0) {
-        cleanQuery = this.cleanupQueryForRetrieval(normalizedQuery);
-        strategy = this.isPureTaxonomyQuery({
-          normalizedQuery,
-          matchedBrandAliases,
-        })
-          ? 'filter-only'
-          : 'query+filter';
+      if (intentGroup) {
+        inferredCategoryIds = this.taxonomy.getCategoryIdsByGroup(intentGroup);
+
+        const hasAnyResolvedFilter =
+          inferredCategoryIds.length > 0 || inferredBrandIds.length > 0;
+
+        if (hasAnyResolvedFilter) {
+          const stripped = this.removePhrases(
+            normalizedQuery,
+            matchedBrandAliases,
+          );
+          cleanQuery = this.cleanupQueryForRetrieval(stripped);
+
+          strategy = this.isPureTaxonomyQuery({
+            normalizedQuery,
+            intentGroup,
+            matchedBrandAliases,
+          })
+            ? 'filter-only'
+            : 'query+filter';
+        } else {
+          strategy = 'full-text';
+          cleanQuery = this.cleanupQueryForRetrieval(normalizedQuery);
+          intentGroup = undefined;
+        }
       } else {
-        cleanQuery = this.cleanupQueryForRetrieval(normalizedQuery);
+        const exactCatIds =
+          this.taxonomy.getCategoryIdsByExactName(normalizedQuery);
+
+        if (exactCatIds.length > 0) {
+          inferredCategoryIds = exactCatIds;
+
+          const stripped = this.removePhrases(
+            normalizedQuery,
+            matchedBrandAliases,
+          );
+          cleanQuery = this.cleanupQueryForRetrieval(stripped);
+
+          strategy = this.isPureTaxonomyQuery({
+            normalizedQuery,
+            matchedBrandAliases,
+          })
+            ? 'filter-only'
+            : 'query+filter';
+        } else if (matchedBrands.length > 0) {
+          const stripped = this.removePhrases(
+            normalizedQuery,
+            matchedBrandAliases,
+          );
+          cleanQuery = this.cleanupQueryForRetrieval(stripped);
+
+          strategy = this.isPureTaxonomyQuery({
+            normalizedQuery,
+            matchedBrandAliases,
+          })
+            ? 'filter-only'
+            : 'query+filter';
+        } else {
+          cleanQuery = this.cleanupQueryForRetrieval(normalizedQuery);
+        }
       }
     }
 

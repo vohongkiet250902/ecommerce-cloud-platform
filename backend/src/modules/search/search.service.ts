@@ -13,7 +13,7 @@ import { Brand } from '../brands/schemas/brand.schema';
 import { Category } from '../categories/schemas/category.schema';
 
 import { TaxonomyResolver } from './utils/taxonomy-resolver.util';
-import { QueryIntentAnalyzer } from './utils/query-intent.util';
+import { QueryIntentAnalyzer, AnalyzedIntent } from './utils/query-intent.util';
 
 type SearchSort =
   | 'minPrice:asc'
@@ -161,14 +161,60 @@ export class SearchService implements OnModuleInit {
     };
   }
 
+  private async waitForMeiliTask(
+    taskUid: number,
+    timeoutMs = 30000,
+    intervalMs = 200,
+  ): Promise<void> {
+    const startedAt = Date.now();
+
+    while (Date.now() - startedAt < timeoutMs) {
+      const clientAny = this.client as any;
+
+      const task =
+        typeof clientAny?.tasks?.getTask === 'function'
+          ? await clientAny.tasks.getTask(taskUid)
+          : typeof clientAny?.getTask === 'function'
+            ? await clientAny.getTask(taskUid)
+            : null;
+
+      if (!task) {
+        throw new Error(
+          'Cannot read Meilisearch task status. Your meilisearch SDK version does not expose getTask/tasks.getTask.',
+        );
+      }
+
+      const status = task.status;
+
+      if (status === 'succeeded') return;
+
+      if (status === 'failed' || status === 'canceled') {
+        throw new Error(
+          `Meilisearch task ${taskUid} ${status}: ${JSON.stringify(task.error ?? {})}`,
+        );
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, intervalMs));
+    }
+
+    throw new Error(`Timed out waiting for Meilisearch task ${taskUid}`);
+  }
+
   private async ensureProductsIndexAndSettings() {
     try {
       await this.client.getIndex(this.indexUid);
     } catch {
-      await this.client.createIndex(this.indexUid, { primaryKey: 'id' });
+      const createTask: any = await this.client.createIndex(this.indexUid, {
+        primaryKey: 'id',
+      });
+
+      const createTaskUid = createTask?.taskUid ?? createTask?.uid;
+      if (typeof createTaskUid === 'number') {
+        await this.waitForMeiliTask(createTaskUid);
+      }
     }
 
-    await this.productsIndex().updateSettings({
+    const settingsTask: any = await this.productsIndex().updateSettings({
       searchableAttributes: [
         'name',
         'brandName',
@@ -196,6 +242,14 @@ export class SearchService implements OnModuleInit {
         'inStock',
         'isFeatured',
       ],
+      rankingRules: [
+        'sort',
+        'words',
+        'typo',
+        'proximity',
+        'attribute',
+        'exactness',
+      ],
       synonyms: this.loadSynonyms(),
       typoTolerance: {
         enabled: true,
@@ -203,6 +257,11 @@ export class SearchService implements OnModuleInit {
       },
       stopWords: ['và', 'là', 'của', 'cho', 'với', 'một', 'các', 'những', 'từ'],
     });
+
+    const settingsTaskUid = settingsTask?.taskUid ?? settingsTask?.uid;
+    if (typeof settingsTaskUid === 'number') {
+      await this.waitForMeiliTask(settingsTaskUid);
+    }
   }
 
   private normalizeText(s: any): string {
@@ -913,6 +972,220 @@ export class SearchService implements OnModuleInit {
     );
   }
 
+  private precisionTokens(q: string): string[] {
+    const stop = new Set([
+      'va',
+      'la',
+      'cua',
+      'cho',
+      'voi',
+      'mot',
+      'cac',
+      'nhung',
+      'hang',
+      'chinh',
+      'or',
+    ]);
+
+    return Array.from(
+      new Set(
+        this.normalizeLooseVi(q)
+          .split(/\s+/)
+          .map((x) => x.trim())
+          .filter(Boolean)
+          .filter((x) => !stop.has(x)),
+      ),
+    );
+  }
+
+  private looksLikeExactProductQuery(q: string): boolean {
+    const normalized = this.normalizeLooseVi(q);
+    if (!normalized) return false;
+
+    const tokens = this.precisionTokens(normalized);
+    const hasBrand =
+      this.taxonomyResolver.findBrandsInQuery(normalized).length > 0;
+    const hasNumeric = tokens.some((t) => /\d/.test(t));
+    const hasModelKeyword = tokens.some((t) =>
+      [
+        'ultra',
+        'pro',
+        'plus',
+        'max',
+        'mini',
+        'air',
+        'lite',
+        'note',
+        'tab',
+        'watch',
+      ].includes(t),
+    );
+
+    return tokens.length >= 3 && (hasNumeric || (hasBrand && hasModelKeyword));
+  }
+
+  private strictExactNameFilter(hits: any[], q: string): any[] {
+    const tokens = this.precisionTokens(q);
+    if (tokens.length === 0) return hits;
+
+    const filtered = hits.filter((hit) => {
+      const haystack = this.normalizeLooseVi(
+        [hit?.name, hit?.slug, hit?.brandName, hit?.categoryName]
+          .filter(Boolean)
+          .join(' '),
+      );
+
+      const matchedCount = tokens.filter((token) => {
+        const rx = new RegExp(`\\b${this.escapeRegex(token)}\\b`, 'i');
+        return rx.test(haystack) || haystack.includes(token);
+      }).length;
+
+      const threshold = tokens.length >= 4 ? tokens.length - 1 : tokens.length;
+      return matchedCount >= threshold;
+    });
+
+    return filtered.length > 0 ? filtered : hits;
+  }
+
+  private computeLexicalScore(text: string, tokens: string[]): number {
+    const normalized = this.normalizeLooseVi(text);
+    if (!normalized || tokens.length === 0) return 0;
+
+    let score = 0;
+
+    for (const token of tokens) {
+      const rx = new RegExp(`\\b${this.escapeRegex(token)}\\b`, 'i');
+      if (rx.test(normalized)) score += 20;
+      else if (normalized.includes(token)) score += 10;
+    }
+
+    if (normalized.includes(tokens.join(' '))) score += 80;
+
+    return score;
+  }
+
+  private rerankHits(
+    hits: any[],
+    rawQuery: string,
+    intent: AnalyzedIntent,
+  ): any[] {
+    const tokens = this.precisionTokens(rawQuery);
+    if (tokens.length === 0) return hits;
+
+    const brandIds = new Set(intent.inferredBrandIds);
+    const categoryIds = new Set(intent.inferredCategoryIds);
+
+    return [...hits]
+      .map((hit, index) => {
+        let score = 0;
+
+        score += this.computeLexicalScore(hit?.name ?? '', tokens) * 5;
+        score += this.computeLexicalScore(hit?.slug ?? '', tokens) * 4;
+        score += this.computeLexicalScore(hit?.brandName ?? '', tokens) * 2;
+        score += this.computeLexicalScore(hit?.categoryName ?? '', tokens) * 2;
+        score += this.computeLexicalScore(hit?.semanticText ?? '', tokens);
+
+        if (brandIds.has(String(hit?.brandId ?? ''))) score += 50;
+        if (categoryIds.has(String(hit?.categoryId ?? ''))) score += 30;
+        if (hit?.inStock) score += 15;
+        if (hit?.isFeatured) score += 5;
+
+        score += Math.min(Number(hit?.rating ?? 0), 5) * 3;
+        score += Math.min(Number(hit?.reviewCount ?? 0), 100) / 10;
+
+        return { hit, index, score };
+      })
+      .sort((a, b) => b.score - a.score || a.index - b.index)
+      .map((x) => x.hit);
+  }
+
+  private buildFacetDistributionFromHits(hits: any[]) {
+    const out: Record<string, Record<string, number>> = {
+      brandId: {},
+      categoryId: {},
+      attributePairs: {},
+    };
+
+    for (const hit of hits) {
+      if (hit?.brandId) {
+        const key = String(hit.brandId);
+        out.brandId[key] = (out.brandId[key] ?? 0) + 1;
+      }
+
+      if (hit?.categoryId) {
+        const key = String(hit.categoryId);
+        out.categoryId[key] = (out.categoryId[key] ?? 0) + 1;
+      }
+
+      const pairs = Array.isArray(hit?.attributePairs)
+        ? hit.attributePairs
+        : [];
+      for (const pair of pairs) {
+        const key = String(pair);
+        if (!key) continue;
+        out.attributePairs[key] = (out.attributePairs[key] ?? 0) + 1;
+      }
+    }
+
+    return out;
+  }
+
+  private applyExplicitSort(hits: any[], sort?: SearchSort): any[] {
+    if (!sort) return hits;
+
+    const toNumber = (value: any, fallback = 0) => {
+      const n = Number(value);
+      return Number.isFinite(n) ? n : fallback;
+    };
+
+    return [...hits]
+      .map((hit, index) => ({ hit, index }))
+      .sort((a, b) => {
+        const aMinPrice = toNumber(a.hit?.minPrice, Number.MAX_SAFE_INTEGER);
+        const bMinPrice = toNumber(b.hit?.minPrice, Number.MAX_SAFE_INTEGER);
+
+        const aCreatedAt = toNumber(a.hit?.createdAt, 0);
+        const bCreatedAt = toNumber(b.hit?.createdAt, 0);
+
+        const aRating = toNumber(a.hit?.rating, 0);
+        const bRating = toNumber(b.hit?.rating, 0);
+
+        const aReviewCount = toNumber(a.hit?.reviewCount, 0);
+        const bReviewCount = toNumber(b.hit?.reviewCount, 0);
+
+        switch (sort) {
+          case 'minPrice:asc':
+            return (
+              aMinPrice - bMinPrice ||
+              bCreatedAt - aCreatedAt ||
+              a.index - b.index
+            );
+
+          case 'minPrice:desc':
+            return (
+              bMinPrice - aMinPrice ||
+              bCreatedAt - aCreatedAt ||
+              a.index - b.index
+            );
+
+          case 'createdAt:desc':
+            return bCreatedAt - aCreatedAt || a.index - b.index;
+
+          case 'rating:desc':
+            return (
+              bRating - aRating ||
+              bReviewCount - aReviewCount ||
+              bCreatedAt - aCreatedAt ||
+              a.index - b.index
+            );
+
+          default:
+            return a.index - b.index;
+        }
+      })
+      .map((x) => x.hit);
+  }
+
   private buildSearchOptions(input: {
     q: string;
     params: SearchV2Params;
@@ -920,11 +1193,13 @@ export class SearchService implements OnModuleInit {
     limit: number;
     offset: number;
   }): any {
+    const sort = this.buildSort(input.params);
+
     const opts: any = {
       limit: input.limit,
       offset: input.offset,
       filter: input.filter,
-      sort: this.buildSort(input.params),
+      ...(sort ? { sort } : {}),
       facets:
         input.params.facets === false
           ? undefined
@@ -954,11 +1229,12 @@ export class SearchService implements OnModuleInit {
     };
 
     const tokenCount = input.q.trim().split(/\s+/).filter(Boolean).length;
+    const exactProductQuery = this.looksLikeExactProductQuery(input.q);
+
     if (
       input.q.trim() &&
-      tokenCount > 0 &&
-      tokenCount <= 2 &&
-      !this.looksConversationalQuery(input.q)
+      !this.looksConversationalQuery(input.q) &&
+      (tokenCount <= 2 || exactProductQuery)
     ) {
       opts.matchingStrategy = 'all';
     }
@@ -1477,33 +1753,23 @@ export class SearchService implements OnModuleInit {
     return rows.map((r: any) => r.q);
   }
 
-  private buildSort(p: SearchV2Params): string[] {
-    if (!p.sort) {
-      return [
-        'inStock:desc',
-        'isFeatured:desc',
-        'rating:desc',
-        'reviewCount:desc',
-        'createdAt:desc',
-      ];
+  private buildSort(p: SearchV2Params): string[] | undefined {
+    switch (p.sort) {
+      case 'minPrice:asc':
+        return ['minPrice:asc', 'createdAt:desc'];
+
+      case 'minPrice:desc':
+        return ['minPrice:desc', 'createdAt:desc'];
+
+      case 'createdAt:desc':
+        return ['createdAt:desc'];
+
+      case 'rating:desc':
+        return ['rating:desc', 'reviewCount:desc', 'createdAt:desc'];
+
+      default:
+        return undefined;
     }
-
-    const allowed = new Set<SearchSort>([
-      'minPrice:asc',
-      'minPrice:desc',
-      'createdAt:desc',
-      'rating:desc',
-    ]);
-
-    return allowed.has(p.sort)
-      ? [p.sort]
-      : [
-          'inStock:desc',
-          'isFeatured:desc',
-          'rating:desc',
-          'reviewCount:desc',
-          'createdAt:desc',
-        ];
   }
 
   private newQueryId(): string {
@@ -1565,14 +1831,12 @@ export class SearchService implements OnModuleInit {
 
     const cleanedNaturalQ =
       naturalAttributeExtraction.cleanedQuery?.trim() ?? '';
-    const fallbackTextQ =
-      cleanedNaturalQ ||
-      (intent.strategy === 'filter-only'
-        ? ''
-        : intent.cleanQuery?.trim() || '') ||
-      rawQ;
 
-    const safeEffectiveQ = fallbackTextQ;
+    // FIX 1: nếu là taxonomy/filter-only thì KHÔNG fallback về rawQ
+    const safeEffectiveQ =
+      intent.strategy === 'filter-only'
+        ? ''
+        : cleanedNaturalQ || intent.cleanQuery?.trim() || rawQ;
 
     if (!safeEffectiveQ && !finalFilter) {
       return {
@@ -1582,6 +1846,8 @@ export class SearchService implements OnModuleInit {
         totalHits: 0,
         page,
         limit,
+        strictVariantFiltering: false,
+        coarseTotalHits: 0,
       };
     }
 
@@ -1590,11 +1856,15 @@ export class SearchService implements OnModuleInit {
       Object.keys(effectiveParams.attributes).length > 0,
     );
 
-    const candidateLimit = hasVariantLevelFilters
-      ? Math.min(Math.max(offset + limit * 4, 80), 240)
-      : limit;
+    const hasExplicitSort = Boolean(effectiveParams.sort);
 
-    const candidateOffset = hasVariantLevelFilters ? 0 : offset;
+    const candidateLimit =
+      hasVariantLevelFilters || hasExplicitSort
+        ? Math.min(Math.max(offset + limit * 4, 80), 240)
+        : limit;
+
+    const candidateOffset =
+      hasVariantLevelFilters || hasExplicitSort ? 0 : offset;
 
     const queryId = this.newQueryId();
     const t0 = Date.now();
@@ -1625,39 +1895,58 @@ export class SearchService implements OnModuleInit {
       attempts.push({ qToUse, filter });
     };
 
-    pushAttempt(safeEffectiveQ, finalFilter);
+    // FIX 2: taxonomy query như "dien thoai" phải ưu tiên filter-only thật sự
+    if (intent.strategy === 'filter-only' && finalFilter) {
+      pushAttempt('', finalFilter);
+    } else {
+      pushAttempt(safeEffectiveQ, finalFilter);
+    }
 
-    if (rawQ && rawQ !== safeEffectiveQ) {
+    // Chỉ fallback rawQ khi KHÔNG phải filter-only
+    if (
+      intent.strategy !== 'filter-only' &&
+      rawQ &&
+      safeEffectiveQ &&
+      rawQ !== safeEffectiveQ
+    ) {
       pushAttempt(rawQ, finalFilter);
     }
 
     if (explicitFilter && explicitFilter !== finalFilter) {
-      pushAttempt(safeEffectiveQ || rawQ, explicitFilter);
-      if (rawQ && rawQ !== safeEffectiveQ) {
+      if (intent.strategy !== 'filter-only' && safeEffectiveQ) {
+        pushAttempt(safeEffectiveQ, explicitFilter);
+      }
+
+      if (
+        intent.strategy !== 'filter-only' &&
+        rawQ &&
+        safeEffectiveQ &&
+        rawQ !== safeEffectiveQ
+      ) {
         pushAttempt(rawQ, explicitFilter);
       }
+
+      pushAttempt('', explicitFilter);
     }
 
-    if (finalFilter && safeEffectiveQ) {
+    // luôn có thêm một attempt filter-only nếu có filter
+    if (finalFilter) {
       pushAttempt('', finalFilter);
     }
 
-    if (
-      explicitFilter &&
-      explicitFilter !== finalFilter &&
-      (safeEffectiveQ || rawQ)
-    ) {
-      pushAttempt('', explicitFilter);
+    if (attempts.length === 0) {
+      pushAttempt(safeEffectiveQ || rawQ || '', finalFilter);
     }
+
     let res: any = null;
     let coarseTotalHits = 0;
 
     for (const attempt of attempts) {
       const currentRes: any = await doSearch(attempt);
       const currentTotalHits =
-        currentRes.estimatedTotalHits ?? currentRes.nbHits ?? 0;
+        currentRes?.estimatedTotalHits ?? currentRes?.nbHits ?? 0;
 
-      if (!res) {
+      if (!res || currentTotalHits > coarseTotalHits) {
         res = currentRes;
         coarseTotalHits = currentTotalHits;
       }
@@ -1678,12 +1967,21 @@ export class SearchService implements OnModuleInit {
       },
     );
 
-    const finalHits = hasVariantLevelFilters
-      ? postFiltered.hits.slice(offset, offset + limit)
-      : postFiltered.hits;
+    let orderedHits = postFiltered.hits;
+
+    // FIX 3: nếu user truyền sort explicit thì chốt lại sort ở app layer
+    // để không bị sai thứ tự do Meili / relevance / candidate window
+    if (hasExplicitSort) {
+      orderedHits = this.applyExplicitSort(orderedHits, effectiveParams.sort);
+    }
+
+    const finalHits =
+      hasVariantLevelFilters || hasExplicitSort
+        ? orderedHits.slice(offset, offset + limit)
+        : orderedHits;
 
     const totalHits = hasVariantLevelFilters
-      ? postFiltered.hits.length
+      ? orderedHits.length
       : coarseTotalHits;
 
     const latencyMs = Date.now() - t0;
@@ -1722,7 +2020,10 @@ export class SearchService implements OnModuleInit {
       timestamp: new Date(),
     });
 
-    const facets = res?.facetDistribution ?? {};
+    const facets = hasVariantLevelFilters
+      ? this.buildFacetDistributionFromHits(orderedHits)
+      : (res?.facetDistribution ?? {});
+
     const includeFacetLabels =
       effectiveParams.facets !== false && (effectiveParams.facetLabels ?? true);
     const facetLabels = includeFacetLabels
