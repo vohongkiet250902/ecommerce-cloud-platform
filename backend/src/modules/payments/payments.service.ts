@@ -9,7 +9,6 @@ import { Model, Types } from 'mongoose';
 import { Order } from '../orders/schemas/order.schema';
 import * as crypto from 'crypto';
 import * as qs from 'qs';
-import { ConfigService } from '@nestjs/config';
 import { OrdersService } from '../orders/orders.service';
 
 @Injectable()
@@ -17,7 +16,6 @@ export class PaymentsService {
   constructor(
     @InjectModel(Order.name)
     private readonly orderModel: Model<Order>,
-    private configService: ConfigService,
     @Inject(forwardRef(() => OrdersService))
     private readonly ordersService: OrdersService,
   ) {}
@@ -26,11 +24,22 @@ export class PaymentsService {
     const order = await this.orderModel.findOne({
       _id: orderId,
       userId: new Types.ObjectId(userId),
-      status: 'pending',
     });
 
     if (!order) {
-      throw new BadRequestException('Order not found or already paid');
+      throw new BadRequestException('Order not found');
+    }
+
+    if (order.paymentMethod !== 'vnpay') {
+      throw new BadRequestException('Đơn hàng này không dùng VNPay');
+    }
+
+    if (order.status === 'cancelled' || order.status === 'completed') {
+      throw new BadRequestException('Đơn hàng đã kết thúc');
+    }
+
+    if (order.paymentStatus === 'paid') {
+      throw new BadRequestException('Đơn hàng đã thanh toán');
     }
 
     const tmnCode = process.env.VNP_TMNCODE;
@@ -61,26 +70,20 @@ export class PaymentsService {
       vnp_CreateDate: createDate,
     };
 
-    // BƯỚC QUAN TRỌNG 1: Dùng hàm sort chuẩn của VNPay
     vnp_Params = this.sortObject(vnp_Params);
 
-    // BƯỚC QUAN TRỌNG 2: Tắt encode của qs vì sortObject đã làm rồi
     const signData = qs.stringify(vnp_Params, { encode: false });
-
     const hmac = crypto.createHmac('sha512', secretKey);
     const signed = hmac.update(Buffer.from(signData, 'utf-8')).digest('hex');
 
     vnp_Params['vnp_SecureHash'] = signed;
 
-    // BƯỚC QUAN TRỌNG 3: Nối chuỗi URL (vẫn tắt encode)
     const finalUrl = vnpUrl + '?' + qs.stringify(vnp_Params, { encode: false });
 
     return { paymentUrl: finalUrl };
   }
 
-  // 1. Cập nhật hàm checkReturnUrl
   async checkReturnUrl(query: any) {
-    // BẮT BUỘC: Clone object để cắt đứt liên kết với req.query gốc của NestJS
     let vnp_Params = { ...query };
 
     const secureHash = vnp_Params['vnp_SecureHash'];
@@ -103,10 +106,10 @@ export class PaymentsService {
         orderId: vnp_Params['vnp_TxnRef'],
       };
     }
+
     return { success: false, message: 'Invalid Signature' };
   }
 
-  // 2. Cập nhật hàm handleVnPayIpn
   async handleVnPayIpn(query: any) {
     let vnp_Params = { ...query };
     const secureHash = vnp_Params['vnp_SecureHash'];
@@ -121,50 +124,47 @@ export class PaymentsService {
     const hmac = crypto.createHmac('sha512', secretKey);
     const signed = hmac.update(Buffer.from(signData, 'utf-8')).digest('hex');
 
-    if (secureHash === signed) {
-      const orderId = vnp_Params['vnp_TxnRef'];
-      const responseCode = vnp_Params['vnp_ResponseCode'];
-
-      const order = await this.orderModel.findById(orderId);
-      if (!order) return { RspCode: '01', Message: 'Order not found' };
-
-      if (order.status !== 'pending' && order.paymentStatus === 'paid') {
-        return { RspCode: '02', Message: 'Order already confirmed' };
-      }
-
-      if (responseCode === '00') {
-        // Thanh toán thành công
-        await this.ordersService.updateStatus(orderId, {
-          status: 'paid',
-          paymentStatus: 'paid',
-        });
-      } else {
-        // Thanh toán thất bại hoặc khách hủy
-        // CHUẨN XÁC: Gọi hàm handlePaymentFailed để cập nhật trạng thái chờ
-        await this.ordersService.handlePaymentFailed(orderId);
-      }
-
-      return { RspCode: '00', Message: 'Confirm Success' };
-    } else {
+    if (secureHash !== signed) {
       return { RspCode: '97', Message: 'Invalid signature' };
     }
+
+    const orderId = vnp_Params['vnp_TxnRef'];
+    const responseCode = vnp_Params['vnp_ResponseCode'];
+
+    const order = await this.orderModel.findById(orderId);
+    if (!order) {
+      return { RspCode: '01', Message: 'Order not found' };
+    }
+
+    if (order.paymentStatus === 'paid') {
+      return { RspCode: '02', Message: 'Order already confirmed' };
+    }
+
+    if (responseCode === '00') {
+      await this.ordersService.confirmVnpayPayment(orderId);
+    } else {
+      await this.ordersService.handlePaymentFailed(orderId);
+    }
+
+    return { RspCode: '00', Message: 'Confirm Success' };
   }
 
-  // 3. Sửa lỗi chí mạng trong hàm sortObject
   private sortObject(obj: any): Record<string, string> {
-    let sorted: Record<string, string> = {};
-    let str: string[] = [];
-    let key;
-    for (key in obj) {
-      // SỬA Ở ĐÂY: Dùng Object.prototype.hasOwnProperty.call để tránh crash với object không prototype
+    const sorted: Record<string, string> = {};
+    const str: string[] = [];
+
+    for (const key in obj) {
       if (Object.prototype.hasOwnProperty.call(obj, key)) {
         str.push(encodeURIComponent(key));
       }
     }
+
     str.sort();
-    for (key = 0; key < str.length; key++) {
-      sorted[str[key]] = encodeURIComponent(obj[str[key]]).replace(/%20/g, '+');
+
+    for (let i = 0; i < str.length; i++) {
+      sorted[str[i]] = encodeURIComponent(obj[str[i]]).replace(/%20/g, '+');
     }
+
     return sorted;
   }
 

@@ -3,14 +3,34 @@ import { Types } from 'mongoose';
 
 export type OrderStatus =
   | 'pending'
-  | 'paid'
+  | 'confirmed'
   | 'shipping'
+  | 'delivered'
   | 'completed'
   | 'cancelled';
-export type PaymentStatus = 'pending' | 'paid' | 'refunded';
+
+export type PaymentStatus =
+  | 'unpaid'
+  | 'pending'
+  | 'paid'
+  | 'refunded'
+  | 'failed';
+
 export type PaymentMethod = 'cod' | 'mock' | 'vnpay';
 
-// Sub-schema cho thông tin sản phẩm (giữ nguyên)
+@Schema({ _id: false })
+export class LotAllocation {
+  @Prop({ type: Types.ObjectId, ref: 'InventoryLot', required: true })
+  lotId: Types.ObjectId;
+
+  @Prop({ required: true, min: 1 })
+  quantity: number;
+
+  @Prop({ required: true, min: 0 })
+  unitCost: number;
+}
+const LotAllocationSchema = SchemaFactory.createForClass(LotAllocation);
+
 @Schema({ _id: false })
 export class OrderItem {
   @Prop({ type: Types.ObjectId, ref: 'Product', required: true })
@@ -22,18 +42,26 @@ export class OrderItem {
   @Prop({ required: true })
   sku: string;
 
-  @Prop({ required: true })
+  @Prop({ required: true, min: 0 })
   price: number;
 
-  @Prop({ required: true })
+  @Prop({ required: true, min: 1 })
   quantity: number;
+
+  @Prop({ required: true, min: 0 })
+  lineTotal: number;
+
+  @Prop({ min: 0, default: 0 })
+  unitCostSnapshot?: number;
+
+  @Prop({ type: [LotAllocationSchema], default: [] })
+  lotAllocations: LotAllocation[];
 
   @Prop()
   imageUrl?: string;
 }
 const OrderItemSchema = SchemaFactory.createForClass(OrderItem);
 
-// BỔ SUNG 1: Sub-schema cho Thông tin giao hàng (Snapshot)
 @Schema({ _id: false })
 export class ShippingInfo {
   @Prop({ required: true })
@@ -58,13 +86,12 @@ const ShippingInfoSchema = SchemaFactory.createForClass(ShippingInfo);
 
 @Schema({ timestamps: true })
 export class Order {
-  @Prop({ type: Types.ObjectId, ref: 'User', required: true })
+  @Prop({ type: Types.ObjectId, ref: 'User', required: true, index: true })
   userId: Types.ObjectId;
 
   @Prop({ type: [OrderItemSchema], required: true })
   items: OrderItem[];
 
-  // BỔ SUNG 2: Lưu cứng cục thông tin giao hàng vào Order
   @Prop({ type: ShippingInfoSchema, required: true })
   shippingInfo: ShippingInfo;
 
@@ -78,15 +105,23 @@ export class Order {
   discountAmount?: number;
 
   @Prop({
-    enum: ['pending', 'paid', 'shipping', 'completed', 'cancelled'],
+    enum: [
+      'pending',
+      'confirmed',
+      'shipping',
+      'delivered',
+      'completed',
+      'cancelled',
+    ],
     default: 'pending',
     index: true,
   })
   status: OrderStatus;
 
   @Prop({
-    enum: ['pending', 'paid', 'refunded'],
-    default: 'pending',
+    enum: ['unpaid', 'pending', 'paid', 'refunded', 'failed'],
+    default: 'unpaid',
+    index: true,
   })
   paymentStatus: PaymentStatus;
 
@@ -96,8 +131,42 @@ export class Order {
   })
   paymentMethod: PaymentMethod;
 
-  @Prop({ trim: true })
+  @Prop({ trim: true, index: true })
   idempotencyKey?: string;
+
+  @Prop()
+  placedAt?: Date;
+
+  @Prop()
+  confirmedAt?: Date;
+
+  @Prop()
+  shippedAt?: Date;
+
+  @Prop()
+  deliveredAt?: Date;
+
+  @Prop()
+  completedAt?: Date;
+
+  @Prop()
+  cancelledAt?: Date;
+
+  @Prop()
+  paidAt?: Date;
+
+  @Prop()
+  expiresAt?: Date;
 }
 
 export const OrderSchema = SchemaFactory.createForClass(Order);
+
+OrderSchema.index(
+  { userId: 1, idempotencyKey: 1 },
+  {
+    unique: true,
+    partialFilterExpression: {
+      idempotencyKey: { $type: 'string' },
+    },
+  },
+);

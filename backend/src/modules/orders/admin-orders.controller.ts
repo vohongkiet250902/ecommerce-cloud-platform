@@ -12,6 +12,7 @@ import { Roles } from 'src/common/decorators/roles.decorator';
 import { JwtGuard } from 'src/common/guards/jwt.guard';
 import { RolesGuard } from 'src/common/guards/roles.guard';
 import { OrdersService } from './orders.service';
+import { AdminUpdateOrderStatusDto } from './dto/update-order.dto';
 
 @Roles('admin')
 @UseGuards(JwtGuard, RolesGuard)
@@ -19,7 +20,6 @@ import { OrdersService } from './orders.service';
 export class AdminOrdersController {
   constructor(private readonly ordersService: OrdersService) {}
 
-  // ✅ Đã thêm lại Phân trang và Lọc
   @Get()
   findAll(
     @Query('page') page?: string,
@@ -35,18 +35,21 @@ export class AdminOrdersController {
     });
   }
 
-  // Cho phép update cả trạng thái giao hàng và thanh toán
   @Patch(':id/status')
   updateStatus(
     @Param('id') id: string,
-    @Body() body: { status?: string; paymentStatus?: string },
+    @Body() body: AdminUpdateOrderStatusDto,
   ) {
     return this.ordersService.updateStatus(id, body);
   }
 
-  // API riêng để Hủy đơn + Hoàn kho
   @Post(':id/cancel')
   cancel(@Param('id') id: string) {
     return this.ordersService.adminCancelOrder(id);
+  }
+
+  @Get('stats/products-sold-by-day')
+  getProductsSoldByDay(@Query('days') days?: string) {
+    return this.ordersService.getProductsSoldByDay(days ? Number(days) : 7);
   }
 }

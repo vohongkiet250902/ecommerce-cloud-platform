@@ -7,10 +7,12 @@ import { Order, OrderSchema } from './schemas/order.schema';
 import { Product, ProductSchema } from '../products/schemas/product.schema';
 import { CouponsModule } from '../coupons/coupons.module';
 import { PaymentsModule } from '../payments/payments.module';
+import { InventoryModule } from '../inventory/inventory.module';
 
 @Module({
   imports: [
     forwardRef(() => PaymentsModule),
+    InventoryModule,
     MongooseModule.forFeature([
       { name: Order.name, schema: OrderSchema },
       { name: Product.name, schema: ProductSchema },

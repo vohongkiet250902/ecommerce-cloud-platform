@@ -20,6 +20,7 @@ import { ReviewsModule } from './modules/reviews/reviews.module';
 import { CacheModule } from '@nestjs/cache-manager';
 import { redisStore } from 'cache-manager-redis-yet';
 import { AiChatModule } from './modules/ai-chat/ai-chat.module';
+import { InventoryModule } from './modules/inventory/inventory.module';
 
 @Module({
   imports: [
@@ -70,6 +71,7 @@ import { AiChatModule } from './modules/ai-chat/ai-chat.module';
       }),
     }),
     AiChatModule,
+    InventoryModule,
   ],
   controllers: [AppController],
   providers: [AppService],
