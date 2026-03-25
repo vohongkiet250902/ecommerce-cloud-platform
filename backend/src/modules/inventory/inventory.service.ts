@@ -24,6 +24,17 @@ export class InventoryService {
     private readonly productModel: Model<Product>,
   ) {}
 
+  private isTransactionNotSupported(error: any) {
+    const msg = String(error?.message || '').toLowerCase();
+    return (
+      msg.includes(
+        'transaction numbers are only allowed on a replica set member or mongos',
+      ) ||
+      msg.includes('replica set') ||
+      msg.includes('mongos')
+    );
+  }
+
   private async getProductAndVariant(
     productId: string,
     sku: string,
@@ -99,9 +110,57 @@ export class InventoryService {
             isClosed: false,
           },
         ],
-        { session },
+        session ? { session } : undefined,
       );
     }
+  }
+
+  private async createStockIn(
+    dto: StockInDto,
+    session?: ClientSession,
+  ): Promise<InventoryLot | null> {
+    const { product } = await this.getProductAndVariant(
+      dto.productId,
+      dto.sku,
+      session,
+    );
+
+    const lotDocs = await this.inventoryLotModel.create(
+      [
+        {
+          productId: product._id,
+          sku: dto.sku,
+          unitCost: dto.unitCost,
+          originalQuantity: dto.quantity,
+          remainingQuantity: dto.quantity,
+          receivedAt: dto.receivedAt ? new Date(dto.receivedAt) : new Date(),
+          sourceType: dto.sourceType ?? 'purchase',
+          sourceRef: dto.sourceRef,
+          note: dto.note,
+          isClosed: false,
+        },
+      ],
+      session ? { session } : undefined,
+    );
+
+    const createdLot = lotDocs[0];
+
+    const updated = await this.productModel.updateOne(
+      { _id: product._id, 'variants.sku': dto.sku },
+      {
+        $inc: {
+          'variants.$.stock': dto.quantity,
+          totalStock: dto.quantity,
+        },
+      },
+      session ? { session } : undefined,
+    );
+
+    if (updated.modifiedCount === 0) {
+      throw new BadRequestException('Không thể cập nhật tồn kho sản phẩm');
+    }
+
+    return createdLot;
   }
 
   async stockIn(dto: StockInDto) {
@@ -109,50 +168,17 @@ export class InventoryService {
     try {
       let createdLot: InventoryLot | null = null;
 
-      await session.withTransaction(async () => {
-        const { product } = await this.getProductAndVariant(
-          dto.productId,
-          dto.sku,
-          session,
-        );
-
-        const lotDocs = await this.inventoryLotModel.create(
-          [
-            {
-              productId: product._id,
-              sku: dto.sku,
-              unitCost: dto.unitCost,
-              originalQuantity: dto.quantity,
-              remainingQuantity: dto.quantity,
-              receivedAt: dto.receivedAt
-                ? new Date(dto.receivedAt)
-                : new Date(),
-              sourceType: dto.sourceType ?? 'purchase',
-              sourceRef: dto.sourceRef,
-              note: dto.note,
-              isClosed: false,
-            },
-          ],
-          { session },
-        );
-
-        createdLot = lotDocs[0];
-
-        const updated = await this.productModel.updateOne(
-          { _id: product._id, 'variants.sku': dto.sku },
-          {
-            $inc: {
-              'variants.$.stock': dto.quantity,
-              totalStock: dto.quantity,
-            },
-          },
-          { session },
-        );
-
-        if (updated.modifiedCount === 0) {
-          throw new BadRequestException('Không thể cập nhật tồn kho sản phẩm');
+      try {
+        await session.withTransaction(async () => {
+          createdLot = await this.createStockIn(dto, session);
+        });
+      } catch (error: any) {
+        if (this.isTransactionNotSupported(error)) {
+          createdLot = await this.createStockIn(dto);
+        } else {
+          throw error;
         }
-      });
+      }
 
       return createdLot;
     } finally {
@@ -301,6 +327,195 @@ export class InventoryService {
     if (updated.modifiedCount === 0) {
       throw new BadRequestException('Không thể hoàn lại stock cho Product');
     }
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  //  Analytics helpers
+  // ─────────────────────────────────────────────────────────────
+
+  private normalizeStatsGroupBy(groupBy?: string): 'day' | 'week' | 'month' {
+    if (groupBy === 'week' || groupBy === 'month') return groupBy;
+    return 'day';
+  }
+
+  private clampPositiveInt(value: any, fallback: number, max: number) {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+    return Math.min(Math.floor(parsed), max);
+  }
+
+  private resolveStatsRangeValue(
+    groupBy: 'day' | 'week' | 'month',
+    range?: { days?: number; weeks?: number; months?: number },
+  ) {
+    if (groupBy === 'week') {
+      return this.clampPositiveInt(range?.weeks, 12, 104);
+    }
+    if (groupBy === 'month') {
+      return this.clampPositiveInt(range?.months, 12, 60);
+    }
+    return this.clampPositiveInt(range?.days, 30, 366);
+  }
+
+  private buildStatsStartDate(
+    groupBy: 'day' | 'week' | 'month',
+    range?: { days?: number; weeks?: number; months?: number },
+  ) {
+    const value = this.resolveStatsRangeValue(groupBy, range);
+    const start = new Date();
+    start.setHours(0, 0, 0, 0);
+
+    if (groupBy === 'day') {
+      start.setDate(start.getDate() - (value - 1));
+      return { start, value };
+    }
+
+    if (groupBy === 'week') {
+      const dayOffset = (start.getDay() + 6) % 7;
+      start.setDate(start.getDate() - dayOffset - (value - 1) * 7);
+      return { start, value };
+    }
+
+    start.setDate(1);
+    start.setMonth(start.getMonth() - (value - 1));
+    return { start, value };
+  }
+
+  private buildPeriodGroupExpr(
+    field: string,
+    groupBy: 'day' | 'week' | 'month',
+  ) {
+    const dateRef = `$${field}`;
+
+    if (groupBy === 'day') {
+      return {
+        $dateToString: {
+          format: '%Y-%m-%d',
+          date: dateRef,
+          timezone: 'Asia/Ho_Chi_Minh',
+        },
+      };
+    }
+
+    if (groupBy === 'week') {
+      return {
+        year: { $isoWeekYear: dateRef },
+        week: { $isoWeek: dateRef },
+      };
+    }
+
+    return {
+      $dateToString: {
+        format: '%Y-%m',
+        date: dateRef,
+        timezone: 'Asia/Ho_Chi_Minh',
+      },
+    };
+  }
+
+  private buildPeriodProjectExpr(
+    groupBy: 'day' | 'week' | 'month',
+    sourcePath = '$_id',
+  ): Record<string, any> {
+    if (groupBy === 'day' || groupBy === 'month') {
+      return { period: sourcePath };
+    }
+
+    return {
+      period: {
+        $concat: [
+          { $toString: `${sourcePath}.year` },
+          '-W',
+          {
+            $cond: [
+              { $lt: [`${sourcePath}.week`, 10] },
+              { $concat: ['0', { $toString: `${sourcePath}.week` }] },
+              { $toString: `${sourcePath}.week` },
+            ],
+          },
+        ],
+      },
+    };
+  }
+
+  async getStockInStats(
+    groupBy: 'day' | 'week' | 'month' = 'day',
+    range?: { days?: number; weeks?: number; months?: number },
+  ) {
+    const normalizedGroupBy = this.normalizeStatsGroupBy(groupBy);
+    const { start, value } = this.buildStatsStartDate(normalizedGroupBy, range);
+
+    const items = await this.inventoryLotModel.aggregate([
+      {
+        $match: {
+          receivedAt: { $gte: start },
+        },
+      },
+      {
+        $group: {
+          _id: this.buildPeriodGroupExpr('receivedAt', normalizedGroupBy),
+          lotCount: { $sum: 1 },
+          totalQuantity: { $sum: '$originalQuantity' },
+          totalRemainingQuantity: { $sum: '$remainingQuantity' },
+          totalStockInCost: {
+            $sum: {
+              $multiply: [
+                { $ifNull: ['$originalQuantity', 0] },
+                { $ifNull: ['$unitCost', 0] },
+              ],
+            },
+          },
+          sourceTypes: { $addToSet: '$sourceType' },
+        },
+      },
+      {
+        $project: {
+          _id: 0,
+          ...this.buildPeriodProjectExpr(normalizedGroupBy),
+          lotCount: 1,
+          totalQuantity: 1,
+          totalRemainingQuantity: 1,
+          totalStockInCost: 1,
+          sourceTypes: 1,
+          averageUnitCost: {
+            $cond: [
+              { $gt: ['$totalQuantity', 0] },
+              { $divide: ['$totalStockInCost', '$totalQuantity'] },
+              0,
+            ],
+          },
+        },
+      },
+      { $sort: { period: 1 } },
+    ]);
+
+    const summary = items.reduce(
+      (acc: any, item: any) => {
+        acc.totalLots += item.lotCount || 0;
+        acc.totalQuantity += item.totalQuantity || 0;
+        acc.totalRemainingQuantity += item.totalRemainingQuantity || 0;
+        acc.totalStockInCost += item.totalStockInCost || 0;
+        return acc;
+      },
+      {
+        totalLots: 0,
+        totalQuantity: 0,
+        totalRemainingQuantity: 0,
+        totalStockInCost: 0,
+      },
+    );
+
+    summary.averageUnitCost =
+      summary.totalQuantity > 0
+        ? summary.totalStockInCost / summary.totalQuantity
+        : 0;
+
+    return {
+      groupBy: normalizedGroupBy,
+      range: value,
+      items,
+      summary,
+    };
   }
 
   async listLots(productId?: string, sku?: string) {

@@ -22,18 +22,20 @@ export class PaymentsController {
     @Body('orderId') orderId: string,
     @Req() req: Request & { user: any },
   ) {
-    // Lấy IP trực tiếp từ request, fallback về localhost nếu không có
     const ipAddr = req.ip || '127.0.0.1';
     return this.paymentsService.createVNPayUrl(orderId, req.user.id, ipAddr);
   }
 
   @Get('vnpay/return')
   async vnpayReturn(@Query() query: any, @Res() res: Response) {
-    // MẸO LOCAL TEST: Ép server tự chạy hàm IPN để update Database ngay tại đây
-    // (Vì VNPAY không thể tự gọi ngầm vào localhost được)
-    await this.paymentsService.handleVnPayIpn(query);
+    const shouldAutoHandleIpn =
+      process.env.NODE_ENV !== 'production' &&
+      process.env.VNPAY_AUTO_IPN_ON_RETURN !== 'false';
 
-    // Sau khi DB đã được update, chạy hàm check để lấy kết quả hiển thị cho Frontend
+    if (shouldAutoHandleIpn) {
+      await this.paymentsService.handleVnPayIpn(query);
+    }
+
     const result = await this.paymentsService.checkReturnUrl(query);
 
     if (result.success) {
@@ -47,7 +49,6 @@ export class PaymentsController {
     }
   }
 
-  // Endpoint 2: VNPay gọi ngầm để update Database (IPN)
   @Get('vnpay/ipn')
   async vnpayIpn(@Query() query: any, @Res() res: Response) {
     const result = await this.paymentsService.handleVnPayIpn(query);

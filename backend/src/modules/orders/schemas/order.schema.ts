@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Types } from 'mongoose';
+import { Schema as MongooseSchema, Types } from 'mongoose';
 
 export type OrderStatus =
   | 'pending'
@@ -7,6 +7,8 @@ export type OrderStatus =
   | 'shipping'
   | 'delivered'
   | 'completed'
+  | 'delivery_failed'
+  | 'returned'
   | 'cancelled';
 
 export type PaymentStatus =
@@ -17,6 +19,12 @@ export type PaymentStatus =
   | 'failed';
 
 export type PaymentMethod = 'cod' | 'mock' | 'vnpay';
+
+export type ShippingSyncStatus =
+  | 'not_created'
+  | 'created'
+  | 'create_failed'
+  | 'synced';
 
 @Schema({ _id: false })
 export class LotAllocation {
@@ -81,8 +89,110 @@ export class ShippingInfo {
 
   @Prop({ required: true })
   city: string;
+
+  @Prop()
+  ghnDistrictId?: number;
+
+  @Prop()
+  ghnWardCode?: string;
 }
 const ShippingInfoSchema = SchemaFactory.createForClass(ShippingInfo);
+
+@Schema({ _id: false })
+export class ParcelSnapshot {
+  @Prop({ required: true, min: 1 })
+  weight: number;
+
+  @Prop({ required: true, min: 1 })
+  length: number;
+
+  @Prop({ required: true, min: 1 })
+  width: number;
+
+  @Prop({ required: true, min: 1 })
+  height: number;
+}
+const ParcelSnapshotSchema = SchemaFactory.createForClass(ParcelSnapshot);
+
+@Schema({ _id: false })
+export class ShippingStatusHistory {
+  @Prop({ required: true })
+  status: string;
+
+  @Prop()
+  note?: string;
+
+  @Prop({ required: true, default: Date.now })
+  at: Date;
+
+  @Prop({ type: MongooseSchema.Types.Mixed })
+  raw?: any;
+}
+const ShippingStatusHistorySchema = SchemaFactory.createForClass(
+  ShippingStatusHistory,
+);
+
+@Schema({ _id: false })
+export class ShippingIntegration {
+  @Prop({ default: 'ghn' })
+  provider?: string;
+
+  @Prop({ enum: ['test', 'production'], default: 'test' })
+  env?: 'test' | 'production';
+
+  @Prop({
+    enum: ['not_created', 'created', 'create_failed', 'synced'],
+    default: 'not_created',
+  })
+  syncStatus?: ShippingSyncStatus;
+
+  @Prop()
+  providerOrderCode?: string;
+
+  @Prop()
+  clientOrderCode?: string;
+
+  @Prop()
+  serviceId?: number;
+
+  @Prop()
+  serviceTypeId?: number;
+
+  @Prop()
+  fee?: number;
+
+  @Prop()
+  codAmount?: number;
+
+  @Prop()
+  status?: string;
+
+  @Prop()
+  expectedDeliveryTime?: Date;
+
+  @Prop({ type: ParcelSnapshotSchema })
+  parcelSnapshot?: ParcelSnapshot;
+
+  @Prop({ type: [ShippingStatusHistorySchema], default: [] })
+  statusHistory?: ShippingStatusHistory[];
+
+  @Prop()
+  createError?: string;
+
+  @Prop()
+  lastWebhookType?: string;
+
+  @Prop()
+  lastSyncedAt?: Date;
+
+  @Prop({ type: MongooseSchema.Types.Mixed })
+  rawCreateResponse?: any;
+
+  @Prop({ type: MongooseSchema.Types.Mixed })
+  rawLastPayload?: any;
+}
+const ShippingIntegrationSchema =
+  SchemaFactory.createForClass(ShippingIntegration);
 
 @Schema({ timestamps: true })
 export class Order {
@@ -94,6 +204,9 @@ export class Order {
 
   @Prop({ type: ShippingInfoSchema, required: true })
   shippingInfo: ShippingInfo;
+
+  @Prop({ type: ShippingIntegrationSchema })
+  shipping?: ShippingIntegration;
 
   @Prop({ required: true, min: 0 })
   totalAmount: number;
@@ -111,6 +224,8 @@ export class Order {
       'shipping',
       'delivered',
       'completed',
+      'delivery_failed',
+      'returned',
       'cancelled',
     ],
     default: 'pending',
@@ -127,11 +242,11 @@ export class Order {
 
   @Prop({
     enum: ['cod', 'mock', 'vnpay'],
-    default: 'mock',
+    default: 'cod',
   })
   paymentMethod: PaymentMethod;
 
-  @Prop({ trim: true, index: true })
+  @Prop({ trim: true })
   idempotencyKey?: string;
 
   @Prop()
@@ -153,6 +268,12 @@ export class Order {
   cancelledAt?: Date;
 
   @Prop()
+  deliveryFailedAt?: Date;
+
+  @Prop()
+  returnedAt?: Date;
+
+  @Prop()
   paidAt?: Date;
 
   @Prop()
@@ -168,5 +289,21 @@ OrderSchema.index(
     partialFilterExpression: {
       idempotencyKey: { $type: 'string' },
     },
+  },
+);
+
+OrderSchema.index(
+  { 'shipping.providerOrderCode': 1 },
+  {
+    unique: true,
+    sparse: true,
+  },
+);
+
+OrderSchema.index(
+  { 'shipping.clientOrderCode': 1 },
+  {
+    unique: true,
+    sparse: true,
   },
 );

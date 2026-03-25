@@ -5,6 +5,8 @@ export const ADMIN_ORDER_STATUSES = [
   'shipping',
   'delivered',
   'completed',
+  'delivery_failed',
+  'returned',
   'cancelled',
 ] as const;
 

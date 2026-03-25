@@ -3,23 +3,26 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { OrdersService } from './orders.service';
 import { OrdersController } from './orders.controller';
 import { AdminOrdersController } from './admin-orders.controller';
+import { GhnWebhookController } from '../ghn/ghn-webhook.controller';
 import { Order, OrderSchema } from './schemas/order.schema';
 import { Product, ProductSchema } from '../products/schemas/product.schema';
 import { CouponsModule } from '../coupons/coupons.module';
 import { PaymentsModule } from '../payments/payments.module';
 import { InventoryModule } from '../inventory/inventory.module';
+import { GhnModule } from '../ghn/ghn.module';
 
 @Module({
   imports: [
     forwardRef(() => PaymentsModule),
     InventoryModule,
+    GhnModule,
     MongooseModule.forFeature([
       { name: Order.name, schema: OrderSchema },
       { name: Product.name, schema: ProductSchema },
     ]),
     CouponsModule,
   ],
-  controllers: [OrdersController, AdminOrdersController],
+  controllers: [OrdersController, AdminOrdersController, GhnWebhookController],
   providers: [OrdersService],
   exports: [OrdersService],
 })

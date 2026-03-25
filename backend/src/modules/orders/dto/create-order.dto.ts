@@ -44,6 +44,17 @@ export class ShippingInfoDto {
 
   @IsString()
   city: string;
+
+  // GHN drop-off district id
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  ghnDistrictId?: number;
+
+  // GHN drop-off ward code
+  @IsOptional()
+  @IsString()
+  ghnWardCode?: string;
 }
 
 export class CreateOrderDto {
