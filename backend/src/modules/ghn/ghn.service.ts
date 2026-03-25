@@ -228,4 +228,22 @@ export class GhnService {
       includeShopIdHeader: true,
     });
   }
+
+  async returnOrder(orderCode: string) {
+    return this.request('/v2/switch-status/return', {
+      body: {
+        order_codes: [orderCode],
+      },
+      includeShopIdHeader: true,
+    });
+  }
+
+  async deliveryAgain(orderCode: string) {
+    return this.request('/v2/switch-status/storing', {
+      body: {
+        order_codes: [orderCode],
+      },
+      includeShopIdHeader: true,
+    });
+  }
 }

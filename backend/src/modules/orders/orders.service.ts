@@ -642,6 +642,44 @@ export class OrdersService {
     return this.updateStatus(orderId, { status: 'confirmed' }, 'admin');
   }
 
+  private isMerchantSwitchableGhnStatus(status?: string) {
+    const s = this.normalizeGhnStatus(status);
+    return ['cancel', 'cancelled', 'return', 'storing'].includes(s || '');
+  }
+
+  private async triggerSupportedGhnDevAction(
+    order: any,
+    requestedStatus: string,
+  ) {
+    const providerOrderCode = order.shipping?.providerOrderCode;
+    if (!providerOrderCode) {
+      throw new BadRequestException('Đơn chưa có providerOrderCode GHN');
+    }
+
+    const s = this.normalizeGhnStatus(requestedStatus);
+    if (!s) {
+      throw new BadRequestException('Thiếu status để thao tác GHN');
+    }
+
+    if (s === 'cancel' || s === 'cancelled') {
+      await this.ghnService.cancelOrder(providerOrderCode);
+      return 'cancel';
+    }
+
+    if (s === 'return') {
+      await this.ghnService.returnOrder(providerOrderCode);
+      return 'return';
+    }
+
+    if (s === 'storing') {
+      await this.ghnService.deliveryAgain(providerOrderCode);
+      return 'storing';
+    }
+
+    throw new BadRequestException(
+      `Status "${s}" không có public API đổi trạng thái từ merchant trên GHN. Hãy đổi trạng thái trên môi trường dev GHN theo tài liệu bạn đang dùng, sau đó gọi POST /api/v1/admin/orders/${order._id}/shipping/ghn/sync hoặc chờ webhook callback.`,
+    );
+  }
   // ─────────────────────────────────────────────────────────────
   //  GHN integration
   // ─────────────────────────────────────────────────────────────
@@ -936,6 +974,31 @@ export class OrdersService {
       throw new BadRequestException('Thiếu status để simulate GHN');
     }
 
+    const hasRealGhnShipment =
+      !!order.shipping?.providerOrderCode && this.ghnService.hasConfig();
+
+    /**
+     * Nếu đơn đã có vận đơn GHN thật:
+     * - chỉ gọi public API GHN với các action merchant được support rõ
+     *   như cancel / return / storing
+     * - các status logistics còn lại phải đổi từ GHN dev UI/doc,
+     *   rồi sync/webhook về hệ thống local
+     */
+    if (hasRealGhnShipment) {
+      if (this.isMerchantSwitchableGhnStatus(normalizedStatus)) {
+        await this.triggerSupportedGhnDevAction(order, normalizedStatus);
+        return this.syncGhnShipment(orderId);
+      }
+
+      throw new BadRequestException(
+        `Đơn này đã có vận đơn GHN thật (${order.shipping?.providerOrderCode}). Status "${normalizedStatus}" không nên simulate local. Hãy đổi trạng thái trên môi trường dev GHN theo tài liệu bạn cung cấp, sau đó gọi POST /api/v1/admin/orders/${orderId}/shipping/ghn/sync hoặc chờ webhook callback.`,
+      );
+    }
+
+    /**
+     * Fallback local:
+     * Chỉ dùng cho demo nội bộ khi chưa tạo vận đơn GHN thật.
+     */
     return this.handleGhnWebhook({
       Type: type || 'Switch_status',
       Status: normalizedStatus,
@@ -943,6 +1006,7 @@ export class OrdersService {
       ClientOrderCode: String(order._id),
       CODAmount: Number(order.totalAmount || 0),
       simulated: true,
+      source: 'local-dev-fallback',
     });
   }
 
