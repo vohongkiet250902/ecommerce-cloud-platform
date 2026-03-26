@@ -119,7 +119,7 @@ export class InventoryService {
     dto: StockInDto,
     session?: ClientSession,
   ): Promise<InventoryLot | null> {
-    const { product } = await this.getProductAndVariant(
+    const { product, variant } = await this.getProductAndVariant(
       dto.productId,
       dto.sku,
       session,
@@ -131,6 +131,7 @@ export class InventoryService {
           productId: product._id,
           sku: dto.sku,
           unitCost: dto.unitCost,
+          sellingPrice: dto.sellingPrice,
           originalQuantity: dto.quantity,
           remainingQuantity: dto.quantity,
           receivedAt: dto.receivedAt ? new Date(dto.receivedAt) : new Date(),
@@ -145,12 +146,21 @@ export class InventoryService {
 
     const createdLot = lotDocs[0];
 
+    const newPrice = dto.sellingPrice !== undefined ? dto.sellingPrice : variant.price;
+    const discount = variant.discountPercentage || 0;
+    const finalPrice = Math.round(newPrice * (1 - discount / 100));
+
     const updated = await this.productModel.updateOne(
       { _id: product._id, 'variants.sku': dto.sku },
       {
         $inc: {
           'variants.$.stock': dto.quantity,
           totalStock: dto.quantity,
+        },
+        $set: {
+          'variants.$.importPrice': dto.unitCost,
+          'variants.$.price': newPrice,
+          'variants.$.finalPrice': finalPrice,
         },
       },
       session ? { session } : undefined,
@@ -525,6 +535,6 @@ export class InventoryService {
 
     return this.inventoryLotModel
       .find(filter)
-      .sort({ receivedAt: 1, createdAt: 1 });
+      .sort({ receivedAt: -1, createdAt: -1 });
   }
 }

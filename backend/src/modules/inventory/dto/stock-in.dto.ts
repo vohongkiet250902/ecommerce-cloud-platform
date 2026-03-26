@@ -25,6 +25,11 @@ export class StockInDto {
   unitCost: number;
 
   @IsOptional()
+  @IsNumber()
+  @Min(0)
+  sellingPrice?: number;
+
+  @IsOptional()
   @IsDateString()
   receivedAt?: string;
 

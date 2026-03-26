@@ -34,6 +34,9 @@ export class ProductVariant {
   @Prop({ default: 'active' })
   status: string;
 
+  @Prop({ type: Number, default: 0 })
+  importPrice: number;
+
   @Prop({ type: Number, default: 0, min: 0, max: 100 })
   discountPercentage: number;
 

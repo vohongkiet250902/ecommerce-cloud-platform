@@ -567,7 +567,7 @@ export default function ProductsPage() {
                       product.status === "active" ? "bg-success" : "bg-destructive",
                     )}
                   />
-                  {product.status === "active" ? "Ngừng hoạt động" : "Kích hoạt lại"}
+                  {product.status === "active" ? "Ngừng hoạt động" : "Kích hoạt"}
                 </div>
               </DropdownMenuItem>
 

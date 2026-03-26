@@ -24,6 +24,9 @@ export class InventoryLot extends Document {
   @Prop({ type: Number, required: true, min: 0, index: true })
   remainingQuantity: number;
 
+  @Prop({ type: Number, min: 0 })
+  sellingPrice?: number;
+
   @Prop({ type: Date, required: true, default: Date.now, index: true })
   receivedAt: Date;
 

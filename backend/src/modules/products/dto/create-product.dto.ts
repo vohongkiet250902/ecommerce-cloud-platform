@@ -49,6 +49,11 @@ class ProductVariantDto {
   @IsOptional()
   @IsNumber()
   @Min(0)
+  importPrice?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
   @Max(100)
   discountPercentage?: number;
 }

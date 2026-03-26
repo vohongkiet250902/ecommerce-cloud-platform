@@ -21,6 +21,7 @@ import { Badge } from "@/components/ui/badge";
 import { DataTable } from "@/components/shared/DataTable";
 import { Progress } from "@/components/ui/progress";
 import { Input } from "@/components/ui/input";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import {
     DropdownMenu,
     DropdownMenuContent,
@@ -66,9 +67,15 @@ export default function InventoryPage() {
   const [selectedItem, setSelectedItem] = useState<InventoryItem | null>(null);
   const [importQuantity, setImportQuantity] = useState<number>(0);
   const [unitCost, setUnitCost] = useState<number>(0);
+  const [sellingPrice, setSellingPrice] = useState<number>(0);
   const [note, setNote] = useState<string>("");
   const [updating, setUpdating] = useState(false);
   const [statusFilter, setStatusFilter] = useState<"all" | "out_of_stock" | "low_stock" | "in_stock">("all");
+
+  // Detail View State
+  const [isDetailOpen, setIsDetailOpen] = useState(false);
+  const [lots, setLots] = useState<any[]>([]);
+  const [detailLoading, setDetailLoading] = useState(false);
 
   const fetchInventory = async () => {
     try {
@@ -128,9 +135,25 @@ export default function InventoryPage() {
   const handleOpenUpdate = (item: InventoryItem) => {
       setSelectedItem(item);
       setImportQuantity(0);
-      setUnitCost(item.rawProduct?.price || 0);
+      setUnitCost(0);
+      setSellingPrice(0);
       setNote("");
       setIsUpdateOpen(true);
+  }
+
+  const handleOpenDetail = async (item: InventoryItem) => {
+      setSelectedItem(item);
+      setIsDetailOpen(true);
+      setDetailLoading(true);
+      try {
+          const res = await inventoryApi.getLots({ sku: item.sku });
+          setLots(res.data.data || res.data);
+      } catch (error) {
+          console.error(error);
+          toast({ title: "Lỗi", description: "Không thể lấy chi tiết nhập kho", variant: "destructive" });
+      } finally {
+          setDetailLoading(false);
+      }
   }
 
   const handleStockIn = async () => {
@@ -146,6 +169,7 @@ export default function InventoryPage() {
             sku: selectedItem.sku,
             quantity: importQuantity,
             unitCost: unitCost,
+            sellingPrice: sellingPrice,
             sourceType: 'purchase',
             note: note || undefined
           });
@@ -153,6 +177,9 @@ export default function InventoryPage() {
           toast({ title: "Nhập kho thành công", variant: "success" });
           setIsUpdateOpen(false);
           setImportQuantity(0);
+          setUnitCost(0);
+          setSellingPrice(0);
+          setNote("");
           fetchInventory();
       } catch (error: any) {
          const msg = error?.response?.data?.message || "Thất bại";
@@ -260,9 +287,14 @@ export default function InventoryPage() {
       key: "actions",
       header: "",
       render: (item: InventoryItem) => (
-        <Button variant="ghost" size="sm" className="h-8 border border-border hover:bg-accent hover:text-accent-foreground" onClick={() => handleOpenUpdate(item)}>
-           <span className="text-xs">Nhập kho</span>
-        </Button>
+        <div className="flex items-center gap-2">
+            <Button variant="ghost" size="sm" className="h-8 border border-border hover:bg-accent hover:text-accent-foreground" onClick={() => handleOpenDetail(item)}>
+               <span className="text-xs">Chi tiết</span>
+            </Button>
+            <Button variant="ghost" size="sm" className="h-8 border border-border hover:bg-primary/10 hover:text-primary" onClick={() => handleOpenUpdate(item)}>
+               <span className="text-xs">Nhập kho</span>
+            </Button>
+        </div>
       ),
     },
   ];
@@ -274,7 +306,7 @@ export default function InventoryPage() {
         <div>
           <h1 className="text-2xl font-bold text-foreground">Kho hàng</h1>
           <p className="text-muted-foreground">
-            Quản lý tồn kho chi tiết theo từng biến thể sản phẩm
+            Quản lý tồn kho và nhập xuất chi tiết theo từng sản phẩm
           </p>
         </div>
       </div>
@@ -418,7 +450,7 @@ export default function InventoryPage() {
                       </div>
                       <div className="flex-1 min-w-0">
                           <h3 className="font-bold text-xl text-foreground leading-tight">{selectedItem?.productName}</h3>
-                          <div className="flex flex-wrap items-center gap-2 mt-2">
+                          <div className="flex wrap items-center gap-2 mt-2">
                              <Badge variant="secondary" className="px-1.5 py-0 text-[10px] h-5 font-bold uppercase tracking-wider bg-primary/10 text-primary border-none">
                                 {selectedItem?.sku}
                              </Badge>
@@ -432,9 +464,9 @@ export default function InventoryPage() {
 
                   <div className="p-6 space-y-6">
                       {/* Input Section */}
-                      <div className="space-y-4">
-                          <div className="space-y-2">
-                            <Label className="text-sm font-semibold ml-1">Số lượng nhập thêm</Label>
+                      <div className="grid grid-cols-2 gap-4">
+                          <div className="col-span-2 space-y-2">
+                            <Label className="text-sm font-semibold ml-1">Số lượng nhập</Label>
                             <Input 
                                 type="number" 
                                 min={1} 
@@ -444,7 +476,7 @@ export default function InventoryPage() {
                             />
                           </div>
                           
-                          <div className="space-y-2">
+                          <div className="col-span-1 space-y-2">
                             <Label className="text-sm font-semibold ml-1">Đơn giá nhập (VND)</Label>
                             <Input 
                                 type="number" 
@@ -455,12 +487,23 @@ export default function InventoryPage() {
                             />
                           </div>
 
-                          <div className="space-y-2">
-                            <Label className="text-sm font-semibold ml-1">Ghi chú (Tùy chọn)</Label>
+                          <div className="col-span-1 space-y-2">
+                            <Label className="text-sm font-semibold ml-1">Giá bán mới (VND)</Label>
+                            <Input 
+                                type="number" 
+                                min={0} 
+                                value={sellingPrice} 
+                                onChange={(e) => setSellingPrice(Number(e.target.value))} 
+                                className="h-12 bg-muted/30"
+                            />
+                          </div>
+
+                          <div className="col-span-2 space-y-2">
+                            <Label className="text-sm font-semibold ml-1">Ghi chú</Label>
                             <Input 
                                 type="text" 
                                 value={note} 
-                                placeholder="VD: Nhập hàng đợt 1 tháng 10..."
+                                placeholder="Nhập ghi chú khi nhập kho"
                                 onChange={(e) => setNote(e.target.value)} 
                                 className="h-10 bg-muted/30"
                             />
@@ -480,6 +523,93 @@ export default function InventoryPage() {
                       </div>
                   </div>
               </div>
+          </DialogContent>
+      </Dialog>
+
+      {/* Batch History Detail Dialog */}
+      <Dialog open={isDetailOpen} onOpenChange={setIsDetailOpen}>
+          <DialogContent className="max-w-3xl p-0 overflow-hidden rounded-2xl shadow-2xl border-none">
+              <DialogHeader className="p-6 bg-muted/30 border-b border-border/50">
+                  <div className="flex items-center gap-4">
+                      <div className="p-2 rounded-xl bg-primary/10">
+                          <Layers className="h-6 w-6 text-primary" />
+                      </div>
+                      <div>
+                          <DialogTitle className="text-xl font-bold">Chi tiết nhập kho theo đợt</DialogTitle>
+                          <DialogDescription className="text-xs uppercase tracking-widest font-bold text-muted-foreground mt-0.5">
+                              {selectedItem?.productName} — {selectedItem?.sku}
+                          </DialogDescription>
+                      </div>
+                  </div>
+              </DialogHeader>
+
+              <ScrollArea className="max-h-[60vh]">
+                  {detailLoading ? (
+                      <div className="py-20 flex flex-col items-center justify-center gap-3">
+                          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                          <p className="text-sm text-muted-foreground animate-pulse font-medium">Đang lấy dữ liệu lô hàng...</p>
+                      </div>
+                  ) : lots.length === 0 ? (
+                      <div className="py-20 text-center space-y-3">
+                          <div className="inline-flex p-4 rounded-full bg-muted">
+                              <Package className="h-8 w-8 text-muted-foreground" />
+                          </div>
+                          <p className="text-muted-foreground font-medium">Chưa có thông tin nhập kho chi tiết.</p>
+                      </div>
+                  ) : (
+                      <div className="p-6">
+                          <div className="space-y-4">
+                              {lots.map((lot, idx) => (
+                                  <div key={lot._id} className="group relative border border-border rounded-xl p-4 transition-all hover:bg-muted/5 hover:border-primary/20">
+                                      <div className="absolute -left-1 top-4 w-1 h-12 bg-primary/20 rounded-full group-hover:bg-primary transition-colors" />
+                                      <div className="flex items-start justify-between">
+                                          <div className="space-y-1">
+                                              <div className="flex items-center gap-3">
+                                                  <Badge variant="outline" className="bg-primary/5 text-primary border-primary/20 text-[10px] font-bold">Lô #{lots.length - idx}</Badge>
+                                                  <span className="text-xs font-bold text-muted-foreground">
+                                                      {new Date(lot.receivedAt).toLocaleString("vi-VN", {
+                                                          day: "2-digit",
+                                                          month: "2-digit",
+                                                          year: "numeric",
+                                                          hour: "2-digit",
+                                                          minute: "2-digit"
+                                                      })}
+                                                  </span>
+                                              </div>
+                                              <p className="text-sm font-semibold mt-2">{lot.note || "Không có ghi chú"}</p>
+                                          </div>
+                                          <div className="text-right space-y-1">
+                                              <p className="text-xs text-muted-foreground">Số lượng</p>
+                                              <p className="font-bold text-lg">+{lot.originalQuantity}</p>
+                                              <p className="text-[10px] text-muted-foreground italic">Còn lại: {lot.remainingQuantity}</p>
+                                          </div>
+                                      </div>
+                                      <div className="mt-4 pt-4 border-t border-border/50 grid grid-cols-2 gap-4">
+                                          <div>
+                                              <p className="text-[10px] text-muted-foreground uppercase tracking-widest font-bold">Giá nhập</p>
+                                              <p className="font-bold text-sm text-foreground">
+                                                  {lot.unitCost.toLocaleString("vi-VN")} <span className="text-[10px]">VNĐ</span>
+                                              </p>
+                                          </div>
+                                          {lot.sellingPrice && (
+                                              <div className="text-right">
+                                                  <p className="text-[10px] text-muted-foreground uppercase tracking-widest font-bold">Giá bán khi nhập</p>
+                                                  <p className="font-bold text-sm text-primary">
+                                                      {lot.sellingPrice.toLocaleString("vi-VN")} <span className="text-[10px]">VNĐ</span>
+                                                  </p>
+                                              </div>
+                                          )}
+                                      </div>
+                                  </div>
+                              ))}
+                          </div>
+                      </div>
+                  )}
+              </ScrollArea>
+
+              <DialogFooter className="p-4 bg-muted/10 border-t border-border/50">
+                  <Button variant="outline" onClick={() => setIsDetailOpen(false)} className="rounded-xl px-6">Đóng</Button>
+              </DialogFooter>
           </DialogContent>
       </Dialog>
     </div>

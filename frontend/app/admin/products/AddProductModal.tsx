@@ -107,6 +107,7 @@ interface Variant {
   sku: string;
   price: number;
   discountPercentage: number;
+  importPrice: number;
   stock: number;
   attributes: Attribute[];
   image?: ImageType;
@@ -182,9 +183,9 @@ export default function AddProductModal({ open, onOpenChange, initialData, onSuc
     { key: "", value: "" },
   ]);
   const [variants, setVariants] = useState<Variant[]>([
-    { sku: generateSKU(), price: 0, discountPercentage: 0, stock: 0, attributes: [{ key: "", value: "" }], image: undefined }
+    { sku: generateSKU(), price: 0, importPrice: 0, discountPercentage: 0, stock: 0, attributes: [{ key: "", value: "" }], image: undefined }
   ]);
-  const [isActive, setIsActive] = useState(true);
+  const [isActive, setIsActive] = useState(false);
   const [isFeatured, setIsFeatured] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [variantUploadingIndex, setVariantUploadingIndex] = useState<number | null>(null);
@@ -264,7 +265,7 @@ export default function AddProductModal({ open, onOpenChange, initialData, onSuc
         });
         setSpecs(initialData.specs || [{ key: "", value: "" }]);
         setImages(initialData.images || []);
-        setVariants(initialData.variants || [{ sku: generateSKU(), price: 0, discountPercentage: 0, stock: 0, attributes: [{ key: "", value: "" }], image: undefined }]);
+        setVariants(initialData.variants || [{ sku: generateSKU(), price: 0, importPrice: 0, discountPercentage: 0, stock: 0, attributes: [{ key: "", value: "" }], image: undefined }]);
         setIsActive(initialData.status === "active");
         setIsFeatured(initialData.isFeatured || false);
       } else {
@@ -277,8 +278,8 @@ export default function AddProductModal({ open, onOpenChange, initialData, onSuc
         });
         setSpecs([{ key: "", value: "" }]);
         setImages([]);
-        setVariants([{ sku: generateSKU(), price: 0, discountPercentage: 0, stock: 0, attributes: [{ key: "", value: "" }], image: undefined }]);
-        setIsActive(true);
+        setVariants([{ sku: generateSKU(), price: 0, importPrice: 0, discountPercentage: 0, stock: 0, attributes: [{ key: "", value: "" }], image: undefined }]);
+        setIsActive(false);
         setIsFeatured(false);
       }
     }
@@ -350,6 +351,7 @@ export default function AddProductModal({ open, onOpenChange, initialData, onSuc
       {
         sku: generateSKU(),
         price: 0,
+        importPrice: 0,
         discountPercentage: 0,
         stock: 0,
         attributes: [{ key: "", value: "" }],
@@ -457,30 +459,28 @@ export default function AddProductModal({ open, onOpenChange, initialData, onSuc
       return;
     }
 
-    // Validate variants content
+    // Validate variants content (Chỉ yêu cầu ít nhất một thuộc tính)
     const invalidVariants = variants.some(v => 
-      v.price <= 0 || 
-      v.stock < 0 || 
       v.attributes.filter((a) => a.key.trim() && a.value.trim()).length === 0
     );
 
     if (invalidVariants) {
       toast({ 
         title: "Lỗi dữ liệu", 
-        description: "Vui lòng nhập đầy đủ thông tin (giá > 0, tồn kho >= 0) cho các biến thể.", 
+        description: "Vui lòng nhập đầy đủ ít nhất một thuộc tính cho các biến thể.", 
         variant: "destructive" 
       });
       return;
     }
 
-    // Validate SKU không trùng
-    const skus = variants.map((v) => v.sku.trim());
-    const unique = new Set(skus);
+    // Validate SKU không trùng (Nếu SKU đã nhập)
+    const filledSkus = variants.map((v) => v.sku.trim()).filter(s => s !== "");
+    const uniqueFilledSkus = new Set(filledSkus);
 
-    if (skus.some((s) => !s) || unique.size !== skus.length) {
+    if (uniqueFilledSkus.size !== filledSkus.length) {
       toast({ 
         title: "Lỗi dữ liệu", 
-        description: "Mã SKU không được để trống và không được trùng lặp giữa các biến thể.", 
+        description: "Mã SKU không được trùng lặp giữa các biến thể.", 
         variant: "destructive" 
       });
       return;
@@ -500,6 +500,7 @@ export default function AddProductModal({ open, onOpenChange, initialData, onSuc
       variants: variants.map((v) => ({
         sku: v.sku.trim(),
         price: Number(v.price),
+        importPrice: Number(v.importPrice || 0),
         discountPercentage: Number(v.discountPercentage || 0),
         stock: Number(v.stock),
         attributes: v.attributes.filter((a) => a.key.trim() && a.value.trim()),
@@ -528,7 +529,8 @@ export default function AddProductModal({ open, onOpenChange, initialData, onSuc
       reset();
       setImages([]);
       setSpecs([{ key: "", value: "" }]);
-      setVariants([{ sku: generateSKU(), price: 0, discountPercentage: 0, stock: 0, attributes: [{ key: "", value: "" }], image: undefined }]);
+      setVariants([{ sku: generateSKU(), price: 0, importPrice: 0, discountPercentage: 0, stock: 0, attributes: [{ key: "", value: "" }], image: undefined }]);
+      setIsActive(false);
       setIsFeatured(false);
       onSuccess?.(payload);
       onOpenChange(false);
@@ -931,66 +933,90 @@ export default function AddProductModal({ open, onOpenChange, initialData, onSuc
                               )}
                             </div>
                           </div>
-                          <div className="col-span-3 grid grid-cols-2 gap-4">
-                            <div>
+                          <div className="col-span-3 space-y-4">
+                            {/* Row 1: SKU */}
+                            <div className="w-full">
                               <Label htmlFor={`variant-sku-${i}`}>
-                                SKU
+                                SKU (Mã sản phẩm)
                               </Label>
                               <Input
                                 id={`variant-sku-${i}`}
                                 value={variant.sku}
-                                disabled
                                 onChange={(e) => updateVariant(i, "sku", e.target.value)}
                                 className="mt-1.5 bg-muted/30"
+                                disabled
+                                placeholder="Tự động phát sinh nếu để trống"
                               />
                             </div>
-                            <div>
-                              <Label htmlFor={`variant-price-${i}`}>
-                                Giá (VNĐ) <span className="text-destructive">*</span>
-                              </Label>
-                              <Input
-                                id={`variant-price-${i}`}
-                                type="number"
-                                min="0"
-                                placeholder="0"
-                                value={variant.price}
-                                onChange={(e) => updateVariant(i, "price", Math.max(0, Number(e.target.value)))}
-                                className="mt-1.5"
-                              />
-                            </div>
-                            <div>
-                              <Label htmlFor={`variant-discount-${i}`}>
-                                Chiết khấu (%)
-                              </Label>
-                              <Input
-                                id={`variant-discount-${i}`}
-                                type="number"
-                                min="0"
-                                max="100"
-                                placeholder="0"
-                                value={variant.discountPercentage}
-                                onChange={(e) => {
-                                  let val = Number(e.target.value);
-                                  if (val < 0) val = 0;
-                                  if (val > 100) val = 100;
-                                  updateVariant(i, "discountPercentage", val);
-                                }}
-                                className="mt-1.5"
-                              />
-                            </div>
-                            <div>
-                              <Label htmlFor={`variant-stock-${i}`}>
-                                Tồn kho <span className="text-destructive">*</span>
+
+                            {/* Row 2: Giá nhập and Giá bán */}
+                            <div className="grid grid-cols-2 gap-4">
+                              <div>
+                                <Label htmlFor={`variant-import-price-${i}`}>
+                                  Giá nhập (VNĐ)
                                 </Label>
-                              <Input
-                                id={`variant-stock-${i}`}
-                                type="number"
-                                min="0"
-                                placeholder="0"
-                                value={variant.stock}
-                                onChange={(e) => updateVariant(i, "stock", Math.max(0, Math.floor(Number(e.target.value))))}
-                                className="mt-1.5"
-                              />
+                                <Input
+                                  id={`variant-import-price-${i}`}
+                                  type="number"
+                                  disabled
+                                  value={variant.importPrice}
+                                  className="mt-1.5 bg-muted/40 cursor-not-allowed"
+                                  title="Giá nhập đồng bộ từ tồn kho"
+                                />
+                              </div>
+                              <div>
+                                <Label htmlFor={`variant-price-${i}`}>
+                                  Giá bán (VNĐ)
+                                </Label>
+                                <Input
+                                  id={`variant-price-${i}`}
+                                  type="number"
+                                  min="0"
+                                  placeholder="0"
+                                  value={variant.price}
+                                  onChange={(e) => updateVariant(i, "price", Math.max(0, Number(e.target.value)))}
+                                  className="mt-1.5"
+                                />
+                              </div>
+                            </div>
+
+                            {/* Row 3: Tồn kho and Chiết khấu */}
+                            <div className="grid grid-cols-2 gap-4">
+                              <div>
+                                <Label htmlFor={`variant-stock-${i}`}>
+                                  Tồn kho
+                                  </Label>
+                                <Input
+                                  id={`variant-stock-${i}`}
+                                  type="number"
+                                  min="0"
+                                  disabled
+                                  placeholder="0"
+                                  value={variant.stock}
+                                  onChange={(e) => updateVariant(i, "stock", Math.max(0, Math.floor(Number(e.target.value))))}
+                                  className="mt-1.5 bg-muted/40"
+                                />
+                              </div>
+                              <div>
+                                <Label htmlFor={`variant-discount-${i}`}>
+                                  Chiết khấu (%)
+                                </Label>
+                                <Input
+                                  id={`variant-discount-${i}`}
+                                  type="number"
+                                  min="0"
+                                  max="100"
+                                  placeholder="0"
+                                  value={variant.discountPercentage}
+                                  onChange={(e) => {
+                                    let val = Number(e.target.value);
+                                    if (val < 0) val = 0;
+                                    if (val > 100) val = 100;
+                                    updateVariant(i, "discountPercentage", val);
+                                  }}
+                                  className="mt-1.5"
+                                />
+                              </div>
                             </div>
                           </div>
                         </div>
