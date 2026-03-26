@@ -5,7 +5,7 @@ import {
   Eye, MoreHorizontal, Download, RefreshCw, Loader2, User, Mail, 
   Phone, Calendar, MapPin, CreditCard, Package, TrendingUp, 
   FileSpreadsheet, Printer, History, Clock, ArrowUpRight, ChevronDown,
-  Filter, Search, ShieldCheck, Truck, CheckCircle2, Trash2, AlertTriangle
+  Filter, Search, ShieldCheck, Truck, CheckCircle2, Trash2, AlertTriangle, AlertCircle
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -56,8 +56,8 @@ interface Order {
   };
   items: any[];
   totalAmount: number;
-  status: "pending" | "paid" | "shipping" | "completed" | "cancelled";
-  paymentStatus: "pending" | "paid" | "refunded";
+  status: "pending" | "confirmed" | "shipping" | "delivered" | "completed" | "delivery_failed" | "returned" | "cancelled";
+  paymentStatus: "unpaid" | "pending" | "paid" | "refunded" | "failed";
   paymentMethod?: string;
   createdAt: string;
   shippingInfo?: {
@@ -67,41 +67,61 @@ interface Order {
     ward: string;
     district: string;
     city: string;
+    ghnDistrictId?: number;
+    ghnWardCode?: string;
+  };
+  shipping?: {
+    providerOrderCode?: string;
+    syncStatus?: string;
+    status?: string;
+    clientOrderCode?: string;
+    fee?: number;
+    codAmount?: number;
   };
 }
 
 /* ===================== CONFIG ===================== */
 const statusConfig = {
-  pending: {
-    label: "Chờ xử lý",
-    className: "bg-warning/10 text-warning border-warning/20",
-  },
-  paid: {
-    label: "Đã xác nhận",
-    className: "bg-info/10 text-info border-info/20",
-  },
-  shipping: {
-    label: "Đang giao",
-    className: "bg-primary/10 text-primary border-primary/20",
-  },
-  completed: {
-    label: "Hoàn thành",
-    className: "bg-success/10 text-success border-success/20",
-  },
-  cancelled: {
-    label: "Đã hủy",
-    className: "bg-destructive/10 text-destructive border-destructive/20",
-  },
+  pending: { label: "Chờ xử lý", className: "bg-warning/10 text-warning border-warning/20", },
+  confirmed: { label: "Đã xác nhận", className: "bg-info/10 text-info border-info/20", },
+  shipping: { label: "Đang giao", className: "bg-primary/10 text-primary border-primary/20", icon: Truck },
+  delivered: { label: "Đã giao hàng", className: "bg-success/10 text-success border-success/20", },
+  completed: { label: "Hoàn thành", className: "bg-success/10 text-success border-success/20", },
+  delivery_failed: { label: "Giao thất bại", className: "bg-destructive/10 text-destructive border-destructive/20", icon: AlertCircle },
+  returned: { label: "Trả hàng", className: "bg-destructive/10 text-destructive border-destructive/20", icon: History },
+  cancelled: { label: "Đã hủy", className: "bg-destructive/10 text-destructive border-destructive/20", },
 };
 
 const paymentStatusConfig = {
-  pending: { label: "Chưa thanh toán", className: "bg-muted text-muted-foreground" },
+  unpaid: { label: "Chưa thanh toán", className: "bg-muted text-muted-foreground" },
+  pending: { label: "Chờ thanh toán", className: "bg-warning/10 text-warning" },
   paid: { label: "Đã thanh toán", className: "bg-success/10 text-success" },
   refunded: { label: "Hoàn tiền", className: "bg-warning/10 text-warning" },
+  failed: { label: "Thất bại", className: "bg-destructive/10 text-destructive" },
 };
 
 const formatPrice = (price: number) =>
   new Intl.NumberFormat("vi-VN").format(price) + "đ";
+
+const formatErrorMessage = (error: any, defaultMsg: string) => {
+  if (!error) return defaultMsg;
+  const data = error.response?.data;
+  if (!data) return error.message || defaultMsg;
+  let msg = data.message || data;
+  
+  if (typeof msg === 'string') return msg;
+  if (Array.isArray(msg)) {
+    return msg.map(m => typeof m === 'object' ? JSON.stringify(m) : m).join(', ');
+  }
+  if (typeof msg === 'object') {
+    if (msg.message) {
+      if (typeof msg.message === 'string') return msg.message;
+      if (Array.isArray(msg.message)) return msg.message.join(', ');
+    }
+    try { return JSON.stringify(msg); } catch(e) { return defaultMsg; }
+  }
+  return defaultMsg;
+};
 
 /* ===================== PAGE ===================== */
 export default function OrdersPage() {
@@ -120,11 +140,29 @@ export default function OrdersPage() {
   const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
   const [orderToCancel, setOrderToCancel] = useState<string | null>(null);
   const [cancelling, setCancelling] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
   const [dateRange, setDateRange] = useState<{ start: string; end: string }>({ start: "", end: "" });
+
+  const renderAttributes = (item: any) => {
+    if (item.attributes) {
+      if (Array.isArray(item.attributes)) {
+        return item.attributes
+          .map((attr: any) => `${attr.key || attr.name}: ${attr.value || attr.val || attr.v}`)
+          .join(" - ");
+      }
+      if (typeof item.attributes === 'object' && item.attributes !== null) {
+        return Object.entries(item.attributes)
+          .map(([key, value]) => `${key}: ${value}`)
+          .join(" - ");
+      }
+      return String(item.attributes);
+    }
+    return "";
+  };
 
   // Calculation for Revenue: Only count PAID orders that are NOT CANCELLED
   const totalRevenue = allOrders
-    .filter(o => o.paymentStatus === "paid" && o.status !== "cancelled")
+    .filter(o => o.paymentStatus === "paid" && ["delivered", "completed"].includes(o.status))
     .reduce((sum, o) => sum + o.totalAmount, 0);
 
   const exportToCSV = () => {
@@ -284,6 +322,23 @@ export default function OrdersPage() {
     }
   };
 
+  const handleRefresh = async () => {
+    try {
+      setIsSyncing(true);
+      // Automatically sync GHN statuses for all active orders
+      const syncRes = await orderApi.syncAllGhnShipments();
+      const results = syncRes.data;
+      console.log("GHN Sync Results:", results);
+    } catch (error) {
+      console.error("Lỗi đồng bộ GHN tự động:", error);
+    } finally {
+      fetchOrders(1, statusFilter);
+      fetchAllOrders();
+      setIsSyncing(false);
+      toast({ variant: "success", title: "Đã làm mới dữ liệu", description: "Danh sách đơn hàng và trạng thái vận chuyển đã được cập nhật." });
+    }
+  };
+
   const handleViewDetail = async (order: Order) => {
     setSelectedOrder(order);
     setDetailModalOpen(true);
@@ -345,11 +400,14 @@ export default function OrdersPage() {
     
     try {
       setCancelling(true);
-      await handleUpdateStatus(orderToCancel, { status: 'cancelled' });
+      await orderApi.adminCancelOrder(orderToCancel);
+      toast({ title: "Hủy đơn thành công", variant: "success" });
       setCancelDialogOpen(false);
       setOrderToCancel(null);
-    } catch {
-      toast({ title: "Lỗi khi hủy đơn hàng", variant: "destructive" });
+      fetchOrders(page, statusFilter);
+      fetchAllOrders();
+    } catch (e: any) {
+      toast({ title: "Lỗi", description: typeof e.response?.data?.message === 'string' ? e.response.data.message : '', variant: "destructive" });
     } finally {
       setCancelling(false);
     }
@@ -444,47 +502,56 @@ export default function OrdersPage() {
             <DropdownMenuSeparator />
             
             <div className="px-2 py-1.5 text-xs font-bold text-muted-foreground uppercase tracking-widest">
-              Cập nhật đơn hàng
+              Xử lý đơn hàng
             </div>
 
             <DropdownMenuItem 
                 disabled={order.status !== "pending"}
-                onClick={() => handleUpdateStatus(order._id, { status: 'paid' })}
+                onClick={() => orderApi.adminConfirmOrder(order._id).then(() => { toast({title: "Xác nhận thành công", variant: "success"}); fetchOrders(page, statusFilter); fetchAllOrders(); }).catch((e) => toast({title: "Lỗi", description: formatErrorMessage(e, "Lỗi xác nhận"), variant: "destructive"}))}
             >
               <ShieldCheck className="mr-2 h-4 w-4 text-info" />
               Xác nhận đơn hàng
             </DropdownMenuItem>
 
             <DropdownMenuItem 
-                disabled={order.status !== "paid"}
-                onClick={() => handleUpdateStatus(order._id, { status: 'shipping' })}
-            >
-              <Truck className="mr-2 h-4 w-4 text-primary" />
-              Bắt đầu giao hàng
-            </DropdownMenuItem>
-
-            <DropdownMenuItem 
-                disabled={order.paymentStatus === "paid" || order.status === "pending" || order.status === "cancelled"}
-                onClick={() => handleUpdateStatus(order._id, { paymentStatus: 'paid' })}
-            >
-              <CreditCard className="mr-2 h-4 w-4 text-success" />
-              Xác nhận thanh toán
-            </DropdownMenuItem>
-            
-            <DropdownMenuItem 
-                disabled={order.status !== "shipping"}
-                onClick={() => handleUpdateStatus(order._id, { status: 'completed', paymentStatus: 'paid' })}
+                disabled={order.status !== "delivered"}
+                onClick={() => orderApi.adminCompleteOrder(order._id).then(() => { toast({title: "Hoàn thành thành công", variant: "success"}); fetchOrders(page, statusFilter); fetchAllOrders(); }).catch((e) => toast({title: "Lỗi", description: formatErrorMessage(e, "Lỗi hoàn thành"), variant: "destructive"}))}
             >
               <CheckCircle2 className="mr-2 h-4 w-4 text-success" />
-              Hoàn thành đơn hàng
+              Hoàn thành đơn
             </DropdownMenuItem>
+            
+            <DropdownMenuSeparator />
 
+            <div className="px-2 py-1.5 text-xs font-bold text-muted-foreground uppercase tracking-widest">
+              Giao hàng nhanh (GHN)
+            </div>
+
+            {order.shipping?.providerOrderCode ? (
+               <DropdownMenuItem disabled>
+                 <CheckCircle2 className="mr-2 h-4 w-4 text-success" />
+                 Mã GHN: {order.shipping.providerOrderCode}
+               </DropdownMenuItem>
+            ) : (
+               <DropdownMenuItem 
+                   disabled={
+                     ['completed', 'cancelled', 'returned'].includes(order.status) || 
+                     (order.paymentMethod === 'vnpay' && order.paymentStatus !== 'paid') ||
+                     !order.shippingInfo?.ghnDistrictId
+                   }
+                   onClick={() => orderApi.createGhnShipment(order._id).then(() => { toast({title: "Tạo đơn giao hàng thành công", variant: "success"}); fetchOrders(page, statusFilter); fetchAllOrders(); }).catch((e) => toast({title: "Lỗi tạo GHN", description: formatErrorMessage(e, "Lỗi tạo GHN"), variant: "destructive"}))}
+               >
+                 <Package className="mr-2 h-4 w-4 text-primary" />
+                 {order.paymentMethod === 'vnpay' && order.paymentStatus !== 'paid' ? "VNPAY (Chưa thanh toán)" : "Tạo đơn GHN"}
+               </DropdownMenuItem>
+            )}
+            
             <DropdownMenuItem 
-                disabled={order.status !== "cancelled" || order.paymentStatus !== "paid"}
-                onClick={() => handleUpdateStatus(order._id, { paymentStatus: 'refunded' })}
+                disabled={order.status === "pending" || order.status === "cancelled" || !order.shipping?.providerOrderCode}
+                onClick={() => orderApi.syncGhnShipment(order._id).then(() => { toast({title: "Đồng bộ thành công", variant: "success"}); fetchOrders(page, statusFilter); fetchAllOrders(); }).catch((e) => toast({title: "Lỗi đồng bộ", description: formatErrorMessage(e, "Lỗi đồng bộ"), variant: "destructive"}))}
             >
-              <RefreshCw className="mr-2 h-4 w-4 text-warning" />
-              Hoàn trả tiền (Refund)
+              <RefreshCw className="mr-2 h-4 w-4 text-primary" />
+              Đồng bộ trạng thái GHN
             </DropdownMenuItem>
 
             <DropdownMenuSeparator />
@@ -521,9 +588,14 @@ export default function OrdersPage() {
             <FileSpreadsheet className="h-4 w-4 mr-2 text-green-600" />
             Xuất Excel
           </Button>
-          <Button variant="outline" onClick={() => fetchOrders(page, statusFilter)} className="border-dashed bg-background/50 border-border/40">
-            <RefreshCw className="h-4 w-4 mr-2" />
-            Làm mới
+          <Button 
+            variant="outline" 
+            onClick={handleRefresh} 
+            disabled={isSyncing}
+            className="border-dashed bg-background/50 border-border/40"
+          >
+            {isSyncing ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />}
+            {isSyncing ? "Đang đồng bộ..." : "Làm mới"}
           </Button>
         </div>
       </div>
@@ -565,10 +637,10 @@ export default function OrdersPage() {
             </div>
           </div>
           <div className="bg-card rounded-xl p-4 border border-border shadow-sm hover:border-primary/20 transition-colors">
-            <p className="text-xs text-muted-foreground font-bold uppercase tracking-wider">Đã xác nhận</p>
+            <p className="text-xs text-muted-foreground font-bold uppercase tracking-wider">Xác nhận</p>
             <div className="flex items-baseline gap-2 mt-2">
               <span className="text-2xl font-bold text-cyan-600">
-                  {allOrders.filter((o) => o.status === "paid").length}
+                  {allOrders.filter((o) => o.status === "confirmed").length}
               </span>
             </div>
           </div>
@@ -584,7 +656,7 @@ export default function OrdersPage() {
             <p className="text-xs text-muted-foreground font-bold uppercase tracking-wider">Hoàn thành</p>
             <div className="flex items-baseline gap-2 mt-2">
               <span className="text-2xl font-bold text-green-600">
-                  {allOrders.filter((o) => o.status === "completed").length}
+                  {allOrders.filter((o) => o.status === "completed" || o.status === "delivered").length}
               </span>
             </div>
           </div>
@@ -831,25 +903,51 @@ export default function OrdersPage() {
                       {/* Payment */}
                       {selectedOrder.paymentStatus === "paid" && (
                         <div className="relative pl-8">
-                          <div className="absolute left-0 top-1 h-6 w-6 rounded-full bg-background border-2 border-success flex items-center justify-center">
-                            <CreditCard className="h-3 w-3 text-success" />
+                          <div className="absolute left-0 top-1 h-6 w-6 rounded-full bg-background border-2 border-emerald-500 flex items-center justify-center">
+                            <CreditCard className="h-3 w-3 text-emerald-500" />
                           </div>
                           <div>
-                            <p className="text-sm font-bold text-success">Đã hoàn tất thanh toán</p>
+                            <p className="text-sm font-bold text-emerald-500">Đã hoàn tất thanh toán</p>
                             <p className="text-xs text-muted-foreground">Khách hàng đã thanh toán qua {selectedOrder.paymentMethod || 'COD'}</p>
                           </div>
                         </div>
                       )}
 
+                      {/* Confirmed */}
+                      {['confirmed', 'shipping', 'delivered', 'completed'].includes(selectedOrder.status) && (
+                        <div className="relative pl-8">
+                          <div className="absolute left-0 top-1 h-6 w-6 rounded-full bg-background border-2 border-info flex items-center justify-center">
+                            <ShieldCheck className="h-3 w-3 text-info" />
+                          </div>
+                          <div>
+                            <p className="text-sm font-bold text-info">Đã xác nhận đơn hàng</p>
+                            <p className="text-xs text-muted-foreground">Nhân viên đã xác nhận đơn hàng hợp lệ.</p>
+                          </div>
+                        </div>
+                      )}
+
                       {/* Shipping */}
-                      {(selectedOrder.status === "shipping" || selectedOrder.status === "completed") && (
+                      {(['shipping', 'delivered', 'completed'].includes(selectedOrder.status)) && (
                         <div className="relative pl-8">
                           <div className="absolute left-0 top-1 h-6 w-6 rounded-full bg-background border-2 border-blue-500 flex items-center justify-center">
-                            <Package className="h-3 w-3 text-blue-500" />
+                            <Truck className="h-3 w-3 text-blue-500" />
                           </div>
                           <div>
                             <p className="text-sm font-bold text-blue-500">Đang thực hiện giao hàng</p>
-                            <p className="text-xs text-muted-foreground">Kiện hàng đã rời kho...</p>
+                            <p className="text-xs text-muted-foreground">Đã bàn giao cho đơn vị vận chuyển.</p>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Delivered */}
+                      {(['delivered', 'completed'].includes(selectedOrder.status)) && (
+                        <div className="relative pl-8">
+                          <div className="absolute left-0 top-1 h-6 w-6 rounded-full bg-background border-2 border-success flex items-center justify-center">
+                            <CheckCircle2 className="h-3 w-3 text-success" />
+                          </div>
+                          <div>
+                            <p className="text-sm font-bold text-success">Đã giao hàng thành công</p>
+                            <p className="text-xs text-muted-foreground">Kiện hàng đã đến tay khách hàng.</p>
                           </div>
                         </div>
                       )}
@@ -861,20 +959,23 @@ export default function OrdersPage() {
                              <TrendingUp className="h-3 w-3 text-white" />
                           </div>
                           <div>
-                            <p className="text-sm font-bold text-success">Giao hàng thành công</p>
-                            <p className="text-xs text-muted-foreground">Khách hàng đã nhận được hàng và hoàn tất.</p>
+                            <p className="text-sm font-bold text-success">Đơn hàng hoàn tất</p>
+                            <p className="text-xs text-muted-foreground">Đơn hàng đã kết thúc chu kỳ xử lý.</p>
                           </div>
                         </div>
                       )}
 
-                       {/* Cancelled */}
-                       {selectedOrder.status === "cancelled" && (
+                       {/* Error states */}
+                       {['cancelled', 'delivery_failed', 'returned'].includes(selectedOrder.status) && (
                         <div className="relative pl-8">
                           <div className="absolute left-0 top-1 h-6 w-6 rounded-full bg-destructive border-2 border-destructive flex items-center justify-center">
-                             <MoreHorizontal className="h-3 w-3 text-white" />
+                             <AlertTriangle className="h-3 w-3 text-white" />
                           </div>
                           <div>
-                            <p className="text-sm font-bold text-destructive">Đơn hàng đã bị hủy</p>
+                            <p className="text-sm font-bold text-destructive">
+                              {selectedOrder.status === 'cancelled' ? 'Đơn hàng đã bị hủy' : 
+                               selectedOrder.status === 'delivery_failed' ? 'Giao hàng thất bại' : 'Đơn hàng đã hoàn trả'}
+                            </p>
                             <p className="text-xs text-muted-foreground">Đơn hàng không được tiếp tục xử lý.</p>
                           </div>
                         </div>
@@ -913,11 +1014,11 @@ export default function OrdersPage() {
                             </div>
                               <div className="flex flex-col gap-1.5 mt-2">
                                 <div className="flex flex-wrap gap-1">
-                                  {item.attributes?.map((attr: any, idx: number) => (
-                                    <span key={idx} className="text-[9px] bg-primary/10 text-primary px-1.5 py-0.5 rounded-sm font-bold border border-primary/20 leading-none">
-                                      {attr.key}: {attr.value}
+                                  {renderAttributes(item) && (
+                                    <span className="text-[9px] bg-primary/10 text-primary px-1.5 py-0.5 rounded-sm font-bold border border-primary/20 leading-none">
+                                      {renderAttributes(item)}
                                     </span>
-                                  ))}
+                                  )}
                                 </div>
                                 <div className="flex items-center justify-between">
                                   <div className="flex items-center gap-2">
@@ -944,18 +1045,54 @@ export default function OrdersPage() {
               </div>
 
               {/* Modal Footer with Actions */}
-              <div className="bg-muted/30 p-4 border-t border-border/50 flex items-center justify-between gap-3 print:hidden">
-                <Button 
-                  variant="outline" 
-                  onClick={handlePrint}
-                  className="rounded-xl font-bold bg-background/50"
-                >
-                  <Printer className="h-4 w-4 mr-2" />
-                  In hóa đơn
-                </Button>
-                <Button variant="ghost" onClick={() => setDetailModalOpen(false)} className="rounded-xl font-bold print:hidden">
-                  Đóng
-                </Button>
+              <div className="bg-muted/30 p-4 border-t border-border/50 flex flex-wrap items-center justify-between gap-3 print:hidden">
+                <div className="flex gap-2">
+                  <Button 
+                    variant="outline" 
+                    onClick={handlePrint}
+                    className="rounded-xl font-bold bg-background/50 h-9"
+                  >
+                    <Printer className="h-4 w-4 mr-2" />
+                    In hóa đơn
+                  </Button>
+                </div>
+                
+                <div className="flex gap-2">
+                  {selectedOrder.status === "pending" && (
+                    <Button 
+                      className="rounded-xl font-bold bg-info hover:bg-info/90 text-white h-9"
+                      onClick={() => orderApi.adminConfirmOrder(selectedOrder._id).then(() => { toast({title: "Xác nhận thành công", variant: "success"}); fetchOrders(page, statusFilter); fetchAllOrders(); setDetailModalOpen(false); }).catch((e) => toast({title: "Lỗi", description: formatErrorMessage(e, "Lỗi xác nhận"), variant: "destructive"}))}
+                    >
+                      <ShieldCheck className="h-4 w-4 mr-2" />
+                      Xác nhận đơn
+                    </Button>
+                  )}
+
+                  {selectedOrder.status === "delivered" && (
+                    <Button 
+                      className="rounded-xl font-bold bg-success hover:bg-success/90 text-white h-9"
+                      onClick={() => orderApi.adminCompleteOrder(selectedOrder._id).then(() => { toast({title: "Hoàn kết đơn hàng thành công", variant: "success"}); fetchOrders(page, statusFilter); fetchAllOrders(); setDetailModalOpen(false); }).catch((e) => toast({title: "Lỗi", description: formatErrorMessage(e, "Lỗi hoàn tất"), variant: "destructive"}))}
+                    >
+                      <CheckCircle2 className="h-4 w-4 mr-2" />
+                      Hoàn thành đơn
+                    </Button>
+                  )}
+
+                  {['pending', 'confirmed', 'paid', 'shipping', 'delivered'].includes(selectedOrder.status) && (
+                    <Button 
+                      variant="destructive"
+                      className="rounded-xl font-bold h-9"
+                      onClick={() => handleCancelOrder(selectedOrder._id)}
+                    >
+                      <Trash2 className="h-4 w-4 mr-2" />
+                      Hủy đơn
+                    </Button>
+                  )}
+                  
+                  <Button variant="ghost" onClick={() => setDetailModalOpen(false)} className="rounded-xl font-bold h-9">
+                    Đóng
+                  </Button>
+                </div>
               </div>
             </div>
           )}

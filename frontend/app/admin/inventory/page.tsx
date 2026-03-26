@@ -37,7 +37,7 @@ import {
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
-import { productApi } from "@/services/api";
+import { productApi, inventoryApi } from "@/services/api";
 import { useToast } from "@/hooks/use-toast";
 
 interface InventoryItem {
@@ -65,7 +65,8 @@ export default function InventoryPage() {
   const [isUpdateOpen, setIsUpdateOpen] = useState(false);
   const [selectedItem, setSelectedItem] = useState<InventoryItem | null>(null);
   const [importQuantity, setImportQuantity] = useState<number>(0);
-  const [updateMode, setUpdateMode] = useState<"add" | "set">("add");
+  const [unitCost, setUnitCost] = useState<number>(0);
+  const [note, setNote] = useState<string>("");
   const [updating, setUpdating] = useState(false);
   const [statusFilter, setStatusFilter] = useState<"all" | "out_of_stock" | "low_stock" | "in_stock">("all");
 
@@ -127,56 +128,36 @@ export default function InventoryPage() {
   const handleOpenUpdate = (item: InventoryItem) => {
       setSelectedItem(item);
       setImportQuantity(0);
-      setUpdateMode("add");
+      setUnitCost(item.rawProduct?.price || 0);
+      setNote("");
       setIsUpdateOpen(true);
   }
 
-  const handleUpdateStock = async () => {
+  const handleStockIn = async () => {
       if (!selectedItem) return;
+      if (importQuantity <= 0) {
+        toast({ title: "Lỗi", description: "Số lượng nhập phải lớn hơn 0", variant: "destructive" });
+        return;
+      }
       try {
           setUpdating(true);
-          
-          // Construct update payload
-          const product = selectedItem.rawProduct;
-          // Clone variants (Safe check if the product has no variants)
-          const updatedVariants = product.variants ? [...product.variants] : [];
-          let updatePayload: any = {};
+          await inventoryApi.stockIn({
+            productId: selectedItem.productId,
+            sku: selectedItem.sku,
+            quantity: importQuantity,
+            unitCost: unitCost,
+            sourceType: 'purchase',
+            note: note || undefined
+          });
 
-          if (selectedItem.rawVariantIndex >= 0 && updatedVariants[selectedItem.rawVariantIndex]) {
-              // Cập nhật tồn kho cho riêng một biến thể
-              const currentStock = Number(updatedVariants[selectedItem.rawVariantIndex].stock) || 0;
-              const newTotalStock = updateMode === "add" 
-                ? currentStock + Number(importQuantity)
-                : Number(importQuantity);
-
-              updatedVariants[selectedItem.rawVariantIndex] = {
-                  ...updatedVariants[selectedItem.rawVariantIndex],
-                  stock: Math.max(0, newTotalStock)
-              };
-
-              const totalStock = updatedVariants.reduce((acc: number, v: any) => acc + (Number(v.stock) || 0), 0);
-              updatePayload = { variants: updatedVariants, totalStock };
-          } else {
-              // Cập nhật tồn kho trực tiếp vào sản phẩm (nếu là mặt hàng đơn giản, không biến thể)
-              const currentStock = (Number(product.stock ?? product.totalStock) || 0);
-              const newTotalStock = updateMode === "add"
-                ? currentStock + Number(importQuantity)
-                : Number(importQuantity);
-                
-              const finalStock = Math.max(0, newTotalStock);
-              updatePayload = { totalStock: finalStock, stock: finalStock };
-          }
-
-          await productApi.updateProduct(selectedItem.productId, updatePayload);
-
-          toast({ title: "Cập nhật tồn kho thành công", variant: "success" });
+          toast({ title: "Nhập kho thành công", variant: "success" });
           setIsUpdateOpen(false);
           setImportQuantity(0);
           fetchInventory();
       } catch (error: any) {
          const msg = error?.response?.data?.message || "Thất bại";
          toast({ 
-            title: "Lỗi cập nhật", 
+            title: "Lỗi nhập kho", 
             description: typeof msg === "string" ? msg : (Array.isArray(msg) ? msg.join(", ") : JSON.stringify(msg)), 
             variant: "destructive" 
          });
@@ -280,7 +261,7 @@ export default function InventoryPage() {
       header: "",
       render: (item: InventoryItem) => (
         <Button variant="ghost" size="sm" className="h-8 border border-border hover:bg-accent hover:text-accent-foreground" onClick={() => handleOpenUpdate(item)}>
-           <span className="text-xs">Cập nhật</span>
+           <span className="text-xs">Nhập kho</span>
         </Button>
       ),
     },
@@ -421,7 +402,7 @@ export default function InventoryPage() {
       <Dialog open={isUpdateOpen} onOpenChange={setIsUpdateOpen}>
           <DialogContent className="sm:max-w-md p-0 overflow-hidden border-none shadow-2xl rounded-2xl">
               <DialogHeader className="sr-only">
-                  <DialogTitle>Cập nhật tồn kho</DialogTitle>
+                  <DialogTitle>Nhập kho sản phẩm</DialogTitle>
               </DialogHeader>
 
               <div className="flex flex-col">
@@ -450,127 +431,51 @@ export default function InventoryPage() {
                   </div>
 
                   <div className="p-6 space-y-6">
-                      {/* Mode Toggle */}
-                      <div className="flex p-1 bg-muted rounded-xl border border-border/50">
-                          <button 
-                              className={cn(
-                                  "flex-1 py-2 text-xs font-bold rounded-lg transition-all",
-                                  updateMode === "add" ? "bg-background shadow-sm text-primary" : "text-muted-foreground hover:text-foreground"
-                              )}
-                              onClick={() => {
-                                  setUpdateMode("add");
-                                  setImportQuantity(0);
-                              }}
-                          >
-                              Nhập thêm (+)
-                          </button>
-                          <button 
-                              className={cn(
-                                  "flex-1 py-2 text-xs font-bold rounded-lg transition-all",
-                                  updateMode === "set" ? "bg-background shadow-sm text-primary" : "text-muted-foreground hover:text-foreground"
-                              )}
-                              onClick={() => {
-                                  setUpdateMode("set");
-                                  setImportQuantity(selectedItem?.stock || 0);
-                              }}
-                          >
-                              Điều chỉnh tổng (=)
-                          </button>
-                      </div>
-
-                      {/* Stock Comparison Cards */}
-                      <div className="grid grid-cols-2 gap-4">
-                          <div className="p-4 rounded-xl bg-muted/50 border border-border/50 text-center">
-                              <p className="text-xs font-semibold text-muted-foreground mb-1">Hiện tại</p>
-                              <p className="text-xl font-bold text-foreground">{selectedItem?.stock || 0}</p>
-                          </div>
-                          <div className="p-4 rounded-xl bg-primary/5 border border-primary/20 text-center relative overflow-hidden">
-                              <div className="absolute top-0 right-0 p-1 opacity-10">
-                                  {updateMode === "add" ? (
-                                      <Plus className="h-8 w-8" />
-                                  ) : (
-                                      <RefreshCw className="h-8 w-8" />
-                                  )}
-                              </div>
-                              <p className="text-xs font-semibold text-primary mb-1">
-                                  {updateMode === "add" ? "Dự kiến" : "Số lượng mới"}
-                              </p>
-                              <p className="text-xl font-bold text-primary">
-                                  {updateMode === "add" 
-                                      ? (selectedItem?.stock || 0) + importQuantity 
-                                      : importQuantity}
-                              </p>
-                          </div>
-                      </div>
-
                       {/* Input Section */}
-                      <div className="space-y-3">
-                          <Label className="text-sm font-semibold ml-1">
-                              {updateMode === "add" ? "Số lượng nhập thêm" : "Tổng số lượng thực tế trong kho"}
-                          </Label>
-                          <div className="relative group">
-                              <Button 
-                                  variant="ghost" 
-                                  size="icon" 
-                                  className="absolute left-1 top-1 h-10 w-10 rounded-lg hover:bg-primary/10 hover:text-primary transition-colors"
-                                  onClick={() => setImportQuantity(prev => Math.max(0, prev - 1))}
-                              >
-                                  <Minus className="h-4 w-4" />
-                              </Button>
-                              <Input 
-                                  type="number" 
-                                  min={0} 
-                                  value={importQuantity} 
-                                  onChange={(e) => setImportQuantity(Number(e.target.value))} 
-                                  className="h-12 text-center text-xl font-bold bg-muted/30 border-border/60 rounded-xl focus-visible:ring-primary focus-visible:border-primary px-12 transition-all group-hover:bg-muted/50"
-                              />
-                              <Button 
-                                  variant="ghost" 
-                                  size="icon" 
-                                  className="absolute right-1 top-1 h-10 w-10 rounded-lg hover:bg-primary/10 hover:text-primary transition-colors"
-                                  onClick={() => setImportQuantity(prev => prev + 1)}
-                              >
-                                  <Plus className="h-4 w-4" />
-                              </Button>
+                      <div className="space-y-4">
+                          <div className="space-y-2">
+                            <Label className="text-sm font-semibold ml-1">Số lượng nhập thêm</Label>
+                            <Input 
+                                type="number" 
+                                min={1} 
+                                value={importQuantity} 
+                                onChange={(e) => setImportQuantity(Number(e.target.value))} 
+                                className="h-12 bg-muted/30"
+                            />
+                          </div>
+                          
+                          <div className="space-y-2">
+                            <Label className="text-sm font-semibold ml-1">Đơn giá nhập (VND)</Label>
+                            <Input 
+                                type="number" 
+                                min={0} 
+                                value={unitCost} 
+                                onChange={(e) => setUnitCost(Number(e.target.value))} 
+                                className="h-12 bg-muted/30"
+                            />
                           </div>
 
-                          {/* Quick Select Buttons */}
-                          <div className="flex gap-2">
-                              {[5, 10, 50, 100].map(val => (
-                                  <Button 
-                                      key={val} 
-                                      variant="outline" 
-                                      size="sm" 
-                                      className="flex-1 text-[10px] font-bold rounded-lg border-dashed bg-background/50 border-border/40 hover:bg-primary/5 hover:border-primary/30 hover:text-primary transition-all"
-                                      onClick={() => setImportQuantity(prev => prev + val)}
-                                  >
-                                      +{val}
-                                  </Button>
-                              ))}
+                          <div className="space-y-2">
+                            <Label className="text-sm font-semibold ml-1">Ghi chú (Tùy chọn)</Label>
+                            <Input 
+                                type="text" 
+                                value={note} 
+                                placeholder="VD: Nhập hàng đợt 1 tháng 10..."
+                                onChange={(e) => setNote(e.target.value)} 
+                                className="h-10 bg-muted/30"
+                            />
                           </div>
                       </div>
 
-                      <div className="flex items-center justify-end gap-3 pt-2">
+                      <div className="flex items-center justify-end gap-3 pt-4">
                           <Button 
                               variant="outline" 
                               className="border-border/60"
                               onClick={() => setIsUpdateOpen(false)}
-                          >
-                              Hủy
-                          </Button>
-                          <Button 
-                              className="font-bold"
-                              onClick={handleUpdateStock} 
-                              disabled={updating}
-                          >
-                              {updating ? (
-                                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                              ) : (
-                                  <>
-                                      <Save className="w-4 h-4 mr-2" />
-                                      Cập nhật
-                                  </>
-                              )}
+                          >Hủy</Button>
+                          <Button className="font-bold" onClick={handleStockIn} disabled={updating}>
+                              {updating ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
+                              Xác nhận nhập kho
                           </Button>
                       </div>
                   </div>

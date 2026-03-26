@@ -27,71 +27,57 @@ export default function Dashboard() {
       try {
         setLoading(true);
         // 1. Fetch all essential data
-        // Chúng ta lấy 1000 đơn gần nhất để tính toán thống kê (giống trang Orders)
-        const [orderRes, productRes, userRes] = await Promise.all([
+        const [orderRes, productRes, userRes, revStatsYear] = await Promise.all([
           orderApi.getOrders({ limit: 1000 }),
-          productApi.getAdminProducts({ limit: 1000 }),
-          usersApi.getUsers({ limit: 1000 })
+          productApi.getAdminProducts({ limit: 1 }),
+          usersApi.getUsers({ limit: 1000 }),
+          orderApi.getRevenueStats({ groupBy: 'month', months: 12 })
         ]);
 
-        // Xử lý dữ liệu trả về linh hoạt (Hỗ trợ cả object {data, total} hoặc array trực tiếp)
         const allOrders = orderRes.data?.data || orderRes.data || [];
-        const allProducts = productRes.data?.data || productRes.data || [];
         const allUsers = userRes.data?.data || userRes.data || [];
-
         const currentYear = new Date().getFullYear();
 
-        // 2. Tính toán Doanh thu (Sync KHỚP 100% với Doanh thu tổng hợp bên trang Orders)
-        const revenue = allOrders
-          .filter((o: any) => o.paymentStatus === "paid" && o.status !== "cancelled")
-          .reduce((sum: number, o: any) => sum + (o.totalAmount || 0), 0);
-
-        // Biểu đồ doanh thu theo tháng
+        const revData = revStatsYear.data?.items || [];
+        const revSummary = revStatsYear.data?.summary || { totalNetRevenue: 0 };
+        
         const monthlyData: Record<string, { revenue: number, orders: number }> = {};
         for (let i = 1; i <= 12; i++) {
           monthlyData[`T${i}`] = { revenue: 0, orders: 0 };
         }
-
-        allOrders.forEach((order: any) => {
-          const date = new Date(order.createdAt);
-          if (date.getFullYear() === currentYear) {
-            const monthKey = `T${date.getMonth() + 1}`;
-            if (monthlyData[monthKey]) {
-              monthlyData[monthKey].orders += 1;
-              if (order.paymentStatus === "paid" && order.status !== "cancelled") {
-                monthlyData[monthKey].revenue += (order.totalAmount || 0);
-              }
-            }
-          }
+        
+        revData.forEach((item: any) => {
+           if (item.period && item.period.startsWith(String(currentYear))) {
+               const m = parseInt(item.period.split('-')[1], 10);
+               if (monthlyData[`T${m}`]) {
+                   monthlyData[`T${m}`].revenue = item.netRevenue || item.grossRevenue || 0;
+                   monthlyData[`T${m}`].orders = item.orderCount || 0;
+               }
+           }
         });
 
         setRevenueChartData(Object.entries(monthlyData).map(([name, stats]) => ({ name, ...stats })));
 
-        // 3. Phân bổ trạng thái Đơn hàng
         const statusCounts = {
-          completed: allOrders.filter((o: any) => o.status === "completed").length,
+          completed: allOrders.filter((o: any) => o.status === "completed" || o.status === "delivered").length,
           shipping: allOrders.filter((o: any) => o.status === "shipping").length,
-          paid: allOrders.filter((o: any) => o.status === "paid").length,
+          confirmed: allOrders.filter((o: any) => o.status === "confirmed").length,
           cancelled: allOrders.filter((o: any) => o.status === "cancelled").length,
         };
 
         setOrderStatusData([
           { name: "Hoàn thành", value: statusCounts.completed, color: "hsl(var(--success))" },
           { name: "Đang giao", value: statusCounts.shipping, color: "hsl(var(--info))" },
-          { name: "Đã xác nhận", value: statusCounts.paid, color: "hsl(var(--primary))" },
+          { name: "Đã xác nhận", value: statusCounts.confirmed, color: "hsl(var(--primary))" },
           { name: "Đã hủy", value: statusCounts.cancelled, color: "hsl(var(--destructive))" },
         ]);
 
-        // 4. Cập nhật các thẻ chỉ số (Cards)
-        // Khách hàng: Tổng người dùng trừ Admin
         const customerCount = allUsers.filter((u: any) => u.role !== "admin").length;
-        // Nếu số lượng user > 1000, ta nên dùng total từ BE nếu BE hỗ trợ lọc role. 
-        // Hiện tại ta dùng filter trên tập data 1000 user gần nhất.
 
         setStats({
-          totalRevenue: revenue,
+          totalRevenue: revSummary.totalNetRevenue,
           totalOrders: orderRes.data?.total || allOrders.length,
-          totalProducts: productRes.data?.total || allProducts.length,
+          totalProducts: productRes.data?.total || 0,
           totalCustomers: customerCount,
           successfulOrders: statusCounts.completed,
         });

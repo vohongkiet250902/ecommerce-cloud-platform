@@ -32,7 +32,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardFooter } from "@/componen
 import { useCart } from "@/hooks/useCart";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
-import { orderApi, paymentApi, cartApi, usersApi } from "@/services/api";
+import { orderApi, paymentApi, cartApi, usersApi, ghnApi } from "@/services/api";
 import { 
   Dialog, 
   DialogContent, 
@@ -93,6 +93,7 @@ function CheckoutContent() {
   
   const [selectedProvinceCode, setSelectedProvinceCode] = useState<string>("");
   const [selectedDistrictCode, setSelectedDistrictCode] = useState<string>("");
+  const [selectedWardCode, setSelectedWardCode] = useState<string>("");
   
   // Coupon state
   const [couponCode, setCouponCode] = useState("");
@@ -117,6 +118,7 @@ function CheckoutContent() {
   const [modalWards, setModalWards] = useState<{ code: number; name: string }[]>([]);
   const [modalSelectedProvinceCode, setModalSelectedProvinceCode] = useState<string>("");
   const [modalSelectedDistrictCode, setModalSelectedDistrictCode] = useState<string>("");
+  const [modalSelectedWardCode, setModalSelectedWardCode] = useState<string>("");
 
   // Add Address State (from AccountPage logic)
   const [isAddingNewAddress, setIsAddingNewAddress] = useState(false);
@@ -143,6 +145,7 @@ function CheckoutContent() {
     });
     setModalSelectedProvinceCode("");
     setModalSelectedDistrictCode("");
+    setModalSelectedWardCode("");
     setModalDistricts([]);
     setModalWards([]);
   };
@@ -158,10 +161,11 @@ function CheckoutContent() {
         ward: ""
       }));
       setModalSelectedDistrictCode("");
+      setModalSelectedWardCode("");
       setModalWards([]);
       try {
-        const res = await axios.get(`https://provinces.open-api.vn/api/p/${code}?depth=2`);
-        setModalDistricts(res.data.districts);
+        const res = await ghnApi.getDistricts(code);
+        setModalDistricts(res.data.map((d: any) => ({ code: d.DistrictID, name: d.DistrictName })));
       } catch (err) {}
     }
   };
@@ -176,9 +180,18 @@ function CheckoutContent() {
         ward: ""
       }));
       try {
-        const res = await axios.get(`https://provinces.open-api.vn/api/d/${code}?depth=2`);
-        setModalWards(res.data.wards);
+        const res = await ghnApi.getWards(code);
+        setModalWards(res.data.map((w: any) => ({ code: w.WardCode, name: w.WardName })));
       } catch (err) {}
+      setModalSelectedWardCode("");
+    }
+  };
+
+  const onNewAddressWardChange = (code: string) => {
+    const ward = modalWards.find(w => w.code.toString() === code);
+    if (ward) {
+      setModalSelectedWardCode(code);
+      setAddressForm(prev => ({ ...prev, ward: ward.name }));
     }
   };
 
@@ -200,6 +213,7 @@ function CheckoutContent() {
       // Sync codes back to main form so selects show correctly
       setSelectedProvinceCode(modalSelectedProvinceCode);
       setSelectedDistrictCode(modalSelectedDistrictCode);
+      setSelectedWardCode(modalSelectedWardCode);
       setDistricts(modalDistricts);
       setWards(modalWards);
       
@@ -227,7 +241,7 @@ function CheckoutContent() {
       toast({
         variant: "destructive",
         title: "Lỗi",
-        description: error.response?.data?.message || "Thao tác thất bại."
+        description: getErrorMessage(error, "Thao tác thất bại.")
       });
     } finally {
       setIsSubmittingNewAddress(false);
@@ -238,8 +252,8 @@ function CheckoutContent() {
   useEffect(() => {
     const fetchProvinces = async () => {
       try {
-        const res = await axios.get("https://provinces.open-api.vn/api/p/");
-        setProvinces(res.data);
+        const res = await ghnApi.getProvinces();
+        setProvinces(res.data.map((p: any) => ({ code: p.ProvinceID, name: p.ProvinceName })));
       } catch (err) {
         console.error("Failed to fetch provinces", err);
       }
@@ -255,8 +269,8 @@ function CheckoutContent() {
     }
     const fetchDistricts = async () => {
       try {
-        const res = await axios.get(`https://provinces.open-api.vn/api/p/${selectedProvinceCode}?depth=2`);
-        setDistricts(res.data.districts);
+        const res = await ghnApi.getDistricts(selectedProvinceCode);
+        setDistricts(res.data.map((d: any) => ({ code: d.DistrictID, name: d.DistrictName })));
       } catch (err) {
         console.error("Failed to fetch districts", err);
       }
@@ -272,8 +286,8 @@ function CheckoutContent() {
     }
     const fetchWards = async () => {
       try {
-        const res = await axios.get(`https://provinces.open-api.vn/api/d/${selectedDistrictCode}?depth=2`);
-        setWards(res.data.wards);
+        const res = await ghnApi.getWards(selectedDistrictCode);
+        setWards(res.data.map((w: any) => ({ code: w.WardCode, name: w.WardName })));
       } catch (err) {
         console.error("Failed to fetch wards", err);
       }
@@ -292,6 +306,7 @@ function CheckoutContent() {
         ward: ""
       }));
       setSelectedDistrictCode(""); 
+      setSelectedWardCode("");
     }
   };
 
@@ -304,12 +319,14 @@ function CheckoutContent() {
         district: district.name,
         ward: ""
       }));
+      setSelectedWardCode("");
     }
   };
 
   const onWardChange = (code: string) => {
     const ward = wards.find(w => w.code.toString() === code);
     if (ward) {
+      setSelectedWardCode(code);
       setFormData(prev => ({
         ...prev,
         ward: ward.name
@@ -368,6 +385,11 @@ function CheckoutContent() {
     }
   }, [user, provinces, isFirstLoad]);
 
+  const normalizeAddressName = (name: string) => {
+    if (!name) return "";
+    return name.toLowerCase().replace(/^(tỉnh|thành phố|tp\.|tp|quận|huyện|thị xã|phường|xã|thị trấn|q\.|h\.|p\.|tx\.)\s*/gi, "").trim();
+  }
+
   // Handle address selection from book
   const selectAddressFromBook = async (address: any) => {
     setFormData(prev => ({
@@ -382,22 +404,30 @@ function CheckoutContent() {
 
     // Find codes for the selects
     if (provinces.length > 0) {
-      const p = provinces.find(p => p.name.trim().toLowerCase() === address.city.trim().toLowerCase());
+      const p = provinces.find(p => normalizeAddressName(p.name).includes(normalizeAddressName(address.city)) || normalizeAddressName(address.city).includes(normalizeAddressName(p.name)));
       if (p) {
         setSelectedProvinceCode(p.code.toString());
         
         // Fetch districts immediately to find the district code
         try {
-          const res = await axios.get(`https://provinces.open-api.vn/api/p/${p.code}?depth=2`);
-          const districtsData = res.data.districts;
+          const res = await ghnApi.getDistricts(p.code);
+          const districtsData = res.data.map((d: any) => ({ code: d.DistrictID, name: d.DistrictName }));
           setDistricts(districtsData);
-          const d = districtsData.find((dist: any) => dist.name.trim().toLowerCase() === address.district.trim().toLowerCase());
+          const d = districtsData.find((dist: any) => normalizeAddressName(dist.name).includes(normalizeAddressName(address.district)) || normalizeAddressName(address.district).includes(normalizeAddressName(dist.name)));
           if (d) {
             setSelectedDistrictCode(d.code.toString());
             
             // Also fetch wards immediately to ensure the ward select can find the code
-            const wardRes = await axios.get(`https://provinces.open-api.vn/api/d/${d.code}?depth=2`);
-            setWards(wardRes.data.wards);
+            const wardRes = await ghnApi.getWards(d.code);
+            const wardsData = wardRes.data.map((w: any) => ({ code: w.WardCode, name: w.WardName }));
+            setWards(wardsData);
+            
+            const w = wardsData.find((ward: any) => normalizeAddressName(ward.name) === normalizeAddressName(address.ward));
+            if (w) {
+              setSelectedWardCode(w.code.toString());
+            } else {
+              setSelectedWardCode("");
+            }
           }
         } catch (err) {
           console.error("Failed to fetch districts/wards in selectAddressFromBook", err);
@@ -484,7 +514,9 @@ function CheckoutContent() {
       city: formData.city,
       district: formData.district,
       ward: formData.ward,
-      street: formData.street
+      street: formData.street,
+      ghnDistrictId: selectedDistrictCode ? Number(selectedDistrictCode) : undefined,
+      ghnWardCode: selectedWardCode ? selectedWardCode : undefined
     };
 
     try {
@@ -492,36 +524,31 @@ function CheckoutContent() {
       
       let orderId = "";
 
-      if (isBuyNow) {
-        // Mapping items for Buy Now
-        const items = checkoutItems.map(item => {
-          const productId = (item.productId || item.id || "").toString();
-          const sku = item.sku && item.sku !== "N/A" ? item.sku : "";
-          return {
-            productId,
-            sku: sku || "DEFAULT",
-            quantity: item.quantity || 1
-          };
-        });
-
-        const orderData = {
-          items,
-          shippingInfo,
-          paymentMethod: formData.paymentMethod === "VNPAYQR" ? "vnpay" : "cod",
-          couponCode: appliedCouponCode || undefined,
-          idempotencyKey: `ord_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`
+      // Mapping checkout items uniformly
+      const items = checkoutItems.map(item => {
+        const productId = (item.productId || item.id || "").toString();
+        const sku = item.sku && item.sku !== "N/A" ? item.sku : "";
+        return {
+          productId,
+          sku: sku || "DEFAULT",
+          quantity: item.quantity || 1
         };
+      });
 
-        const orderResponse = await orderApi.createOrder(orderData);
-        orderId = orderResponse.data?._id || orderResponse.data?.id || orderResponse.data?.data?._id || orderResponse.data?.data?.id;
-      } else {
-        // standard cart checkout
-        const checkoutResponse = await cartApi.checkout({
-          shippingInfo,
-          paymentMethod: formData.paymentMethod === "VNPAYQR" ? "vnpay" : "cod",
-          idempotencyKey: `ord_cart_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`
-        });
-        orderId = checkoutResponse.data?._id || checkoutResponse.data?.id || checkoutResponse.data?.data?._id || checkoutResponse.data?.data?.id;
+      const orderData = {
+        items,
+        shippingInfo,
+        paymentMethod: formData.paymentMethod === "VNPAYQR" ? "vnpay" : "cod",
+        couponCode: appliedCouponCode || undefined,
+        idempotencyKey: isBuyNow ? `ord_${Date.now()}_${Math.random().toString(36).substring(2, 11)}` : `ord_cart_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`
+      };
+
+      // Ensure we use orderApi for ALL checkouts since cartApi.checkout DTO rejects GHN fields
+      const orderResponse = await orderApi.createOrder(orderData);
+      orderId = orderResponse.data?._id || orderResponse.data?.id || orderResponse.data?.data?._id || orderResponse.data?.data?.id;
+      
+      if (!isBuyNow) {
+        try { await cartApi.clearCart(); } catch (err) {}
       }
 
       if (!orderId) {
@@ -550,7 +577,7 @@ function CheckoutContent() {
           console.error("VNPay error:", error);
           toast({
             title: "Lỗi thanh toán",
-            description: error.response?.data?.message || "Không thể khởi tạo thanh toán VNPay.",
+            description: getErrorMessage(error, "Không thể khởi tạo thanh toán VNPay."),
             variant: "destructive"
           });
           router.push("/orders");
@@ -582,12 +609,21 @@ function CheckoutContent() {
   };
 
   const getErrorMessage = (error: any, defaultMsg: string) => {
-    const msg = error?.response?.data?.message || error?.response?.data || error?.message;
+    if (!error) return defaultMsg;
+    const data = error.response?.data;
+    if (!data) return error.message || defaultMsg;
+    let msg = data.message || data;
+    
     if (typeof msg === 'string') return msg;
-    if (Array.isArray(msg)) return msg.join(', ');
+    if (Array.isArray(msg)) {
+      return msg.map(m => typeof m === 'object' ? JSON.stringify(m) : m).join(', ');
+    }
     if (typeof msg === 'object') {
-       if (msg.message) return typeof msg.message === 'string' ? msg.message : JSON.stringify(msg.message);
-       return JSON.stringify(msg);
+      if (msg.message) {
+        if (typeof msg.message === 'string') return msg.message;
+        if (Array.isArray(msg.message)) return msg.message.join(', ');
+      }
+      try { return JSON.stringify(msg); } catch(e) { return defaultMsg; }
     }
     return defaultMsg;
   };
@@ -757,7 +793,7 @@ function CheckoutContent() {
                         <Label className="text-sm font-bold">Phường / Xã</Label>
                         <Select 
                           onValueChange={onWardChange} 
-                          value={wards.find(w => w.name === formData.ward)?.code.toString() || ""}
+                          value={selectedWardCode}
                           disabled={!selectedDistrictCode}
                         >
                           <SelectTrigger className="rounded-xl h-11 bg-background">
@@ -1200,11 +1236,8 @@ function CheckoutContent() {
               <div className="space-y-2 col-span-1">
                 <Label className="text-xs font-bold">Phường / Xã</Label>
                 <Select 
-                  value={modalWards.find(w => w.name === addressForm.ward)?.code.toString() || ""} 
-                  onValueChange={(val) => {
-                    const ward = modalWards.find(w => w.code.toString() === val);
-                    if (ward) setAddressForm({...addressForm, ward: ward.name});
-                  }}
+                  value={modalSelectedWardCode} 
+                  onValueChange={onNewAddressWardChange}
                   disabled={!modalSelectedDistrictCode}
                 >
                   <SelectTrigger className="h-11 rounded-xl">

@@ -51,12 +51,23 @@ const ADMIN_ALLOWED_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
   cancelled: [],
 };
 
+const USER_ALLOWED_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
+  pending: ['cancelled'],
+  confirmed: ['cancelled'],
+  shipping: ['completed'],
+  delivered: ['completed', 'delivery_failed', 'returned'],
+  completed: ['returned'],
+  delivery_failed: [],
+  returned: [],
+  cancelled: [],
+};
+
 type StatusUpdatePayload = {
   status: OrderStatus;
 };
 
 /** Nguồn gọi chuyển trạng thái — để enforce đúng transition map */
-type TransitionSource = 'ghn' | 'admin' | 'system';
+type TransitionSource = 'ghn' | 'admin' | 'system' | 'user';
 
 type StatsGroupBy = 'day' | 'week' | 'month';
 
@@ -122,10 +133,14 @@ export class OrdersService {
   private assertTransition(
     current: OrderStatus,
     next: OrderStatus,
-    source: TransitionSource = 'ghn',
+    source: TransitionSource | 'user' = 'ghn',
   ) {
     const map =
-      source === 'admin' ? ADMIN_ALLOWED_TRANSITIONS : GHN_TRANSITIONS;
+      source === 'admin'
+        ? ADMIN_ALLOWED_TRANSITIONS
+        : source === 'user'
+          ? USER_ALLOWED_TRANSITIONS
+          : GHN_TRANSITIONS;
     if (!map[current]?.includes(next)) {
       const hint =
         source === 'admin'
@@ -367,7 +382,8 @@ export class OrdersService {
         lineTotal,
         unitCostSnapshot: averageUnitCost,
         lotAllocations: allocationResult.allocations,
-        imageUrl: (product as any).images?.[0]?.url,
+        imageUrl: variant.image?.url || (product as any).images?.[0]?.url,
+        attributes: variant.attributes || variant.val,
       });
 
       subTotal += lineTotal;
@@ -458,7 +474,7 @@ export class OrdersService {
   private async performStatusUpdate(
     orderId: string,
     updateData: StatusUpdatePayload,
-    source: TransitionSource,
+    source: TransitionSource | 'user',
     session?: any,
   ) {
     const query = this.orderModel.findById(orderId);
@@ -598,6 +614,46 @@ export class OrdersService {
     }
 
     return currentOrder;
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  //  User operations
+  // ─────────────────────────────────────────────────────────────
+
+  async userCancelOrder(orderId: string, userId: string) {
+    const order = await this.orderModel.findOne({
+      _id: orderId,
+      userId: new Types.ObjectId(userId),
+    });
+    if (!order) throw new NotFoundException('Không tìm thấy đơn hàng');
+    return this.updateStatus(orderId, { status: 'cancelled' }, 'user');
+  }
+
+  async confirmReceived(orderId: string, userId: string) {
+    const order = await this.orderModel.findOne({
+      _id: orderId,
+      userId: new Types.ObjectId(userId),
+    });
+    if (!order) throw new NotFoundException('Không tìm thấy đơn hàng');
+    return this.updateStatus(orderId, { status: 'completed' }, 'user');
+  }
+
+  async reportNotReceived(orderId: string, userId: string) {
+    const order = await this.orderModel.findOne({
+      _id: orderId,
+      userId: new Types.ObjectId(userId),
+    });
+    if (!order) throw new NotFoundException('Không tìm thấy đơn hàng');
+    return this.updateStatus(orderId, { status: 'delivery_failed' }, 'user');
+  }
+
+  async returnOrder(orderId: string, userId: string) {
+    const order = await this.orderModel.findOne({
+      _id: orderId,
+      userId: new Types.ObjectId(userId),
+    });
+    if (!order) throw new NotFoundException('Không tìm thấy đơn hàng');
+    return this.updateStatus(orderId, { status: 'returned' }, 'user');
   }
 
   // ─────────────────────────────────────────────────────────────
@@ -757,8 +813,8 @@ export class OrdersService {
     const order = await this.orderModel.findById(orderId);
     if (!order) throw new NotFoundException('Không tìm thấy đơn hàng');
 
-    if (order.paymentMethod !== 'cod') {
-      throw new BadRequestException('Hiện tại chỉ auto GHN cho COD');
+    if (order.paymentMethod !== 'cod' && order.paymentStatus !== 'paid') {
+      throw new BadRequestException('Hiện tại chỉ auto GHN cho COD hoặc đơn đã thanh toán');
     }
     if (['cancelled', 'completed', 'returned'].includes(order.status)) {
       throw new BadRequestException('Đơn hàng đã kết thúc');
@@ -798,7 +854,7 @@ export class OrdersService {
       width: parcel.width,
       weight: parcel.weight,
       insurance_value: Math.min(Number(order.totalAmount || 0), 5000000),
-      cod_amount: Math.round(Number(order.totalAmount || 0)),
+      cod_amount: order.paymentMethod === 'cod' ? Math.round(Number(order.totalAmount || 0)) : 0,
       items: (order.items || []).map((item: any) => ({
         name: item.name,
         code: item.sku,
@@ -839,7 +895,7 @@ export class OrdersService {
       to_ward_code: order.shippingInfo.ghnWardCode,
       to_district_id: order.shippingInfo.ghnDistrictId,
 
-      cod_amount: Math.round(Number(order.totalAmount || 0)),
+      cod_amount: order.paymentMethod === 'cod' ? Math.round(Number(order.totalAmount || 0)) : 0,
       content: (order.items || [])
         .map((item: any) => item.name)
         .join(', ')
@@ -885,7 +941,7 @@ export class OrdersService {
         feeData?.main_service ??
         0,
     );
-    shipping.codAmount = Math.round(Number(order.totalAmount || 0));
+    shipping.codAmount = order.paymentMethod === 'cod' ? Math.round(Number(order.totalAmount || 0)) : 0;
     shipping.expectedDeliveryTime = createRes?.expected_delivery_time
       ? new Date(createRes.expected_delivery_time)
       : undefined;
@@ -921,6 +977,32 @@ export class OrdersService {
       return this.ghnService.getOrderDetail(order.shipping.providerOrderCode);
     }
     return this.ghnService.getOrderDetailByClientCode(String(order._id));
+  }
+
+  async syncAllActiveGhnShipments() {
+    // Find orders with GHN order code and not in a final state
+    const orders = await this.orderModel.find({
+      'shipping.providerOrderCode': { $exists: true, $ne: '' },
+      status: { $in: ['confirmed', 'shipping', 'delivered'] },
+    });
+
+    const results = {
+      total: orders.length,
+      success: 0,
+      failed: 0,
+    };
+
+    // Sequential execution to respect GHN API limits
+    for (const order of orders) {
+      try {
+        await this.syncGhnShipment(String(order._id));
+        results.success++;
+      } catch (error: any) {
+        results.failed++;
+      }
+    }
+
+    return results;
   }
 
   async syncGhnShipment(orderId: string) {
@@ -1089,10 +1171,8 @@ export class OrdersService {
     const paymentMethod: PaymentMethod = dto.paymentMethod || 'cod';
     const normalizedIdempotencyKey = dto.idempotencyKey?.trim();
 
-    const shouldAutoCreateGhn =
-      paymentMethod === 'cod' &&
-      process.env.GHN_ENABLE_AUTO_CREATE !== 'false' &&
-      this.ghnService.hasConfig();
+    // Disable auto-create GHN shipment for COD as per user request to wait for admin confirmation
+    const shouldAutoCreateGhn = false;
 
     if (
       shouldAutoCreateGhn &&
@@ -1142,9 +1222,10 @@ export class OrdersService {
         throw new BadRequestException('Không thể tạo đơn hàng');
       }
 
-      if (paymentMethod === 'cod') {
-        await this.tryAutoCreateGhnShipment(String((createdOrder as any)._id));
-      }
+      // Auto-create GHN shipment removed to wait for admin manual confirmation & shipment creation
+      // if (paymentMethod === 'cod') {
+      //   await this.tryAutoCreateGhnShipment(String((createdOrder as any)._id));
+      // }
 
       const fresh = await this.orderModel.findById((createdOrder as any)._id);
       return fresh || createdOrder;
@@ -1297,15 +1378,6 @@ export class OrdersService {
       order.paymentStatus = 'paid';
       order.paidAt = new Date();
       await order.save();
-    }
-
-    if (order.status === 'pending') {
-      const updated = await this.updateStatus(
-        orderId,
-        { status: 'confirmed' },
-        'system',
-      );
-      return updated || this.orderModel.findById(orderId);
     }
 
     return this.orderModel.findById(orderId);

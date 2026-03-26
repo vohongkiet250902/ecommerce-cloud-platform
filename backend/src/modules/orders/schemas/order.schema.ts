@@ -67,6 +67,9 @@ export class OrderItem {
 
   @Prop()
   imageUrl?: string;
+
+  @Prop({ type: MongooseSchema.Types.Mixed })
+  attributes?: any;
 }
 const OrderItemSchema = SchemaFactory.createForClass(OrderItem);
 

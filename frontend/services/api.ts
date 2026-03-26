@@ -191,7 +191,7 @@ export const orderApi = {
     apiClient.get('/orders/me', { params }),
   createOrder: (data: { 
     items: { productId: string; sku: string; quantity: number }[]; 
-    shippingInfo: { receiverName: string; phone: string; street: string; ward: string; district: string; city: string; };
+    shippingInfo: { receiverName: string; phone: string; street: string; ward: string; district: string; city: string; ghnDistrictId?: number; ghnWardCode?: string; };
     paymentMethod?: string; 
     idempotencyKey?: string;
     couponCode?: string;
@@ -204,7 +204,39 @@ export const orderApi = {
     apiClient.patch(`/admin/orders/${id}/status`, data),
   cancelOrder: (id: string) => apiClient.post(`/admin/orders/${id}/cancel`),
   cancelMyOrder: (id: string) => apiClient.patch(`/orders/${id}/cancel`),
+  confirmReceived: (id: string) => apiClient.patch(`/orders/${id}/confirm-received`),
+  reportNotReceived: (id: string) => apiClient.patch(`/orders/${id}/report-not-received`),
+  returnOrder: (id: string) => apiClient.patch(`/orders/${id}/return`),
   retryPayment: (id: string) => apiClient.post(`/orders/${id}/retry-payment`),
+
+  // NEW ADMIN ACTIONS
+  adminConfirmOrder: (id: string) => apiClient.post(`/admin/orders/${id}/confirm`),
+  adminCompleteOrder: (id: string) => apiClient.post(`/admin/orders/${id}/complete`),
+  adminCancelOrder: (id: string) => apiClient.post(`/admin/orders/${id}/cancel`),
+  createGhnShipment: (id: string) => apiClient.post(`/admin/orders/${id}/shipping/ghn/create`),
+  syncGhnShipment: (id: string) => apiClient.post(`/admin/orders/${id}/shipping/ghn/sync`),
+  syncAllGhnShipments: () => apiClient.post('/admin/orders/shipping/ghn/sync-all'),
+  getGhnDetail: (id: string) => apiClient.get(`/admin/orders/${id}/shipping/ghn/detail`),
+  simulateGhnStatus: (id: string, data: { status: string; type?: string }) => apiClient.post(`/admin/orders/${id}/shipping/ghn/simulate-status`, data),
+  
+  // STATS
+  getRevenueStats: (params?: any) => apiClient.get('/admin/orders/stats/revenue', { params }),
+  getProfitStats: (params?: any) => apiClient.get('/admin/orders/stats/profit', { params }),
+  getTopSkus: (params?: any) => apiClient.get('/admin/orders/stats/top-skus', { params }),
+  getTopProducts: (params?: any) => apiClient.get('/admin/orders/stats/top-products', { params }),
+};
+
+export const ghnApi = {
+  getProvinces: () => apiClient.get('/shipping/ghn/provinces'),
+  getDistricts: (provinceId: string | number) => apiClient.get('/shipping/ghn/districts', { params: { provinceId } }),
+  getWards: (districtId: string | number) => apiClient.get('/shipping/ghn/wards', { params: { districtId } }),
+  getServices: (toDistrictId: string | number) => apiClient.get('/shipping/ghn/services', { params: { toDistrictId } })
+};
+
+export const inventoryApi = {
+  stockIn: (data: any) => apiClient.post('/admin/inventory/receipts', data),
+  getLots: (params?: any) => apiClient.get('/admin/inventory/lots', { params }),
+  getStockInStats: (params?: any) => apiClient.get('/admin/inventory/stats/stock-in', { params })
 };
 
 export const cartApi = {

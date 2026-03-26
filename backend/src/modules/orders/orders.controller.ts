@@ -38,7 +38,22 @@ export class OrdersController {
 
   @Patch(':id/cancel')
   cancel(@Param('id') id: string, @Req() req) {
-    return this.ordersService.cancelOrder(id, req.user.id);
+    return this.ordersService.userCancelOrder(id, req.user.id);
+  }
+
+  @Patch(':id/confirm-received')
+  confirmReceived(@Param('id') id: string, @Req() req) {
+    return this.ordersService.confirmReceived(id, req.user.id);
+  }
+
+  @Patch(':id/report-not-received')
+  reportNotReceived(@Param('id') id: string, @Req() req) {
+    return this.ordersService.reportNotReceived(id, req.user.id);
+  }
+
+  @Patch(':id/return')
+  returnOrder(@Param('id') id: string, @Req() req) {
+    return this.ordersService.returnOrder(id, req.user.id);
   }
 
   @Get('me')

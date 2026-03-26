@@ -66,7 +66,16 @@ import {
   PaginationPrevious,
 } from "@/components/ui/pagination";
 
-type OrderStatus = 'pending' | 'paid' | 'shipping' | 'completed' | 'cancelled' | 'failed';
+export type OrderStatus =
+  | 'pending'
+  | 'paid'
+  | 'confirmed'
+  | 'shipping'
+  | 'delivered'
+  | 'completed'
+  | 'delivery_failed'
+  | 'returned'
+  | 'cancelled';
 
 export default function MyOrdersPage() {
   const [orders, setOrders] = useState<any[]>([]);
@@ -100,6 +109,23 @@ export default function MyOrdersPage() {
     return "";
   };
 
+  const renderAttributes = (item: any) => {
+    if (item.attributes) {
+      if (Array.isArray(item.attributes)) {
+        return item.attributes
+          .map((attr: any) => `${attr.key || attr.name}: ${attr.value || attr.val}`)
+          .join(" - ");
+      }
+      if (typeof item.attributes === 'object' && item.attributes !== null) {
+        return Object.entries(item.attributes)
+          .map(([key, value]) => `${key}: ${value}`)
+          .join(" - ");
+      }
+      return String(item.attributes);
+    }
+    return formatSkuValuesOnly(item.sku);
+  };
+
   // Helper to get variant display info from item (using data provided by BE)
   const getVariantDisplay = (item: any) => {
     return item.sku && item.sku !== 'DEFAULT' ? `SKU: ${item.sku}` : "";
@@ -116,8 +142,13 @@ export default function MyOrdersPage() {
   const [isSubmittingReview, setIsSubmittingReview] = useState(false);
   const [reviewedItems, setReviewedItems] = useState<Record<string, number>>({});
   const [isCancelModalOpen, setIsCancelModalOpen] = useState(false);
+  const [isConfirmReceivedModalOpen, setIsConfirmReceivedModalOpen] = useState(false);
+  const [isNotReceivedModalOpen, setIsNotReceivedModalOpen] = useState(false);
+  const [isReturnModalOpen, setIsReturnModalOpen] = useState(false);
   const [orderToCancel, setOrderToCancel] = useState<string | null>(null);
+  const [orderToProcess, setOrderToProcess] = useState<string | null>(null);
   const [isCancelling, setIsCancelling] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
   const { user, isAuthenticated, loading: authLoading } = useAuth();
   const router = useRouter();
   const { toast } = useToast();
@@ -141,20 +172,41 @@ export default function MyOrdersPage() {
   const fetchOrders = async () => {
     try {
       setLoading(true);
+      // Support multiple statuses in filter (comma separated)
+      const statuses = statusFilter ? statusFilter.split(",") : [];
+      const primaryStatus = statuses.length === 1 ? statuses[0] : undefined;
+
       const res = await orderApi.getUserOrders({
         page: currentPage,
         limit: 5,
-        status: statusFilter || undefined
+        status: primaryStatus
       });
       
       const responseData = res.data?.data || res.data;
-      const fetchedOrders = Array.isArray(responseData) ? responseData : responseData.data || [];
+      let fetchedOrders = Array.isArray(responseData) ? responseData : responseData.data || [];
       
+      const limit = 5;
+
+      // Handle multi-status filtering (like pending,paid,confirmed)
+      if (statuses.length > 1) {
+        // Fetch a larger sample (up to 100) and filter on client side for better UX
+        const allRes = await orderApi.getUserOrders({ page: 1, limit: 100 });
+        const allData = allRes.data?.data || allRes.data?.data || allRes.data || [];
+        const filteredAll = allData.filter((o: any) => statuses.includes(o.status));
+        
+        // Update total pages based on filtered count
+        setTotalPages(Math.ceil(filteredAll.length / limit) || 1);
+        
+        // Only take the slice for the current page
+        const start = (currentPage - 1) * limit;
+        fetchedOrders = filteredAll.slice(start, start + limit);
+      } else {
+        // Normal backend pagination
+        const total = res.data?.total || responseData.total || 0;
+        setTotalPages(Math.ceil(total / limit) || 1);
+      }
+
       setOrders(fetchedOrders);
-      
-      const total = res.data?.total || responseData.total || 0;
-      const limit = res.data?.limit || responseData.limit || 5;
-      setTotalPages(Math.ceil(total / limit) || 1);
 
       // Enrichment logic removed as per user request to only show BE data
     } catch (error) {
@@ -193,7 +245,9 @@ export default function MyOrdersPage() {
     if (!orderToCancel) return;
     try {
       setIsCancelling(true);
-      await orderApi.cancelMyOrder(orderToCancel);
+      const res = await orderApi.cancelMyOrder(orderToCancel);
+      const updatedOrder = res.data?.data || res.data;
+      
       toast({
         variant: "success",
         title: "Thành công",
@@ -201,6 +255,12 @@ export default function MyOrdersPage() {
       });
       setIsCancelModalOpen(false);
       setOrderToCancel(null);
+      
+      // Update detail view if it's open
+      if (selectedOrderDetail && selectedOrderDetail._id === orderToCancel) {
+        setSelectedOrderDetail(updatedOrder);
+      }
+      
       fetchOrders();
     } catch (error: any) {
       toast({
@@ -217,13 +277,16 @@ export default function MyOrdersPage() {
     handleCancelOrderPrompt(orderId);
   };
 
-  const statusMap: Record<OrderStatus, { label: string, color: string, icon: any }> = {
+  const statusMap: Record<string, { label: string, color: string, icon: any }> = {
     pending: { label: "Chờ xử lý", color: "bg-warning/10 text-warning border-warning/20", icon: Clock },
-    paid: { label: "Đã thanh toán", color: "bg-success/10 text-success border-success/20", icon: CheckCircle2 },
+    confirmed: { label: "Đã xác nhận", color: "bg-success/10 text-success border-success/20", icon: CheckCircle2 },
     shipping: { label: "Đang giao", color: "bg-primary/10 text-primary border-primary/20", icon: Truck },
+    delivered: { label: "Đã giao hàng", color: "bg-success/10 text-success border-success/20", icon: CheckCircle2 },
     completed: { label: "Hoàn tất", color: "bg-success text-success-foreground", icon: CheckCircle2 },
     cancelled: { label: "Đã hủy", color: "bg-destructive/10 text-destructive border-destructive/20", icon: XCircle },
     failed: { label: "Thanh toán lỗi", color: "bg-destructive/10 text-destructive border-destructive/20", icon: AlertCircle },
+    delivery_failed: { label: "Giao thất bại", color: "bg-destructive/10 text-destructive border-destructive/20", icon: AlertCircle },
+    returned: { label: "Trả hàng", color: "bg-destructive/10 text-destructive border-destructive/20", icon: History },
   };
 
   const handleRetryPayment = async (orderId: string) => {
@@ -288,6 +351,117 @@ export default function MyOrdersPage() {
     }
   };
 
+  const handleConfirmReceived = async (orderId: string) => {
+    setOrderToProcess(orderId);
+    setIsConfirmReceivedModalOpen(true);
+  };
+
+  const handleConfirmReceivedAction = async () => {
+    if (!orderToProcess) return;
+    try {
+      setIsProcessing(true);
+      const res = await orderApi.confirmReceived(orderToProcess);
+      const updatedOrder = res.data?.data || res.data;
+      
+      toast({
+        variant: "success",
+        title: "Thành công",
+        description: "Xác nhận đã nhận hàng thành công!"
+      });
+      setIsConfirmReceivedModalOpen(false);
+      setOrderToProcess(null);
+      
+      // Update detail view if it's open
+      if (selectedOrderDetail && selectedOrderDetail._id === orderToProcess) {
+        setSelectedOrderDetail(updatedOrder);
+      }
+      
+      fetchOrders();
+    } catch (error: any) {
+      toast({
+        variant: "destructive",
+        title: "Lỗi",
+        description: getErrorMessage(error, "Không thể xác nhận nhận hàng")
+      });
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleReportNotReceived = async (orderId: string) => {
+    setOrderToProcess(orderId);
+    setIsNotReceivedModalOpen(true);
+  };
+
+  const handleReportNotReceivedAction = async () => {
+    if (!orderToProcess) return;
+    try {
+      setIsProcessing(true);
+      const res = await orderApi.reportNotReceived(orderToProcess);
+      const updatedOrder = res.data?.data || res.data;
+
+      toast({
+        variant: "success",
+        title: "Đã ghi nhận",
+        description: "Chúng tôi đã ghi nhận báo cáo của bạn."
+      });
+      setIsNotReceivedModalOpen(false);
+      setOrderToProcess(null);
+      
+      // Update detail view if it's open
+      if (selectedOrderDetail && selectedOrderDetail._id === orderToProcess) {
+        setSelectedOrderDetail(updatedOrder);
+      }
+
+      fetchOrders();
+    } catch (error: any) {
+      toast({
+        variant: "destructive",
+        title: "Lỗi",
+        description: getErrorMessage(error, "Không thể gửi báo cáo")
+      });
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleReturnOrder = async (orderId: string) => {
+    setOrderToProcess(orderId);
+    setIsReturnModalOpen(true);
+  };
+
+  const handleReturnOrderAction = async () => {
+    if (!orderToProcess) return;
+    try {
+      setIsProcessing(true);
+      const res = await orderApi.returnOrder(orderToProcess);
+      const updatedOrder = res.data?.data || res.data;
+
+      toast({
+        variant: "success",
+        title: "Thành công",
+        description: "Yêu cầu trả hàng đã được gửi đi."
+      });
+      setIsReturnModalOpen(false);
+      setOrderToProcess(null);
+      
+      // Update detail view if it's open
+      if (selectedOrderDetail && selectedOrderDetail._id === orderToProcess) {
+        setSelectedOrderDetail(updatedOrder);
+      }
+
+      fetchOrders();
+    } catch (error: any) {
+      toast({
+        variant: "destructive",
+        title: "Lỗi",
+        description: getErrorMessage(error, "Không thể yêu cầu trả hàng")
+      });
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
   const formatPrice = (price: number) => {
     return new Intl.NumberFormat("vi-VN", { style: "currency", currency: "VND" }).format(price);
   };
@@ -329,7 +503,14 @@ export default function MyOrdersPage() {
           </div>
 
           <div className="flex flex-wrap gap-2 pb-2 overflow-x-auto no-scrollbar">
-            {[{ label: "Tất cả", value: "" }, { label: "Chờ xử lý", value: "pending" }, { label: "Đang giao", value: "shipping" }, { label: "Hoàn tất", value: "completed" }, { label: "Đã hủy", value: "cancelled" }].map((tab, i) => (
+            {[
+              { label: "Tất cả", value: "" }, 
+              { label: "Chờ xử lý", value: "pending,paid,confirmed" }, 
+              { label: "Đang giao", value: "shipping,delivered" }, 
+              { label: "Trả hàng", value: "delivery_failed,returned" },
+              { label: "Hoàn tất", value: "completed" }, 
+              { label: "Đã hủy", value: "cancelled" }
+            ].map((tab, i) => (
               <motion.div key={tab.value} initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: i * 0.05 }}>
                 <Button variant={statusFilter === tab.value ? "default" : "outline"} size="sm" className="rounded-full px-6 whitespace-nowrap transition-all duration-300" onClick={() => { setStatusFilter(tab.value); setCurrentPage(1); }}>{tab.label}</Button>
               </motion.div>
@@ -392,12 +573,15 @@ export default function MyOrdersPage() {
                                        <p className="font-black text-base text-primary whitespace-nowrap">{formatPrice(item.price)}</p>
                                     </div>
                                     <div className="flex items-center justify-between mt-1">
-                                       <div className="flex items-center gap-3">
-                                           {item.sku && item.sku !== 'DEFAULT' && (
-                                               <span className="text-[9px] bg-primary/5 text-primary px-2 py-0.5 rounded-md font-mono border border-primary/20">SKU: {item.sku}</span>
-                                           )}
-                                           <p className="text-xs font-bold text-muted-foreground">Số lượng: <span className="text-foreground">x{item.quantity}</span></p>
-                                       </div>
+                                         <div className="flex flex-col gap-1">
+                                             {renderAttributes(item) && (
+                                                 <span className="text-[10px] font-bold text-primary/80">{renderAttributes(item)}</span>
+                                             )}
+                                             <div className="flex items-center gap-3">
+                                                 <span className="text-[9px] bg-muted text-muted-foreground px-1.5 py-0.5 rounded font-mono">#{item.sku}</span>
+                                                 <p className="text-xs font-bold text-muted-foreground">Số lượng: <span className="text-foreground">x{item.quantity}</span></p>
+                                             </div>
+                                         </div>
                                        {order.status === 'completed' && !reviewedItems[`${item.productId}-${item.sku}`] && (
                                            <Button variant="outline" size="sm" className="h-7 px-3 rounded-full border-primary/20 text-primary hover:bg-primary hover:text-white text-[9px] font-bold uppercase transition-all" onClick={() => handleOpenReviewModal(item)}><Star className="w-3 h-3 mr-1 fill-current" />Đánh giá</Button>
                                        )}
@@ -431,13 +615,31 @@ export default function MyOrdersPage() {
                               <Button variant="outline" size="sm" className="rounded-xl border-primary/20 text-primary hover:bg-primary hover:text-white hover:border-primary font-bold px-4 h-9 text-xs transition-all duration-300 active:scale-95 flex items-center gap-2 cursor-pointer hover:shadow-md hover:shadow-primary/20" onClick={() => handleViewOrderDetail(order)}>
                                 <Eye className="h-3.5 w-3.5" />Chi tiết
                               </Button>
-                              {(order.paymentStatus === 'failed' || (order.paymentMethod?.toLowerCase() === 'vnpay' && order.paymentStatus !== 'paid' && order.status !== 'cancelled')) && (
+                              {(order.paymentStatus === 'failed' || (order.paymentMethod?.toLowerCase() === 'vnpay' && order.paymentStatus !== 'paid' && order.status !== 'cancelled')) && order.status !== 'cancelled' && (
                                 <Button variant="default" size="sm" className="rounded-xl bg-primary hover:bg-primary/90 text-primary-foreground font-bold px-5 h-9 text-xs transition-all active:scale-95 shadow-md shadow-primary/10 cursor-pointer" onClick={() => handleRetryPayment(order._id)}>Thanh toán lại</Button>
                               )}
-                              {order.status === 'pending' && (
-                                <Button variant="outline" size="sm" className="rounded-xl border-destructive/20 text-destructive hover:bg-destructive hover:text-destructive-foreground font-bold px-4 h-9 text-xs transition-all active:scale-95 cursor-pointer" onClick={() => handleCancelOrder(order._id)}>Hủy đơn</Button>
-                              )}
-                            </div>
+                                {order.status === 'pending' && (
+                                  <Button variant="outline" size="sm" className="rounded-xl border-destructive/20 text-destructive hover:bg-destructive hover:text-destructive-foreground font-bold px-4 h-9 text-xs transition-all active:scale-95 cursor-pointer" onClick={() => handleCancelOrder(order._id)}>Hủy đơn</Button>
+                                )}
+                                {['shipping', 'delivered'].includes(order.status) && (
+                                  <Button variant="default" size="sm" className="rounded-xl bg-success hover:bg-success/90 text-white font-bold px-4 h-9 text-xs transition-all active:scale-95 cursor-pointer flex items-center gap-1.5" onClick={() => handleConfirmReceived(order._id)}>
+                                    <CheckCircle className="h-3.5 w-3.5" />
+                                    Đã nhận hàng
+                                  </Button>
+                                )}
+                                {order.status === 'delivered' && (
+                                  <Button variant="outline" size="sm" className="rounded-xl border-warning/20 text-warning hover:bg-warning hover:text-white font-bold px-4 h-9 text-xs transition-all active:scale-95 cursor-pointer flex items-center gap-1.5" onClick={() => handleReportNotReceived(order._id)}>
+                                    <AlertTriangle className="h-3.5 w-3.5" />
+                                    Chưa nhận hàng
+                                  </Button>
+                                )}
+                                {['delivered', 'completed'].includes(order.status) && (
+                                  <Button variant="outline" size="sm" className="rounded-xl border-destructive/20 text-destructive hover:bg-destructive hover:text-white font-bold px-4 h-9 text-xs transition-all active:scale-95 cursor-pointer flex items-center gap-1.5" onClick={() => handleReturnOrder(order._id)}>
+                                    <History className="h-3.5 w-3.5" />
+                                    Trả hàng
+                                  </Button>
+                                )}
+                              </div>
                           </div>
                         </div>
                       </Card>
@@ -468,9 +670,6 @@ export default function MyOrdersPage() {
               <div className="flex flex-col h-[85vh] md:h-auto max-h-[90vh]">
                   <div className="relative h-28 bg-primary/5 dark:bg-primary/10 flex flex-col justify-center px-6 md:px-10 overflow-hidden">
                       <div className="absolute -top-4 -right-4 opacity-5"><ShoppingBag className="w-24 h-24 text-primary" /></div>
-                      <Button variant="ghost" size="icon" className="absolute top-4 right-4 z-50 rounded-full w-8 h-8 hover:bg-black/5 dark:hover:bg-white/5 transition-all flex items-center justify-center group" onClick={() => setIsDetailModalOpen(false)}>
-                          <X className="w-4 h-4 opacity-40 group-hover:opacity-100 transition-all group-hover:rotate-90" />
-                      </Button>
                       <div className="relative z-10">
                            <div className="flex items-center gap-2 mb-1">
                               <Badge className="rounded-full px-3 py-0.5 text-[10px] font-black bg-primary text-primary-foreground border-none">#{selectedOrderDetail?._id?.substring(selectedOrderDetail._id.length - 8).toUpperCase() || 'ORDER'}</Badge>
@@ -505,16 +704,31 @@ export default function MyOrdersPage() {
                           <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-primary/60"><History className="w-3 h-3" />Hành trình</div>
                           <div className="bg-muted/30 rounded-2xl p-6 border border-border/20">
                               <div className="relative flex justify-between items-start max-w-xl mx-auto">
-                                  <div className="absolute top-4 left-6 right-6 h-[1.5px] bg-border/40 z-0"><motion.div initial={{ width: 0 }} animate={{ width: selectedOrderDetail?.status === 'completed' ? '100%' : selectedOrderDetail?.status === 'shipping' ? '66%' : selectedOrderDetail?.status === 'paid' ? '33%' : '0%' }} className="h-full bg-primary" /></div>
-                                  {[{ key: 'pending', label: 'Đặt hàng', icon: Clock }, { key: 'paid', label: 'Xác nhận', icon: CheckCircle2 }, { key: 'shipping', label: 'Giao hàng', icon: Truck }, { key: 'completed', label: 'Hoàn tất', icon: CheckCircle }].map((stage) => {
-                                      const isActive = selectedOrderDetail?.status === stage.key || stage.key === 'pending' || (stage.key === 'paid' && ['paid', 'shipping', 'completed'].includes(selectedOrderDetail?.status)) || (stage.key === 'shipping' && ['shipping', 'completed'].includes(selectedOrderDetail?.status)) || (stage.key === 'completed' && selectedOrderDetail?.status === 'completed');
-                                      return (
-                                          <div key={stage.key} className="relative z-10 flex flex-col items-center gap-2">
-                                              <div className={cn("w-8 h-8 rounded-full flex items-center justify-center transition-all duration-500 border-2 shadow-sm", isActive ? "bg-primary border-primary text-primary-foreground scale-110 shadow-primary/10" : "bg-card border-border/40 text-muted-foreground")}><stage.icon className="w-4 h-4" /></div>
-                                              <p className={cn("text-[9px] font-black uppercase tracking-wider", isActive ? "text-primary" : "text-muted-foreground")}>{stage.label}</p>
-                                          </div>
-                                      );
-                                  })}
+                                  <div className="absolute top-4 left-6 right-6 h-[1.5px] bg-border/40 z-0">
+                                      <motion.div 
+                                        initial={{ width: 0 }} 
+                                        animate={{ 
+                                          width: selectedOrderDetail?.status === 'completed' ? '100%' : 
+                                                 ['shipping', 'delivered'].includes(selectedOrderDetail?.status) ? '66.6%' : 
+                                                 ['confirmed', 'paid'].includes(selectedOrderDetail?.status) ? '33.3%' : '0%' 
+                                        }} 
+                                        className="h-full bg-primary" 
+                                      />
+                                   </div>
+                                   {[
+                                     { key: 'pending', label: 'Đặt hàng', icon: Clock, stages: ['pending', 'confirmed', 'paid', 'shipping', 'delivered', 'completed'] }, 
+                                     { key: 'confirmed', label: 'Xác nhận', icon: CheckCircle2, stages: ['confirmed', 'paid', 'shipping', 'delivered', 'completed'] }, 
+                                     { key: 'shipping', label: 'Giao hàng', icon: Truck, stages: ['shipping', 'delivered', 'completed'] }, 
+                                     { key: 'completed', label: 'Hoàn tất', icon: CheckCircle, stages: ['completed'] }
+                                   ].map((stage) => {
+                                       const isActive = stage.stages.includes(selectedOrderDetail?.status);
+                                       return (
+                                           <div key={stage.key} className="relative z-10 flex flex-col items-center gap-2">
+                                               <div className={cn("w-8 h-8 rounded-full flex items-center justify-center transition-all duration-500 border-2 shadow-sm", isActive ? "bg-primary border-primary text-primary-foreground scale-110 shadow-primary/10" : "bg-card border-border/40 text-muted-foreground")}><stage.icon className="w-4 h-4" /></div>
+                                               <p className={cn("text-[9px] font-black uppercase tracking-wider", isActive ? "text-primary" : "text-muted-foreground")}>{stage.label}</p>
+                                           </div>
+                                       );
+                                   })}
                               </div>
                           </div>
                       </div>
@@ -534,14 +748,15 @@ export default function MyOrdersPage() {
                                                 </div>
                                                 <p className="font-black text-sm text-primary shrink-0">{formatPrice(item.price)}</p>
                                               </div>
-                                           <div className="mt-1 flex items-center justify-between gap-2">
-                                             {item.sku && item.sku !== 'DEFAULT' && (
-                                               <div className="mt-2 flex flex-wrap items-center gap-2">
-                                                 <span className="text-[10px] bg-primary/5 text-primary px-2 py-0.5 rounded-md font-mono border border-primary/20">SKU: {item.sku}</span>
+                                           <div className="mt-1 flex flex-col gap-1 py-1">
+                                               {renderAttributes(item) && (
+                                                 <span className="text-[10px] font-black text-primary/70">{renderAttributes(item)}</span>
+                                               )}
+                                               <div className="flex items-center justify-between mt-0.5">
+                                                  <span className="text-[9px] bg-muted text-muted-foreground px-1.5 py-0.5 rounded font-mono">#{item.sku}</span>
+                                                  <p className="text-xs font-black text-muted-foreground">Số lượng: <span className="text-foreground">x{item.quantity}</span></p>
                                                </div>
-                                            )}
-                                               <p className="text-xs font-bold text-muted-foreground ml-auto">Số lượng: <span className="text-foreground">x{item.quantity}</span></p>
-                                           </div>
+                                             </div>
                                       </div>
                                   </div>
                                     );
@@ -555,13 +770,28 @@ export default function MyOrdersPage() {
                           Đóng
                       </Button>
                       {selectedOrderDetail?.status === 'pending' && (
-                        <Button variant="destructive" className="rounded-xl font-bold h-10 px-6 text-xs bg-destructive/5 text-destructive hover:bg-destructive hover:text-white border border-destructive/10 transition-all duration-300 hover:scale-105 active:scale-95 shadow-sm hover:shadow-destructive/20" onClick={() => { setIsDetailModalOpen(false); handleCancelOrder(selectedOrderDetail._id); }}>
+                        <Button variant="destructive" className="rounded-xl font-bold h-10 px-6 text-xs bg-destructive/5 text-destructive hover:bg-destructive hover:text-white border border-destructive/10 transition-all duration-300 hover:scale-105 active:scale-95 shadow-sm hover:shadow-destructive/20" onClick={() => handleCancelOrder(selectedOrderDetail._id)}>
                           Hủy đơn hàng
                         </Button>
                       )}
-                      {(selectedOrderDetail?.paymentStatus === 'failed' || (selectedOrderDetail?.paymentMethod?.toLowerCase() === 'vnpay' && selectedOrderDetail?.paymentStatus !== 'paid' && selectedOrderDetail?.status !== 'cancelled')) && (
+                      {(selectedOrderDetail?.paymentStatus === 'failed' || (selectedOrderDetail?.paymentMethod?.toLowerCase() === 'vnpay' && selectedOrderDetail?.paymentStatus !== 'paid' && selectedOrderDetail?.status !== 'cancelled')) && selectedOrderDetail?.status !== 'cancelled' && (
                         <Button className="rounded-xl font-bold h-10 px-6 text-xs gradient-hero shadow-md shadow-primary/10 transition-all duration-300 hover:scale-105 active:scale-95 hover:shadow-primary/20" onClick={() => handleRetryPayment(selectedOrderDetail._id)}>
                           Thanh toán lại
+                        </Button>
+                      )}
+                      {['shipping', 'delivered'].includes(selectedOrderDetail?.status) && (
+                        <Button className="rounded-xl font-bold h-10 px-6 text-xs bg-success text-white hover:bg-success/90 transition-all duration-300 hover:scale-105 active:scale-95 flex items-center gap-2" onClick={() => handleConfirmReceived(selectedOrderDetail._id)}>
+                          <CheckCircle className="w-3.5 h-3.5" /> Đã nhận được hàng
+                        </Button>
+                      )}
+                      {selectedOrderDetail?.status === 'delivered' && (
+                        <Button variant="outline" className="rounded-xl font-bold h-10 px-6 text-xs border-warning/20 text-warning hover:bg-warning hover:text-white transition-all duration-300 hover:scale-105 active:scale-95 flex items-center gap-2" onClick={() => handleReportNotReceived(selectedOrderDetail._id)}>
+                          <AlertTriangle className="w-3.5 h-3.5" /> Chưa nhận được hàng
+                        </Button>
+                      )}
+                      {['delivered', 'completed'].includes(selectedOrderDetail?.status) && (
+                        <Button variant="outline" className="rounded-xl font-bold h-10 px-6 text-xs border-destructive/20 text-destructive hover:bg-destructive hover:text-white transition-all duration-300 hover:scale-105 active:scale-95 flex items-center gap-2" onClick={() => handleReturnOrder(selectedOrderDetail._id)}>
+                          <History className="w-3.5 h-3.5" /> Trả hàng
                         </Button>
                       )}
                   </div>
@@ -571,9 +801,6 @@ export default function MyOrdersPage() {
 
       <Dialog open={isReviewModalOpen} onOpenChange={setIsReviewModalOpen}>
         <DialogContent className="sm:max-w-[900px] p-0 overflow-hidden border-none shadow-2xl bg-[#0f172a] rounded-3xl group">
-          <Button variant="ghost" size="icon" className="absolute top-4 right-4 z-50 rounded-full w-8 h-8 hover:bg-white/10 transition-all flex items-center justify-center text-white/50 hover:text-white" onClick={() => setIsReviewModalOpen(false)}>
-              <X className="w-4 h-4" />
-          </Button>
           <div className="flex flex-col md:flex-row h-full min-h-[550px]">
             <div className="md:w-[42%] relative overflow-hidden flex flex-col justify-between p-10 md:p-12 text-white border-r border-white/5">
               <div className="absolute inset-0 bg-gradient-to-br from-indigo-600 via-primary to-blue-900 z-0"></div>
@@ -630,15 +857,60 @@ export default function MyOrdersPage() {
       </Dialog>
 
       <Dialog open={isCancelModalOpen} onOpenChange={setIsCancelModalOpen}>
-        <DialogContent className="max-w-md p-0 overflow-hidden rounded-3xl border-none shadow-2xl">
+        <DialogContent className="max-w-sm p-0 overflow-hidden rounded-3xl border-none shadow-2xl">
           <DialogHeader className="sr-only"><DialogTitle>Xác nhận hủy đơn</DialogTitle><DialogDescription>Bạn có chắc chắn muốn hủy đơn hàng này không? Hành động này không thể hoàn tác.</DialogDescription></DialogHeader>
-          <div className="p-8 text-center">
-            <div className="w-20 h-20 bg-destructive/10 text-destructive rounded-full flex items-center justify-center mx-auto mb-6"><AlertTriangle className="w-10 h-10" /></div>
-            <h3 className="text-2xl font-bold mb-2">Xác nhận hủy đơn</h3>
-            <p className="text-muted-foreground mb-8">Bạn có chắc chắn muốn hủy đơn hàng này không? Hành động này không thể hoàn tác.</p>
-            <div className="flex gap-4">
-              <Button variant="outline" className="flex-1 h-12 rounded-xl font-bold" onClick={() => setIsCancelModalOpen(false)} disabled={isCancelling}>Quay lại</Button>
-              <Button variant="destructive" className="flex-1 h-12 rounded-xl font-bold shadow-lg shadow-destructive/20" onClick={handleConfirmCancel} disabled={isCancelling}>{isCancelling ? <><Loader2 className="w-4 h-4 animate-spin mr-2" />Đang xử lý</> : "Xác nhận hủy"}</Button>
+          <div className="p-6 text-center">
+            <div className="w-16 h-16 bg-destructive/10 text-destructive rounded-full flex items-center justify-center mx-auto mb-4"><AlertTriangle className="w-8 h-8" /></div>
+            <h3 className="text-xl font-bold mb-2">Xác nhận hủy đơn</h3>
+            <p className="text-muted-foreground text-sm mb-6">Bạn có chắc chắn muốn hủy đơn hàng này không? Hành động này không thể hoàn tác.</p>
+            <div className="flex gap-3">
+              <Button variant="outline" className="flex-1 h-10 rounded-xl font-bold text-xs" onClick={() => setIsCancelModalOpen(false)} disabled={isCancelling}>Quay lại</Button>
+              <Button variant="destructive" className="flex-1 h-10 rounded-xl font-bold text-xs shadow-lg shadow-destructive/20" onClick={handleConfirmCancel} disabled={isCancelling}>{isCancelling ? <><Loader2 className="w-4 h-4 animate-spin mr-2" />Đang xử lý</> : "Xác nhận hủy"}</Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isConfirmReceivedModalOpen} onOpenChange={setIsConfirmReceivedModalOpen}>
+        <DialogContent className="max-w-sm p-0 overflow-hidden rounded-3xl border-none shadow-2xl">
+          <DialogHeader className="sr-only"><DialogTitle>Xác nhận nhận hàng</DialogTitle><DialogDescription>Bạn xác nhận đã nhận được đủ hàng và hài lòng với sản phẩm?</DialogDescription></DialogHeader>
+          <div className="p-6 text-center">
+            <div className="w-16 h-16 bg-success/10 text-success rounded-full flex items-center justify-center mx-auto mb-4"><CheckCircle className="w-8 h-8" /></div>
+            <h3 className="text-xl font-bold mb-2">Đã nhận được hàng?</h3>
+            <p className="text-muted-foreground text-sm mb-6">Vui lòng chỉ xác nhận khi bạn đã thực sự nhận hàng và hài lòng.</p>
+            <div className="flex gap-3">
+              <Button variant="outline" className="flex-1 h-10 rounded-xl font-bold text-xs" onClick={() => setIsConfirmReceivedModalOpen(false)} disabled={isProcessing}>Hủy bỏ</Button>
+              <Button variant="default" className="flex-1 h-10 rounded-xl font-bold text-xs bg-success hover:bg-success/90 text-white shadow-lg shadow-success/20" onClick={handleConfirmReceivedAction} disabled={isProcessing}>{isProcessing ? <><Loader2 className="w-4 h-4 animate-spin mr-2" />Đang xử lý</> : "Xác nhận đã nhận"}</Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isNotReceivedModalOpen} onOpenChange={setIsNotReceivedModalOpen}>
+        <DialogContent className="max-w-sm p-0 overflow-hidden rounded-3xl border-none shadow-2xl">
+          <DialogHeader className="sr-only"><DialogTitle>Báo cáo chưa nhận hàng</DialogTitle><DialogDescription>Bạn chắc chắn vẫn chưa nhận được hàng dù trạng thái báo đã giao?</DialogDescription></DialogHeader>
+          <div className="p-6 text-center">
+            <div className="w-16 h-16 bg-warning/10 text-warning rounded-full flex items-center justify-center mx-auto mb-4"><AlertTriangle className="w-8 h-8" /></div>
+            <h3 className="text-xl font-bold mb-2">Chưa nhận hàng?</h3>
+            <p className="text-muted-foreground text-sm mb-6">Hệ thống sẽ ghi nhận và kiểm tra lại với đơn vị vận chuyển. Bạn chắc chắn tiếp tục?</p>
+            <div className="flex gap-3">
+              <Button variant="outline" className="flex-1 h-10 rounded-xl font-bold text-xs" onClick={() => setIsNotReceivedModalOpen(false)} disabled={isProcessing}>Quay lại</Button>
+              <Button variant="default" className="flex-1 h-10 rounded-xl font-bold text-xs bg-warning hover:bg-warning/90 text-white shadow-lg shadow-warning/20" onClick={handleReportNotReceivedAction} disabled={isProcessing}>{isProcessing ? <><Loader2 className="w-4 h-4 animate-spin mr-2" />Đang gửi</> : "Báo cáo"}</Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isReturnModalOpen} onOpenChange={setIsReturnModalOpen}>
+        <DialogContent className="max-w-sm p-0 overflow-hidden rounded-3xl border-none shadow-2xl">
+          <DialogHeader className="sr-only"><DialogTitle>Yêu cầu trả hàng</DialogTitle><DialogDescription>Bạn có nhu cầu muốn trả lại hàng cho shop?</DialogDescription></DialogHeader>
+          <div className="p-6 text-center">
+            <div className="w-16 h-16 bg-destructive/10 text-destructive rounded-full flex items-center justify-center mx-auto mb-4"><History className="w-8 h-8" /></div>
+            <h3 className="text-xl font-bold mb-2">Yêu cầu trả hàng</h3>
+            <p className="text-muted-foreground text-sm mb-6">Chúng tôi sẽ liên hệ sớm nhất để hỗ trợ quy trình trả hàng cho bạn.</p>
+            <div className="flex gap-3">
+              <Button variant="outline" className="flex-1 h-10 rounded-xl font-bold text-xs" onClick={() => setIsReturnModalOpen(false)} disabled={isProcessing}>Hủy bỏ</Button>
+              <Button variant="destructive" className="flex-1 h-10 rounded-xl font-bold text-xs shadow-lg shadow-destructive/20" onClick={handleReturnOrderAction} disabled={isProcessing}>{isProcessing ? <><Loader2 className="w-4 h-4 animate-spin mr-2" />Đang xử lý</> : "Xác nhận trả"}</Button>
             </div>
           </div>
         </DialogContent>

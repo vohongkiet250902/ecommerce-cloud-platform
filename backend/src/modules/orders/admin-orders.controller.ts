@@ -71,6 +71,11 @@ export class AdminOrdersController {
     return this.ordersService.createGhnShipment(id);
   }
 
+  @Post('shipping/ghn/sync-all')
+  syncAllGhnShipments() {
+    return this.ordersService.syncAllActiveGhnShipments();
+  }
+
   @Post(':id/shipping/ghn/sync')
   syncGhnShipment(@Param('id') id: string) {
     return this.ordersService.syncGhnShipment(id);
