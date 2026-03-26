@@ -168,12 +168,12 @@ export default function UsersPage() {
         const ordersRes = await orderApi.getOrders({ userId: user._id, limit: 100 });
         const orders = ordersRes.data.data || [];
         
-        const paidOrders = orders.filter((o: any) => o.paymentStatus === 'paid' && o.status !== 'cancelled');
-        const totalSpent = paidOrders.reduce((acc: number, o: any) => acc + (o.totalAmount || 0), 0);
+        const completedOrders = orders.filter((o: any) => o.status === 'completed');
+        const totalSpent = completedOrders.reduce((acc: number, o: any) => acc + (o.totalAmount || 0), 0);
         const lastOrder = orders.length > 0 ? orders[0].createdAt : null;
 
         setUserStats({
-          totalOrders: orders.length,
+          totalOrders: completedOrders.length,
           totalSpent: totalSpent,
           lastOrderDate: lastOrder,
         });
@@ -544,7 +544,7 @@ export default function UsersPage() {
                       <div className="p-3 rounded-2xl bg-primary/[0.03] border border-primary/10 transition-all hover:bg-primary/[0.05]">
                          <div className="flex items-center gap-2 mb-1">
                             <ShoppingBag className="h-3.5 w-3.5 text-primary" />
-                            <span className="text-[10px] font-bold text-muted-foreground">Đơn hàng</span>
+                            <span className="text-[10px] font-bold text-muted-foreground uppercase">Đơn hàng hoàn thành</span>
                          </div>
                          <p className="text-xl font-black text-foreground">{userStats.totalOrders}</p>
                       </div>

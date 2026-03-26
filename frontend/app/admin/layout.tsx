@@ -133,6 +133,7 @@ const NavItem = ({ href, icon: Icon, label, collapsed }: NavItemProps) => {
  ======================= */
 const navItems = [
   { href: "/admin/dashboard", icon: LayoutDashboard, label: "Dashboard" },
+  { href: "/admin/statistics", icon: TrendingUp, label: "Thống kê" },
   { href: "/admin/products", icon: Package, label: "Sản phẩm" },
   { href: "/admin/categories", icon: FolderTree, label: "Danh mục" },
   { href: "/admin/brands", icon: Layers, label: "Thương hiệu" },

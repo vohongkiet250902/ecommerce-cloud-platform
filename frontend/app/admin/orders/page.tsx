@@ -627,41 +627,80 @@ export default function OrdersPage() {
         </div>
 
         {/* Bottom Row: Status Breakdown */}
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+        <div className="grid grid-cols-2 lg:grid-cols-4 xl:grid-cols-8 gap-3">
+          {/* 1. Pending */}
           <div className="bg-card rounded-xl p-4 border border-border shadow-sm hover:border-primary/20 transition-colors">
-            <p className="text-xs text-muted-foreground font-bold uppercase tracking-wider">Chờ xử lý</p>
+            <p className="text-xs text-muted-foreground font-medium">Chờ xử lý</p>
             <div className="flex items-baseline gap-2 mt-2">
               <span className="text-2xl font-bold text-orange-600">
                   {allOrders.filter((o) => o.status === "pending").length}
               </span>
             </div>
           </div>
+
+          {/* 2. Confirmed */}
           <div className="bg-card rounded-xl p-4 border border-border shadow-sm hover:border-primary/20 transition-colors">
-            <p className="text-xs text-muted-foreground font-bold uppercase tracking-wider">Xác nhận</p>
+            <p className="text-xs text-muted-foreground font-medium">Xác nhận</p>
             <div className="flex items-baseline gap-2 mt-2">
               <span className="text-2xl font-bold text-cyan-600">
                   {allOrders.filter((o) => o.status === "confirmed").length}
               </span>
             </div>
           </div>
+
+          {/* 3. Shipping */}
           <div className="bg-card rounded-xl p-4 border border-border shadow-sm hover:border-primary/20 transition-colors">
-            <p className="text-xs text-muted-foreground font-bold uppercase tracking-wider">Đang giao</p>
+            <p className="text-xs text-muted-foreground font-medium">Đang giao</p>
             <div className="flex items-baseline gap-2 mt-2">
               <span className="text-2xl font-bold text-blue-600">
                    {allOrders.filter((o) => o.status === "shipping").length}
               </span>
             </div>
           </div>
+
+          {/* 4. Delivered */}
           <div className="bg-card rounded-xl p-4 border border-border shadow-sm hover:border-primary/20 transition-colors">
-            <p className="text-xs text-muted-foreground font-bold uppercase tracking-wider">Hoàn thành</p>
+            <p className="text-xs text-muted-foreground font-medium">Đã giao</p>
             <div className="flex items-baseline gap-2 mt-2">
-              <span className="text-2xl font-bold text-green-600">
-                  {allOrders.filter((o) => o.status === "completed" || o.status === "delivered").length}
+              <span className="text-2xl font-bold text-emerald-600">
+                  {allOrders.filter((o) => o.status === "delivered").length}
               </span>
             </div>
           </div>
+
+          {/* 5. Completed */}
           <div className="bg-card rounded-xl p-4 border border-border shadow-sm hover:border-primary/20 transition-colors">
-            <p className="text-xs text-muted-foreground font-bold uppercase tracking-wider">Đã hủy</p>
+            <p className="text-xs text-muted-foreground font-medium">Hoàn thành</p>
+            <div className="flex items-baseline gap-2 mt-2">
+              <span className="text-2xl font-bold text-green-600">
+                  {allOrders.filter((o) => o.status === "completed").length}
+              </span>
+            </div>
+          </div>
+
+          {/* 6. Failed */}
+          <div className="bg-card rounded-xl p-4 border border-border shadow-sm hover:border-primary/20 transition-colors">
+            <p className="text-xs text-muted-foreground font-medium">Thất bại</p>
+            <div className="flex items-baseline gap-2 mt-2">
+              <span className="text-2xl font-bold text-red-600">
+                  {allOrders.filter((o) => o.status === "delivery_failed").length}
+              </span>
+            </div>
+          </div>
+
+          {/* 7. Returned */}
+          <div className="bg-card rounded-xl p-4 border border-border shadow-sm hover:border-primary/20 transition-colors">
+            <p className="text-xs text-muted-foreground font-medium">Trả hàng</p>
+            <div className="flex items-baseline gap-2 mt-2">
+              <span className="text-2xl font-bold text-rose-600">
+                  {allOrders.filter((o) => o.status === "returned").length}
+              </span>
+            </div>
+          </div>
+
+          {/* 8. Cancelled */}
+          <div className="bg-card rounded-xl p-4 border border-border shadow-sm hover:border-primary/20 transition-colors">
+            <p className="text-xs text-muted-foreground font-medium">Đã hủy</p>
              <div className="flex items-baseline gap-2 mt-2">
                <span className="text-2xl font-bold text-destructive">
                   {allOrders.filter((o) => o.status === "cancelled").length}

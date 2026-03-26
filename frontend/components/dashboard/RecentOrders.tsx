@@ -16,22 +16,34 @@ interface Order {
   createdAt: string;
 }
 
-const statusConfig = {
+const statusConfig: Record<string, { label: string; className: string }> = {
   pending: {
     label: "Chờ xử lý",
     className: "bg-warning/10 text-warning border-warning/20",
   },
-  paid: {
-    label: "Đã thanh toán",
+  confirmed: {
+    label: "Đã xác nhận",
     className: "bg-info/10 text-info border-info/20",
   },
   shipping: {
     label: "Đang giao",
     className: "bg-primary/10 text-primary border-primary/20",
   },
+  delivered: {
+    label: "Đã giao hàng",
+    className: "bg-success/10 text-success border-success/20",
+  },
   completed: {
     label: "Hoàn thành",
     className: "bg-success/10 text-success border-success/20",
+  },
+  delivery_failed: {
+    label: "Giao thất bại",
+    className: "bg-destructive/10 text-destructive border-destructive/20",
+  },
+  returned: {
+    label: "Trả hàng",
+    className: "bg-destructive/10 text-destructive border-destructive/20",
   },
   cancelled: {
     label: "Đã hủy",
@@ -170,8 +182,8 @@ export default function RecentOrders() {
                         </p>
                       </div>
                     </td>
-                    <td className="py-4 px-2">
-                      <span className="font-black text-sm text-foreground">
+                    <td className="py-4 px-2 text-right sm:text-left">
+                      <span className="font-bold text-sm text-foreground">
                         {formatPrice(order.totalAmount)}
                       </span>
                     </td>

@@ -128,7 +128,7 @@ export default function TopProducts() {
               key={product.id}
               className="group flex items-center gap-4 p-3 rounded-xl hover:bg-secondary/20 transition-all border border-transparent hover:border-border/50"
             >
-              <span className="text-sm font-black text-muted-foreground/50 w-6 italic group-hover:text-primary transition-colors">
+              <span className="text-sm font-bold text-muted-foreground/50 w-6 italic group-hover:text-primary transition-colors">
                 #0{index + 1}
               </span>
 
@@ -158,10 +158,10 @@ export default function TopProducts() {
               </div>
 
               <div className="text-right">
-                <p className="text-xs font-black text-foreground">
+                <p className="text-xs font-bold text-foreground">
                   {product.sales.toLocaleString()}
                 </p>
-                <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-tighter">
+                <p className="text-[10px] text-muted-foreground font-medium">
                   Đã bán
                 </p>
               </div>

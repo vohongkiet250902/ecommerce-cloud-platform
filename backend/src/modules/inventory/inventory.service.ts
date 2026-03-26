@@ -529,12 +529,60 @@ export class InventoryService {
   }
 
   async listLots(productId?: string, sku?: string) {
-    const filter: any = {};
-    if (productId) filter.productId = new Types.ObjectId(productId);
-    if (sku) filter.sku = sku;
+    const match: any = {};
+    if (productId) match.productId = new Types.ObjectId(productId);
+    if (sku) match.sku = sku;
 
-    return this.inventoryLotModel
-      .find(filter)
-      .sort({ receivedAt: -1, createdAt: -1 });
+    return this.inventoryLotModel.aggregate([
+      { $match: match },
+      { $sort: { receivedAt: -1, createdAt: -1 } },
+      {
+        $lookup: {
+          from: 'products',
+          localField: 'productId',
+          foreignField: '_id',
+          as: 'product',
+        },
+      },
+      { $unwind: { path: '$product', preserveNullAndEmptyArrays: true } },
+      {
+        $addFields: {
+          variant: {
+            $filter: {
+              input: '$product.variants',
+              as: 'v',
+              cond: { $eq: ['$$v.sku', '$sku'] },
+            },
+          },
+        },
+      },
+      { $unwind: { path: '$variant', preserveNullAndEmptyArrays: true } },
+      {
+        $project: {
+          _id: 1,
+          productId: {
+            _id: '$product._id',
+            name: '$product.name',
+            images: '$product.images',
+          },
+          sku: 1,
+          unitCost: 1,
+          sellingPrice: 1,
+          originalQuantity: 1,
+          remainingQuantity: 1,
+          receivedAt: 1,
+          sourceType: 1,
+          sourceRef: 1,
+          note: 1,
+          isClosed: 1,
+          variant: {
+            sku: 1,
+            attributes: { $ifNull: ['$variant.attributes', '$variant.val'] },
+            image: 1,
+          },
+          imageUrl: '$variant.image.url',
+        },
+      },
+    ]);
   }
 }

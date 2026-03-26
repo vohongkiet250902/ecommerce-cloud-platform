@@ -1557,16 +1557,13 @@ export class OrdersService {
     return this.orderModel.aggregate([
       {
         $match: {
-          status: { $in: ['delivered', 'completed'] },
-          $or: [
-            { deliveredAt: { $gte: start } },
-            { completedAt: { $gte: start } },
-          ],
+          status: 'completed',
+          completedAt: { $gte: start },
         },
       },
       {
         $addFields: {
-          soldAt: { $ifNull: ['$completedAt', '$deliveredAt'] },
+          soldAt: '$completedAt',
         },
       },
       { $unwind: '$items' },
@@ -1609,16 +1606,13 @@ export class OrdersService {
     const items = await this.orderModel.aggregate([
       {
         $match: {
-          status: { $in: ['delivered', 'completed'] },
-          $or: [
-            { deliveredAt: { $gte: start } },
-            { completedAt: { $gte: start } },
-          ],
+          status: 'completed',
+          completedAt: { $gte: start },
         },
       },
       {
         $addFields: {
-          soldAt: { $ifNull: ['$completedAt', '$deliveredAt'] },
+          soldAt: '$completedAt',
           grossRevenue: {
             $sum: {
               $map: {
@@ -1687,16 +1681,13 @@ export class OrdersService {
     const items = await this.orderModel.aggregate([
       {
         $match: {
-          status: { $in: ['delivered', 'completed'] },
-          $or: [
-            { deliveredAt: { $gte: start } },
-            { completedAt: { $gte: start } },
-          ],
+          status: 'completed',
+          completedAt: { $gte: start },
         },
       },
       {
         $addFields: {
-          soldAt: { $ifNull: ['$completedAt', '$deliveredAt'] },
+          soldAt: '$completedAt',
           grossRevenue: {
             $sum: {
               $map: {
@@ -1712,9 +1703,28 @@ export class OrdersService {
                 input: '$items',
                 as: 'item',
                 in: {
-                  $multiply: [
-                    { $ifNull: ['$$item.unitCostSnapshot', 0] },
-                    { $ifNull: ['$$item.quantity', 0] },
+                  $cond: [
+                    { $gt: [{ $size: { $ifNull: ['$$item.lotAllocations', []] } }, 0] },
+                    {
+                      $sum: {
+                        $map: {
+                          input: '$$item.lotAllocations',
+                          as: 'alloc',
+                          in: {
+                            $multiply: [
+                              { $ifNull: ['$$alloc.unitCost', 0] },
+                              { $ifNull: ['$$alloc.quantity', 0] },
+                            ],
+                          },
+                        },
+                      },
+                    },
+                    {
+                      $multiply: [
+                        { $ifNull: ['$$item.unitCostSnapshot', 0] },
+                        { $ifNull: ['$$item.quantity', 0] },
+                      ],
+                    },
                   ],
                 },
               },
@@ -1859,11 +1869,8 @@ export class OrdersService {
     const items = await this.orderModel.aggregate([
       {
         $match: {
-          status: { $in: ['delivered', 'completed'] },
-          $or: [
-            { deliveredAt: { $gte: start } },
-            { completedAt: { $gte: start } },
-          ],
+          status: 'completed',
+          completedAt: { $gte: start },
         },
       },
       { $unwind: '$items' },
@@ -1874,13 +1881,33 @@ export class OrdersService {
           sku: { $first: '$items.sku' },
           name: { $first: '$items.name' },
           imageUrl: { $first: '$items.imageUrl' },
+          attributes: { $first: '$items.attributes' },
           quantitySold: { $sum: '$items.quantity' },
           grossRevenue: { $sum: '$items.lineTotal' },
           estimatedCost: {
             $sum: {
-              $multiply: [
-                { $ifNull: ['$items.unitCostSnapshot', 0] },
-                { $ifNull: ['$items.quantity', 0] },
+              $cond: [
+                { $gt: [{ $size: { $ifNull: ['$items.lotAllocations', []] } }, 0] },
+                {
+                  $sum: {
+                    $map: {
+                      input: '$items.lotAllocations',
+                      as: 'alloc',
+                      in: {
+                        $multiply: [
+                          { $ifNull: ['$$alloc.unitCost', 0] },
+                          { $ifNull: ['$$alloc.quantity', 0] },
+                        ],
+                      },
+                    },
+                  },
+                },
+                {
+                  $multiply: [
+                    { $ifNull: ['$items.unitCostSnapshot', 0] },
+                    { $ifNull: ['$items.quantity', 0] },
+                  ],
+                },
               ],
             },
           },
@@ -1894,6 +1921,7 @@ export class OrdersService {
           sku: 1,
           name: 1,
           imageUrl: 1,
+          attributes: 1,
           quantitySold: 1,
           grossRevenue: 1,
           estimatedCost: 1,
@@ -1932,11 +1960,8 @@ export class OrdersService {
     const items = await this.orderModel.aggregate([
       {
         $match: {
-          status: { $in: ['delivered', 'completed'] },
-          $or: [
-            { deliveredAt: { $gte: start } },
-            { completedAt: { $gte: start } },
-          ],
+          status: 'completed',
+          completedAt: { $gte: start },
         },
       },
       { $unwind: '$items' },
@@ -1950,9 +1975,28 @@ export class OrdersService {
           grossRevenue: { $sum: '$items.lineTotal' },
           estimatedCost: {
             $sum: {
-              $multiply: [
-                { $ifNull: ['$items.unitCostSnapshot', 0] },
-                { $ifNull: ['$items.quantity', 0] },
+              $cond: [
+                { $gt: [{ $size: { $ifNull: ['$items.lotAllocations', []] } }, 0] },
+                {
+                  $sum: {
+                    $map: {
+                      input: '$items.lotAllocations',
+                      as: 'alloc',
+                      in: {
+                        $multiply: [
+                          { $ifNull: ['$$alloc.unitCost', 0] },
+                          { $ifNull: ['$$alloc.quantity', 0] },
+                        ],
+                      },
+                    },
+                  },
+                },
+                {
+                  $multiply: [
+                    { $ifNull: ['$items.unitCostSnapshot', 0] },
+                    { $ifNull: ['$items.quantity', 0] },
+                  ],
+                },
               ],
             },
           },

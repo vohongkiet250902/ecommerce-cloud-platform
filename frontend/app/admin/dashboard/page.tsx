@@ -1,8 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { DollarSign, ShoppingCart, Package, Users, Loader2 } from "lucide-react";
-import StatCard from "@/components/dashboard/StatCard";
+import { Loader2 } from "lucide-react";
 import RevenueChart from "@/components/dashboard/RevenueChart";
 import OrderStatusChart from "@/components/dashboard/OrderStatusChart";
 import TopProducts from "@/components/dashboard/TopProducts";
@@ -13,11 +12,7 @@ import { orderApi, productApi, usersApi } from "@/services/api";
 export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState({
-    totalRevenue: 0,
     totalOrders: 0,
-    totalProducts: 0,
-    totalCustomers: 0,
-    successfulOrders: 0,
   });
   const [orderStatusData, setOrderStatusData] = useState<any[]>([]);
   const [revenueChartData, setRevenueChartData] = useState<any[]>([]);
@@ -26,60 +21,66 @@ export default function Dashboard() {
     const fetchDashboardData = async () => {
       try {
         setLoading(true);
-        // 1. Fetch all essential data
-        const [orderRes, productRes, userRes, revStatsYear] = await Promise.all([
-          orderApi.getOrders({ limit: 1000 }),
+        // 1. Fetch essential data with a larger limit for more accurate summary
+        const [orderRes, productRes, userRes] = await Promise.all([
+          orderApi.getOrders({ limit: 2000 }), 
           productApi.getAdminProducts({ limit: 1 }),
-          usersApi.getUsers({ limit: 1000 }),
-          orderApi.getRevenueStats({ groupBy: 'month', months: 12 })
+          usersApi.getUsers({ limit: 1000 })
         ]);
 
         const allOrders = orderRes.data?.data || orderRes.data || [];
         const allUsers = userRes.data?.data || userRes.data || [];
         const currentYear = new Date().getFullYear();
 
-        const revData = revStatsYear.data?.items || [];
-        const revSummary = revStatsYear.data?.summary || { totalNetRevenue: 0 };
+        // 2. Filter strictly for 'completed' orders for financial stats
+        const completedOrders = allOrders.filter((o: any) => o.status === "completed");
         
+        // 3. Calculate monthly stats for the chart from current year's completed orders
         const monthlyData: Record<string, { revenue: number, orders: number }> = {};
         for (let i = 1; i <= 12; i++) {
           monthlyData[`T${i}`] = { revenue: 0, orders: 0 };
         }
         
-        revData.forEach((item: any) => {
-           if (item.period && item.period.startsWith(String(currentYear))) {
-               const m = parseInt(item.period.split('-')[1], 10);
+        completedOrders.forEach((o: any) => {
+           const date = new Date(o.createdAt);
+           if (date.getFullYear() === currentYear) {
+               const m = date.getMonth() + 1;
                if (monthlyData[`T${m}`]) {
-                   monthlyData[`T${m}`].revenue = item.netRevenue || item.grossRevenue || 0;
-                   monthlyData[`T${m}`].orders = item.orderCount || 0;
+                   monthlyData[`T${m}`].revenue += o.totalAmount || 0;
+                   monthlyData[`T${m}`].orders += 1;
                }
            }
         });
 
         setRevenueChartData(Object.entries(monthlyData).map(([name, stats]) => ({ name, ...stats })));
 
+        // 4. Detailed Status Counts for Donut Chart
         const statusCounts = {
-          completed: allOrders.filter((o: any) => o.status === "completed" || o.status === "delivered").length,
-          shipping: allOrders.filter((o: any) => o.status === "shipping").length,
+          pending: allOrders.filter((o: any) => o.status === "pending").length,
           confirmed: allOrders.filter((o: any) => o.status === "confirmed").length,
+          shipping: allOrders.filter((o: any) => o.status === "shipping").length,
+          delivered: allOrders.filter((o: any) => o.status === "delivered").length,
+          completed: completedOrders.length,
+          failed: allOrders.filter((o: any) => o.status === "delivery_failed").length,
+          returned: allOrders.filter((o: any) => o.status === "returned").length,
           cancelled: allOrders.filter((o: any) => o.status === "cancelled").length,
         };
 
         setOrderStatusData([
-          { name: "Hoàn thành", value: statusCounts.completed, color: "hsl(var(--success))" },
+          { name: "Chờ xử lý", value: statusCounts.pending, color: "hsl(var(--warning))" },
+          { name: "Đã xác nhận", value: statusCounts.confirmed, color: "hsl(215 100% 50%)" },
           { name: "Đang giao", value: statusCounts.shipping, color: "hsl(var(--info))" },
-          { name: "Đã xác nhận", value: statusCounts.confirmed, color: "hsl(var(--primary))" },
+          { name: "Đã giao", value: statusCounts.delivered, color: "hsl(160 84% 39%)" },
+          { name: "Hoàn thành", value: statusCounts.completed, color: "hsl(var(--success))" },
+          { name: "Thất bại", value: statusCounts.failed, color: "hsl(0 84% 60%)" },
+          { name: "Trả hàng", value: statusCounts.returned, color: "hsl(322 75% 46%)" },
           { name: "Đã hủy", value: statusCounts.cancelled, color: "hsl(var(--destructive))" },
-        ]);
+        ].filter(v => v.value > 0));
 
-        const customerCount = allUsers.filter((u: any) => u.role !== "admin").length;
+        const totalAllOrdersCount = orderRes.data?.total || allOrders.length;
 
         setStats({
-          totalRevenue: revSummary.totalNetRevenue,
-          totalOrders: orderRes.data?.total || allOrders.length,
-          totalProducts: productRes.data?.total || 0,
-          totalCustomers: customerCount,
-          successfulOrders: statusCounts.completed,
+          totalOrders: totalAllOrdersCount,
         });
 
       } catch (error) {
@@ -110,43 +111,13 @@ export default function Dashboard() {
   return (
     <div className="space-y-6 animate-fade-in">
       {/* Page Header */}
-      <div>
-        <h1 className="text-2xl font-bold text-foreground">Dashboard</h1>
-        <p className="text-muted-foreground">
-          Tổng quan về hoạt động kinh doanh
-        </p>
-      </div>
-
-      {/* Stats Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        <StatCard
-          title="Tổng doanh thu"
-          value={formatRevenue(stats.totalRevenue)}
-          icon={DollarSign}
-          iconColor="text-success"
-          iconBg="bg-success/10"
-        />
-        <StatCard
-          title="Đơn hàng"
-          value={stats.successfulOrders.toLocaleString()}
-          icon={ShoppingCart}
-          iconColor="text-primary"
-          iconBg="bg-primary/10"
-        />
-        <StatCard
-          title="Sản phẩm"
-          value={stats.totalProducts.toLocaleString()}
-          icon={Package}
-          iconColor="text-warning"
-          iconBg="bg-warning/10"
-        />
-        <StatCard
-          title="Khách hàng"
-          value={stats.totalCustomers.toLocaleString()}
-          icon={Users}
-          iconColor="text-info"
-          iconBg="bg-info/10"
-        />
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-foreground">Dashboard</h1>
+          <p className="text-sm text-muted-foreground font-medium italic">
+            Tổng quan hiệu suất kinh doanh
+          </p>
+        </div>
       </div>
 
       {/* Charts Row */}
@@ -154,7 +125,7 @@ export default function Dashboard() {
         <div className="lg:col-span-2">
           <RevenueChart 
             data={revenueChartData} 
-            title={`Doanh thu năm ${new Date().getFullYear()}`}
+            title={`Doanh thu hoàn thành năm ${new Date().getFullYear()}`}
           />
         </div>
         <OrderStatusChart data={orderStatusData} />
