@@ -15,6 +15,11 @@ export type AllocatedLotItem = {
   unitCost: number;
 };
 
+export interface StockInResult {
+  lot: InventoryLot;
+  warnings: any[];
+}
+
 @Injectable()
 export class InventoryService {
   constructor(
@@ -118,20 +123,28 @@ export class InventoryService {
   private async createStockIn(
     dto: StockInDto,
     session?: ClientSession,
-  ): Promise<InventoryLot | null> {
+  ): Promise<StockInResult> {
     const { product, variant } = await this.getProductAndVariant(
       dto.productId,
       dto.sku,
       session,
     );
 
+    // Tính toán unitCost và totalBatchCost
+    const unitCost =
+      dto.totalBatchCost != null
+        ? Math.round(dto.totalBatchCost / dto.quantity)
+        : Number(dto.unitCost ?? 0);
+
+    const totalBatchCost = dto.totalBatchCost ?? unitCost * dto.quantity;
+
     const lotDocs = await this.inventoryLotModel.create(
       [
         {
           productId: product._id,
           sku: dto.sku,
-          unitCost: dto.unitCost,
-          sellingPrice: dto.sellingPrice,
+          unitCost: unitCost,
+          totalBatchCost: totalBatchCost,
           originalQuantity: dto.quantity,
           remainingQuantity: dto.quantity,
           receivedAt: dto.receivedAt ? new Date(dto.receivedAt) : new Date(),
@@ -146,10 +159,7 @@ export class InventoryService {
 
     const createdLot = lotDocs[0];
 
-    const newPrice = dto.sellingPrice !== undefined ? dto.sellingPrice : variant.price;
-    const discount = variant.discountPercentage || 0;
-    const finalPrice = Math.round(newPrice * (1 - discount / 100));
-
+    // CẬP NHẬT: Không tự đổi giá bán. Chỉ cập nhật stock và importPrice
     const updated = await this.productModel.updateOne(
       { _id: product._id, 'variants.sku': dto.sku },
       {
@@ -158,9 +168,7 @@ export class InventoryService {
           totalStock: dto.quantity,
         },
         $set: {
-          'variants.$.importPrice': dto.unitCost,
-          'variants.$.price': newPrice,
-          'variants.$.finalPrice': finalPrice,
+          'variants.$.importPrice': unitCost,
         },
       },
       session ? { session } : undefined,
@@ -170,27 +178,59 @@ export class InventoryService {
       throw new BadRequestException('Không thể cập nhật tồn kho sản phẩm');
     }
 
-    return createdLot;
+    // TẠO WARNINGS: Trả về cảnh báo nếu margin bị thấp hoặc bán lỗ
+    const warnings: any[] = [];
+    const currentPrice = variant.price || 0;
+
+    if (currentPrice > 0) {
+      if (currentPrice < unitCost) {
+        warnings.push({
+          code: 'PRICE_BELOW_COST',
+          sku: dto.sku,
+          importPrice: unitCost,
+          currentPrice: currentPrice,
+          loss: unitCost - currentPrice,
+          message: `Giá bán thấp hơn giá nhập ${(unitCost - currentPrice).toLocaleString('vi-VN')}đ. Đang bán lỗ vốn.`,
+        });
+      } else {
+        const targetMargin = 0.1; // Mục tiêu margin 10%
+        const currentMargin = (currentPrice - unitCost) / currentPrice;
+
+        if (currentMargin < targetMargin) {
+          const grossMarginPercent = Math.round(currentMargin * 10000) / 100;
+          warnings.push({
+            code: 'MARGIN_BELOW_TARGET',
+            sku: dto.sku,
+            importPrice: unitCost,
+            currentPrice: currentPrice,
+            grossMarginPercent: grossMarginPercent,
+            message: `Biên lợi nhuận đang ở mức ${grossMarginPercent}%, thấp hơn mục tiêu 10%.`,
+          });
+        }
+      }
+    }
+
+    return { lot: createdLot, warnings };
   }
 
-  async stockIn(dto: StockInDto) {
+  async stockIn(dto: StockInDto): Promise<StockInResult> {
     const session = await this.inventoryLotModel.db.startSession();
     try {
-      let createdLot: InventoryLot | null = null;
+      let result: StockInResult | null = null;
 
       try {
         await session.withTransaction(async () => {
-          createdLot = await this.createStockIn(dto, session);
+          result = await this.createStockIn(dto, session);
         });
       } catch (error: any) {
         if (this.isTransactionNotSupported(error)) {
-          createdLot = await this.createStockIn(dto);
+          result = await this.createStockIn(dto);
         } else {
           throw error;
         }
       }
 
-      return createdLot;
+      return result as StockInResult;
     } finally {
       await session.endSession();
     }

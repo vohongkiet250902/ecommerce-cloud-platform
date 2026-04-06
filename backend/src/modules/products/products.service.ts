@@ -51,10 +51,13 @@ export class ProductsService {
     }
   }
 
+  // Trong class ProductsService:
+
   private calculateVariantPrices(variants: any[]) {
     return (variants ?? []).map((v) => {
       const price = Number(v.price ?? 0);
       const rawDiscount = Number(v.discountPercentage ?? 0);
+      const importPrice = Number(v.importPrice ?? 0);
 
       const safePrice = Number.isFinite(price) && price > 0 ? price : 0;
       const discount = Number.isFinite(rawDiscount)
@@ -64,11 +67,18 @@ export class ProductsService {
       const finalPrice =
         safePrice > 0 ? Math.round(safePrice * (1 - discount / 100)) : 0;
 
+      // THÊM: Tính grossMarginPercent on-the-fly để response
+      const grossMarginPercent =
+        importPrice > 0 && safePrice > 0
+          ? Math.round(((safePrice - importPrice) / safePrice) * 10000) / 100
+          : null;
+
       return {
         ...v,
         price: safePrice,
         discountPercentage: discount,
         finalPrice,
+        grossMarginPercent,
       };
     });
   }

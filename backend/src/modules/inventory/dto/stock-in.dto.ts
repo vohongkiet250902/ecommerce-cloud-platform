@@ -7,6 +7,7 @@ import {
   IsOptional,
   IsString,
   Min,
+  ValidateIf,
 } from 'class-validator';
 
 export class StockInDto {
@@ -20,14 +21,15 @@ export class StockInDto {
   @Min(1)
   quantity: number;
 
+  @ValidateIf((o) => o.unitCost == null)
   @IsNumber()
   @Min(0)
-  unitCost: number;
+  totalBatchCost?: number;
 
-  @IsOptional()
+  @ValidateIf((o) => o.totalBatchCost == null)
   @IsNumber()
   @Min(0)
-  sellingPrice?: number;
+  unitCost?: number;
 
   @IsOptional()
   @IsDateString()

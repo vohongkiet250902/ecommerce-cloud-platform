@@ -18,14 +18,15 @@ export class InventoryLot extends Document {
   @Prop({ type: Number, required: true, min: 0 })
   unitCost: number;
 
+  // THÊM: Snapshot tổng giá lô để tra cứu lịch sử
+  @Prop({ type: Number, min: 0 })
+  totalBatchCost?: number;
+
   @Prop({ type: Number, required: true, min: 1 })
   originalQuantity: number;
 
   @Prop({ type: Number, required: true, min: 0, index: true })
   remainingQuantity: number;
-
-  @Prop({ type: Number, min: 0 })
-  sellingPrice?: number;
 
   @Prop({ type: Date, required: true, default: Date.now, index: true })
   receivedAt: Date;
@@ -48,7 +49,5 @@ export class InventoryLot extends Document {
 }
 
 const schema = SchemaFactory.createForClass(InventoryLot);
-
 schema.index({ productId: 1, sku: 1, receivedAt: 1, createdAt: 1 });
-
 export const InventoryLotSchema = schema;
