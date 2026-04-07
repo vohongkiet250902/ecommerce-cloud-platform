@@ -69,12 +69,13 @@ type StatusUpdatePayload = {
 /** Nguồn gọi chuyển trạng thái — để enforce đúng transition map */
 type TransitionSource = 'ghn' | 'admin' | 'system' | 'user';
 
-type StatsGroupBy = 'day' | 'week' | 'month';
+type StatsGroupBy = 'day' | 'week' | 'month' | 'quarter';
 
 type StatsRangeInput = {
   days?: number;
   weeks?: number;
   months?: number;
+  quarters?: number;
 };
 
 type TopSortBy = 'quantity' | 'revenue' | 'profit';
@@ -814,7 +815,9 @@ export class OrdersService {
     if (!order) throw new NotFoundException('Không tìm thấy đơn hàng');
 
     if (order.paymentMethod !== 'cod' && order.paymentStatus !== 'paid') {
-      throw new BadRequestException('Hiện tại chỉ auto GHN cho COD hoặc đơn đã thanh toán');
+      throw new BadRequestException(
+        'Hiện tại chỉ auto GHN cho COD hoặc đơn đã thanh toán',
+      );
     }
     if (['cancelled', 'completed', 'returned'].includes(order.status)) {
       throw new BadRequestException('Đơn hàng đã kết thúc');
@@ -854,7 +857,10 @@ export class OrdersService {
       width: parcel.width,
       weight: parcel.weight,
       insurance_value: Math.min(Number(order.totalAmount || 0), 5000000),
-      cod_amount: order.paymentMethod === 'cod' ? Math.round(Number(order.totalAmount || 0)) : 0,
+      cod_amount:
+        order.paymentMethod === 'cod'
+          ? Math.round(Number(order.totalAmount || 0))
+          : 0,
       items: (order.items || []).map((item: any) => ({
         name: item.name,
         code: item.sku,
@@ -895,7 +901,10 @@ export class OrdersService {
       to_ward_code: order.shippingInfo.ghnWardCode,
       to_district_id: order.shippingInfo.ghnDistrictId,
 
-      cod_amount: order.paymentMethod === 'cod' ? Math.round(Number(order.totalAmount || 0)) : 0,
+      cod_amount:
+        order.paymentMethod === 'cod'
+          ? Math.round(Number(order.totalAmount || 0))
+          : 0,
       content: (order.items || [])
         .map((item: any) => item.name)
         .join(', ')
@@ -941,7 +950,10 @@ export class OrdersService {
         feeData?.main_service ??
         0,
     );
-    shipping.codAmount = order.paymentMethod === 'cod' ? Math.round(Number(order.totalAmount || 0)) : 0;
+    shipping.codAmount =
+      order.paymentMethod === 'cod'
+        ? Math.round(Number(order.totalAmount || 0))
+        : 0;
     shipping.expectedDeliveryTime = createRes?.expected_delivery_time
       ? new Date(createRes.expected_delivery_time)
       : undefined;
@@ -1441,7 +1453,8 @@ export class OrdersService {
   // ─────────────────────────────────────────────────────────────
 
   private normalizeStatsGroupBy(groupBy?: string): StatsGroupBy {
-    if (groupBy === 'week' || groupBy === 'month') return groupBy;
+    if (groupBy === 'week' || groupBy === 'month' || groupBy === 'quarter')
+      return groupBy;
     return 'day';
   }
 
@@ -1455,34 +1468,47 @@ export class OrdersService {
     groupBy: StatsGroupBy,
     range?: StatsRangeInput,
   ) {
-    if (groupBy === 'week') {
-      return this.clampPositiveInt(range?.weeks, 12, 104);
-    }
-    if (groupBy === 'month') {
+    if (groupBy === 'quarter')
+      return this.clampPositiveInt(range?.quarters, 4, 20);
+    if (groupBy === 'week') return this.clampPositiveInt(range?.weeks, 12, 104);
+    if (groupBy === 'month')
       return this.clampPositiveInt(range?.months, 12, 60);
-    }
     return this.clampPositiveInt(range?.days, 30, 366);
   }
 
-  private buildStatsStartDate(groupBy: StatsGroupBy, range?: StatsRangeInput) {
+  // Lấy ra 2 mốc thời gian: Bắt đầu của kỳ trước và Bắt đầu của kỳ hiện tại
+  private buildComparisonDates(groupBy: StatsGroupBy, range?: StatsRangeInput) {
     const value = this.resolveStatsRangeValue(groupBy, range);
-    const start = new Date();
-    start.setHours(0, 0, 0, 0);
+    const currentStart = new Date();
+    const previousStart = new Date();
+
+    currentStart.setHours(0, 0, 0, 0);
+    previousStart.setHours(0, 0, 0, 0);
 
     if (groupBy === 'day') {
-      start.setDate(start.getDate() - (value - 1));
-      return { start, value };
+      currentStart.setDate(currentStart.getDate() - (value - 1));
+      previousStart.setDate(currentStart.getDate() - value);
+    } else if (groupBy === 'week') {
+      const dayOffset = (currentStart.getDay() + 6) % 7;
+      currentStart.setDate(
+        currentStart.getDate() - dayOffset - (value - 1) * 7,
+      );
+      previousStart.setDate(currentStart.getDate() - value * 7);
+    } else if (groupBy === 'month') {
+      currentStart.setDate(1);
+      currentStart.setMonth(currentStart.getMonth() - (value - 1));
+      previousStart.setDate(1);
+      previousStart.setMonth(currentStart.getMonth() - value);
+    } else if (groupBy === 'quarter') {
+      const currentMonth = currentStart.getMonth();
+      const quarterStartMonth = Math.floor(currentMonth / 3) * 3;
+      currentStart.setDate(1);
+      currentStart.setMonth(quarterStartMonth - (value - 1) * 3);
+      previousStart.setDate(1);
+      previousStart.setMonth(currentStart.getMonth() - value * 3);
     }
 
-    if (groupBy === 'week') {
-      const dayOffset = (start.getDay() + 6) % 7;
-      start.setDate(start.getDate() - dayOffset - (value - 1) * 7);
-      return { start, value };
-    }
-
-    start.setDate(1);
-    start.setMonth(start.getMonth() - (value - 1));
-    return { start, value };
+    return { previousStart, currentStart, value };
   }
 
   private buildPeriodGroupExpr(field: string, groupBy: StatsGroupBy) {
@@ -1497,14 +1523,22 @@ export class OrdersService {
         },
       };
     }
-
     if (groupBy === 'week') {
+      return { year: { $isoWeekYear: dateRef }, week: { $isoWeek: dateRef } };
+    }
+    if (groupBy === 'quarter') {
       return {
-        year: { $isoWeekYear: dateRef },
-        week: { $isoWeek: dateRef },
+        year: { $year: { date: dateRef, timezone: 'Asia/Ho_Chi_Minh' } },
+        quarter: {
+          $ceil: {
+            $divide: [
+              { $month: { date: dateRef, timezone: 'Asia/Ho_Chi_Minh' } },
+              3,
+            ],
+          },
+        },
       };
     }
-
     return {
       $dateToString: {
         format: '%Y-%m',
@@ -1518,10 +1552,18 @@ export class OrdersService {
     groupBy: StatsGroupBy,
     sourcePath = '$_id',
   ): Record<string, any> {
-    if (groupBy === 'day' || groupBy === 'month') {
-      return { period: sourcePath };
+    if (groupBy === 'day' || groupBy === 'month') return { period: sourcePath };
+    if (groupBy === 'quarter') {
+      return {
+        period: {
+          $concat: [
+            { $toString: `${sourcePath}.year` },
+            '-Q',
+            { $toString: `${sourcePath}.quarter` },
+          ],
+        },
+      };
     }
-
     return {
       period: {
         $concat: [
@@ -1539,9 +1581,15 @@ export class OrdersService {
     };
   }
 
-  private normalizeTopSortBy(sortBy?: string): TopSortBy {
-    if (sortBy === 'revenue' || sortBy === 'profit') return sortBy;
-    return 'quantity';
+  private calculateGrowth(current: number, previous: number) {
+    if (previous === 0) return current > 0 ? 100 : 0;
+    return Math.round(((current - previous) / previous) * 1000) / 10;
+  }
+
+  private getTrend(current: number, previous: number) {
+    if (current > previous) return 'up';
+    if (current < previous) return 'down';
+    return 'flat';
   }
 
   // ─────────────────────────────────────────────────────────────
@@ -1601,13 +1649,16 @@ export class OrdersService {
     range?: StatsRangeInput,
   ) {
     const normalizedGroupBy = this.normalizeStatsGroupBy(groupBy);
-    const { start, value } = this.buildStatsStartDate(normalizedGroupBy, range);
+    const { previousStart, currentStart, value } = this.buildComparisonDates(
+      normalizedGroupBy,
+      range,
+    );
 
-    const items = await this.orderModel.aggregate([
+    const rawItems = await this.orderModel.aggregate([
       {
         $match: {
           status: 'completed',
-          completedAt: { $gte: start },
+          completedAt: { $gte: previousStart }, // Query từ thời điểm của kỳ trước
         },
       },
       {
@@ -1627,62 +1678,92 @@ export class OrdersService {
       {
         $group: {
           _id: this.buildPeriodGroupExpr('soldAt', normalizedGroupBy),
+          firstDate: { $min: '$soldAt' }, // Lấy ngày thực tế đầu tiên để so sánh kỳ
           orderCount: { $sum: 1 },
           grossRevenue: { $sum: '$grossRevenue' },
           discountAmount: { $sum: { $ifNull: ['$discountAmount', 0] } },
           netRevenue: { $sum: { $ifNull: ['$totalAmount', 0] } },
-          shippingFee: { $sum: { $ifNull: ['$shipping.fee', 0] } },
         },
       },
       {
         $project: {
           _id: 0,
           ...this.buildPeriodProjectExpr(normalizedGroupBy),
+          firstDate: 1,
           orderCount: 1,
           grossRevenue: 1,
           discountAmount: 1,
           netRevenue: 1,
-          shippingFee: 1,
         },
       },
-      { $sort: { period: 1 } },
+      { $sort: { firstDate: 1 } }, // Sắp xếp theo ngày tăng dần
     ]);
 
-    const summary = items.reduce(
-      (acc: any, item: any) => {
-        acc.totalOrders += item.orderCount || 0;
-        acc.totalGrossRevenue += item.grossRevenue || 0;
-        acc.totalDiscountAmount += item.discountAmount || 0;
-        acc.totalNetRevenue += item.netRevenue || 0;
-        acc.totalShippingFee += item.shippingFee || 0;
-        return acc;
-      },
-      {
-        totalOrders: 0,
-        totalGrossRevenue: 0,
-        totalDiscountAmount: 0,
-        totalNetRevenue: 0,
-        totalShippingFee: 0,
-      },
-    );
+    const currentItems = [];
+    const currentSummary = {
+      orderCount: 0,
+      grossRevenue: 0,
+      discountAmount: 0,
+      netRevenue: 0,
+    };
+    const previousSummary = {
+      orderCount: 0,
+      grossRevenue: 0,
+      discountAmount: 0,
+      netRevenue: 0,
+    };
+
+    for (const item of rawItems) {
+      const isCurrent = new Date(item.firstDate) >= currentStart;
+      delete item.firstDate; // Xóa field này trước khi trả về Frontend
+
+      if (isCurrent) {
+        currentItems.push(item);
+        currentSummary.orderCount += item.orderCount || 0;
+        currentSummary.grossRevenue += item.grossRevenue || 0;
+        currentSummary.discountAmount += item.discountAmount || 0;
+        currentSummary.netRevenue += item.netRevenue || 0;
+      } else {
+        previousSummary.orderCount += item.orderCount || 0;
+        previousSummary.grossRevenue += item.grossRevenue || 0;
+        previousSummary.discountAmount += item.discountAmount || 0;
+        previousSummary.netRevenue += item.netRevenue || 0;
+      }
+    }
 
     return {
       groupBy: normalizedGroupBy,
       range: value,
-      items,
-      summary,
+      summary: {
+        current: currentSummary,
+        previous: previousSummary,
+        growth: {
+          netRevenue: this.calculateGrowth(
+            currentSummary.netRevenue,
+            previousSummary.netRevenue,
+          ),
+          trend: this.getTrend(
+            currentSummary.netRevenue,
+            previousSummary.netRevenue,
+          ),
+        },
+      },
+      chartData: currentItems,
     };
   }
 
   async getProfitStats(groupBy: StatsGroupBy = 'day', range?: StatsRangeInput) {
     const normalizedGroupBy = this.normalizeStatsGroupBy(groupBy);
-    const { start, value } = this.buildStatsStartDate(normalizedGroupBy, range);
+    const { previousStart, currentStart, value } = this.buildComparisonDates(
+      normalizedGroupBy,
+      range,
+    );
 
-    const items = await this.orderModel.aggregate([
+    const rawItems = await this.orderModel.aggregate([
       {
         $match: {
           status: 'completed',
-          completedAt: { $gte: start },
+          completedAt: { $gte: previousStart },
         },
       },
       {
@@ -1704,7 +1785,12 @@ export class OrdersService {
                 as: 'item',
                 in: {
                   $cond: [
-                    { $gt: [{ $size: { $ifNull: ['$$item.lotAllocations', []] } }, 0] },
+                    {
+                      $gt: [
+                        { $size: { $ifNull: ['$$item.lotAllocations', []] } },
+                        0,
+                      ],
+                    },
                     {
                       $sum: {
                         $map: {
@@ -1735,118 +1821,67 @@ export class OrdersService {
       {
         $group: {
           _id: this.buildPeriodGroupExpr('soldAt', normalizedGroupBy),
+          firstDate: { $min: '$soldAt' },
           orderCount: { $sum: 1 },
           grossRevenue: { $sum: '$grossRevenue' },
           netRevenue: { $sum: { $ifNull: ['$totalAmount', 0] } },
-          discountAmount: { $sum: { $ifNull: ['$discountAmount', 0] } },
           cogs: { $sum: '$cogs' },
-          shippingFee: { $sum: { $ifNull: ['$shipping.fee', 0] } },
         },
       },
       {
         $project: {
           _id: 0,
           ...this.buildPeriodProjectExpr(normalizedGroupBy),
+          firstDate: 1,
           orderCount: 1,
           grossRevenue: 1,
           netRevenue: 1,
-          discountAmount: 1,
           cogs: 1,
-          shippingFee: 1,
           grossProfit: { $subtract: ['$grossRevenue', '$cogs'] },
           netProfit: { $subtract: ['$netRevenue', '$cogs'] },
-          netProfitAfterShipping: {
-            $subtract: [
-              { $subtract: ['$netRevenue', '$cogs'] },
-              '$shippingFee',
-            ],
-          },
-          profit: {
-            $cond: [
-              {
-                $gt: [
-                  {
-                    $subtract: [
-                      { $subtract: ['$netRevenue', '$cogs'] },
-                      '$shippingFee',
-                    ],
-                  },
-                  0,
-                ],
-              },
-              {
-                $subtract: [
-                  { $subtract: ['$netRevenue', '$cogs'] },
-                  '$shippingFee',
-                ],
-              },
-              0,
-            ],
-          },
-          loss: {
-            $cond: [
-              {
-                $lt: [
-                  {
-                    $subtract: [
-                      { $subtract: ['$netRevenue', '$cogs'] },
-                      '$shippingFee',
-                    ],
-                  },
-                  0,
-                ],
-              },
-              {
-                $abs: {
-                  $subtract: [
-                    { $subtract: ['$netRevenue', '$cogs'] },
-                    '$shippingFee',
-                  ],
-                },
-              },
-              0,
-            ],
-          },
         },
       },
-      { $sort: { period: 1 } },
+      { $sort: { firstDate: 1 } },
     ]);
 
-    const summary = items.reduce(
-      (acc: any, item: any) => {
-        acc.totalOrders += item.orderCount || 0;
-        acc.totalGrossRevenue += item.grossRevenue || 0;
-        acc.totalNetRevenue += item.netRevenue || 0;
-        acc.totalDiscountAmount += item.discountAmount || 0;
-        acc.totalCogs += item.cogs || 0;
-        acc.totalShippingFee += item.shippingFee || 0;
-        acc.totalGrossProfit += item.grossProfit || 0;
-        acc.totalNetProfit += item.netProfit || 0;
-        acc.totalNetProfitAfterShipping += item.netProfitAfterShipping || 0;
-        acc.totalProfit += item.profit || 0;
-        acc.totalLoss += item.loss || 0;
-        return acc;
-      },
-      {
-        totalOrders: 0,
-        totalGrossRevenue: 0,
-        totalNetRevenue: 0,
-        totalDiscountAmount: 0,
-        totalCogs: 0,
-        totalShippingFee: 0,
-        totalGrossProfit: 0,
-        totalNetProfit: 0,
-        totalNetProfitAfterShipping: 0,
-        totalProfit: 0,
-        totalLoss: 0,
-      },
-    );
+    const currentItems = [];
+    const currentSummary = { netRevenue: 0, cogs: 0, netProfit: 0 };
+    const previousSummary = { netRevenue: 0, cogs: 0, netProfit: 0 };
+
+    for (const item of rawItems) {
+      const isCurrent = new Date(item.firstDate) >= currentStart;
+      delete item.firstDate;
+
+      if (isCurrent) {
+        currentItems.push(item);
+        currentSummary.netRevenue += item.netRevenue || 0;
+        currentSummary.cogs += item.cogs || 0;
+        currentSummary.netProfit += item.netProfit || 0;
+      } else {
+        previousSummary.netRevenue += item.netRevenue || 0;
+        previousSummary.cogs += item.cogs || 0;
+        previousSummary.netProfit += item.netProfit || 0;
+      }
+    }
 
     return {
       groupBy: normalizedGroupBy,
       range: value,
-      items,
-      summary,
+      summary: {
+        current: currentSummary,
+        previous: previousSummary,
+        growth: {
+          netProfit: this.calculateGrowth(
+            currentSummary.netProfit,
+            previousSummary.netProfit,
+          ),
+          trend: this.getTrend(
+            currentSummary.netProfit,
+            previousSummary.netProfit,
+          ),
+        },
+      },
+      chartData: currentItems,
     };
   }
 
@@ -1887,7 +1922,12 @@ export class OrdersService {
           estimatedCost: {
             $sum: {
               $cond: [
-                { $gt: [{ $size: { $ifNull: ['$items.lotAllocations', []] } }, 0] },
+                {
+                  $gt: [
+                    { $size: { $ifNull: ['$items.lotAllocations', []] } },
+                    0,
+                  ],
+                },
                 {
                   $sum: {
                     $map: {
@@ -1976,7 +2016,12 @@ export class OrdersService {
           estimatedCost: {
             $sum: {
               $cond: [
-                { $gt: [{ $size: { $ifNull: ['$items.lotAllocations', []] } }, 0] },
+                {
+                  $gt: [
+                    { $size: { $ifNull: ['$items.lotAllocations', []] } },
+                    0,
+                  ],
+                },
                 {
                   $sum: {
                     $map: {
