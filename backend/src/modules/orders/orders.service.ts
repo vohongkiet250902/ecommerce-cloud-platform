@@ -1592,6 +1592,11 @@ export class OrdersService {
     return 'flat';
   }
 
+  private normalizeTopSortBy(sortBy?: string): TopSortBy {
+    if (sortBy === 'revenue' || sortBy === 'profit') return sortBy;
+    return 'quantity';
+  }
+
   // ─────────────────────────────────────────────────────────────
   //  Analytics
   // ─────────────────────────────────────────────────────────────
@@ -1699,7 +1704,7 @@ export class OrdersService {
       { $sort: { firstDate: 1 } }, // Sắp xếp theo ngày tăng dần
     ]);
 
-    const currentItems = [];
+    const currentItems: any[] = [];
     const currentSummary = {
       orderCount: 0,
       grossRevenue: 0,
@@ -1844,7 +1849,7 @@ export class OrdersService {
       { $sort: { firstDate: 1 } },
     ]);
 
-    const currentItems = [];
+    const currentItems: any[] = [];
     const currentSummary = { netRevenue: 0, cogs: 0, netProfit: 0 };
     const previousSummary = { netRevenue: 0, cogs: 0, netProfit: 0 };
 
