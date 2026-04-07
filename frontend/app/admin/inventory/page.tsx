@@ -540,7 +540,7 @@ export default function InventoryPage() {
                              <Input 
                                  type="text" 
                                  value={note} 
-                                 placeholder="Nhập ghi chú khi nhập kho (VD: Nhập từ NCC Apple VN)"
+                                 placeholder="Nhập ghi chú khi nhập kho"
                                  onChange={(e) => setNote(e.target.value)} 
                                  className="h-10 bg-muted/30"
                              />
