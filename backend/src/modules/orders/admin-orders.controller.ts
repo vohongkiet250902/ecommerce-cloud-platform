@@ -95,7 +95,6 @@ export class AdminOrdersController {
   }
 
   // ── Analytics ──────────────────────────────────────────────
-
   @Get('stats/products-sold-by-day')
   getProductsSoldByDay(@Query('days') days?: string) {
     return this.ordersService.getProductsSoldByDay(days ? Number(days) : 7);
@@ -107,11 +106,13 @@ export class AdminOrdersController {
     @Query('days') days?: string,
     @Query('weeks') weeks?: string,
     @Query('months') months?: string,
+    @Query('quarters') quarters?: string, // Thêm query quarters
   ) {
     return this.ordersService.getRevenueStats((groupBy as any) || 'day', {
       days: days ? Number(days) : undefined,
       weeks: weeks ? Number(weeks) : undefined,
       months: months ? Number(months) : undefined,
+      quarters: quarters ? Number(quarters) : undefined, // Truyền vào service
     });
   }
 
@@ -121,11 +122,13 @@ export class AdminOrdersController {
     @Query('days') days?: string,
     @Query('weeks') weeks?: string,
     @Query('months') months?: string,
+    @Query('quarters') quarters?: string, // Thêm query quarters
   ) {
     return this.ordersService.getProfitStats((groupBy as any) || 'day', {
       days: days ? Number(days) : undefined,
       weeks: weeks ? Number(weeks) : undefined,
       months: months ? Number(months) : undefined,
+      quarters: quarters ? Number(quarters) : undefined, // Truyền vào service
     });
   }
 
