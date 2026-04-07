@@ -65,7 +65,7 @@ import { InventoryModule } from './modules/inventory/inventory.module';
       isGlobal: true,
       useFactory: async () => ({
         store: await redisStore({
-          url: 'redis://localhost:6379',
+          url: 'redis://ecommerce_redis:6379',
           ttl: 60 * 1000,
         }),
       }),
