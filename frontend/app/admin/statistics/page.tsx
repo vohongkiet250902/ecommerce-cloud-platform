@@ -12,6 +12,7 @@ import {
 import {
   Package, ShoppingCart, TrendingUp, DollarSign, ArrowUpRight, ArrowDownRight, Trophy, Loader2,
 } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { orderApi, inventoryApi } from "@/services/api";
 
 type Period = "day" | "week" | "month";
@@ -189,8 +190,14 @@ const StatisticsPage = () => {
               <div className="space-y-1">
                 <p className="text-xs font-semibold text-muted-foreground uppercase opacity-70">Lợi nhuận</p>
                 <p className="text-2xl font-bold text-emerald-600">{formatCurrency(data.profit)}</p>
-                <div className="flex items-center gap-1.5 mt-1">
+                <div className="flex items-center gap-2 mt-1">
                   <span className="text-xs text-muted-foreground font-medium">tổng lợi nhuận</span>
+                  <Badge variant="outline" className={cn(
+                    "text-[10px] h-4 px-1 border-none font-bold",
+                    Number(data.profitMargin) > 15 ? "bg-emerald-500/10 text-emerald-600" : "bg-amber-500/10 text-amber-600"
+                  )}>
+                    Margin: {data.profitMargin}%
+                  </Badge>
                 </div>
               </div>
               <div className="p-3 rounded-2xl bg-amber-500/10">
@@ -274,7 +281,7 @@ const StatisticsPage = () => {
                   itemStyle={{ fontSize: '12px', fontWeight: '600' }}
                   formatter={(value: any, name?: string) => [
                     formatCurrency(Number(value) || 0),
-                    name === "revenue" ? "Doanh thu" : name === "cost" ? "Chi phí nhập" : "Lợi nhuận",
+                    name === "revenue" ? "Doanh thu" : name === "cost" ? "Giá vốn (COGS)" : "Lợi nhuận",
                   ]}
                 />
                 <Area type="monotone" dataKey="revenue" name="revenue" stroke="hsl(var(--primary))" strokeWidth={3} fill="url(#gRevenue)" />
@@ -290,7 +297,7 @@ const StatisticsPage = () => {
             </div>
             <div className="flex items-center gap-2">
               <div className="w-3 h-3 rounded-full bg-destructive" />
-              <span className="text-xs font-bold text-muted-foreground uppercase tracking-tight">Chi phí nhập</span>
+              <span className="text-xs font-bold text-muted-foreground uppercase tracking-tight">Giá vốn (COGS)</span>
             </div>
             <div className="flex items-center gap-2">
               <div className="w-3 h-3 rounded-full bg-success" />
@@ -364,8 +371,8 @@ const StatisticsPage = () => {
               <TableHeader>
                 <TableRow className="hover:bg-transparent border-border/30">
                   <TableHead className="font-bold text-[11px] uppercase tracking-wider text-muted-foreground/70">Sản phẩm</TableHead>
-                  <TableHead className="text-right font-bold text-[11px] uppercase tracking-wider text-muted-foreground/70">Số lượng bán</TableHead>
-                  <TableHead className="text-right font-bold text-[11px] uppercase tracking-wider text-muted-foreground/70">Doanh thu</TableHead>
+                  <TableHead className="text-right font-bold text-[11px] uppercase tracking-wider text-muted-foreground/70">Số lượng</TableHead>
+                  <TableHead className="text-right font-bold text-[11px] uppercase tracking-wider text-muted-foreground/70">Hiệu quả</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -388,8 +395,13 @@ const StatisticsPage = () => {
                           </div>
                         </div>
                       </TableCell>
-                      <TableCell className="text-right text-sm font-semibold">{item.quantity}</TableCell>
-                      <TableCell className="text-right text-sm font-bold text-emerald-600">{formatCurrency(item.revenue)}</TableCell>
+                      <TableCell className="text-right text-sm font-semibold">{item.quantity} sp</TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex flex-col items-end">
+                           <span className="text-sm font-bold text-emerald-600">{formatCurrency(item.revenue)}</span>
+                           <span className="text-[10px] text-muted-foreground font-medium">Bán chạy nhất</span>
+                        </div>
+                      </TableCell>
                     </TableRow>
                   ))
                 ) : (
