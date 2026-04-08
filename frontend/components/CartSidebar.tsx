@@ -16,6 +16,7 @@ interface CartItem {
   name: string;
   price: number;
   quantity: number;
+  stock?: number; // Thêm trường stock (tùy chọn)
   image: string;
   attributes?: { key: string; value: string }[];
   originalPrice?: number;
@@ -200,30 +201,38 @@ export function CartSidebar({
                             </div>
                           </div>
                           <div className="flex items-center justify-between">
-                            <div className="flex items-center bg-background rounded-full border border-border p-1">
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-6 w-6 rounded-full hover:bg-muted"
-                                onClick={() =>
-                                  onUpdateQuantity(item.id, Math.max(1, item.quantity - 1))
-                                }
-                              >
-                                <Minus className="h-3 w-3" />
-                              </Button>
-                              <span className="w-8 text-center text-xs font-bold">
-                                {item.quantity}
-                              </span>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-6 w-6 rounded-full hover:bg-muted"
-                                onClick={() =>
-                                  onUpdateQuantity(item.id, item.quantity + 1)
-                                }
-                              >
-                                <Plus className="h-3 w-3" />
-                              </Button>
+                            <div className="flex flex-col items-end gap-1.5">
+                              <div className="flex items-center bg-background rounded-full border border-border p-1">
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-6 w-6 rounded-full hover:bg-muted"
+                                  onClick={() =>
+                                    onUpdateQuantity(item.id, Math.max(1, item.quantity - 1))
+                                  }
+                                >
+                                  <Minus className="h-3 w-3" />
+                                </Button>
+                                <span className="w-8 text-center text-xs font-bold">
+                                  {item.quantity}
+                                </span>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-6 w-6 rounded-full hover:bg-muted"
+                                  disabled={item.quantity >= (item.stock || 9999)}
+                                  onClick={() =>
+                                    onUpdateQuantity(item.id, Math.min(item.stock || 9999, item.quantity + 1))
+                                  }
+                                >
+                                  <Plus className="h-3 w-3" />
+                                </Button>
+                              </div>
+                              {item.stock !== undefined && item.quantity >= item.stock && (
+                                <span className="text-[9px] font-bold text-destructive animate-pulse bg-destructive/5 px-1.5 py-0.5 rounded">
+                                  Hết hàng trong kho
+                                </span>
+                              )}
                             </div>
                             <Button
                               variant="ghost"

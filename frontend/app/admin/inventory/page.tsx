@@ -566,16 +566,28 @@ export default function InventoryPage() {
       {/* Batch History Detail Dialog */}
       <Dialog open={isDetailOpen} onOpenChange={setIsDetailOpen}>
           <DialogContent className="max-w-3xl p-0 overflow-hidden rounded-2xl shadow-2xl border-none">
-              <DialogHeader className="p-6 bg-muted/30 border-b border-border/50">
-                  <div className="flex items-center gap-4">
-                      <div className="p-2 rounded-xl bg-primary/10">
-                          <Layers className="h-6 w-6 text-primary" />
+              <DialogHeader className="p-0 border-b border-border/50">
+                  <div className="bg-gradient-to-r from-primary/20 to-primary/5 p-6 flex items-center gap-5">
+                      <div className="h-20 w-20 relative rounded-2xl overflow-hidden bg-background border-4 border-background shadow-xl shrink-0">
+                          {selectedItem?.image ? (
+                              <Image src={selectedItem.image} alt={selectedItem.productName} fill className="object-cover" />
+                          ) : (
+                              <div className="flex items-center justify-center h-full bg-muted text-muted-foreground">
+                                  <Box className="h-8 w-8" />
+                              </div>
+                          )}
                       </div>
-                      <div>
-                          <DialogTitle className="text-xl font-bold">Chi tiết nhập kho theo đợt</DialogTitle>
-                          <DialogDescription className="text-xs uppercase tracking-widest font-bold text-muted-foreground mt-0.5">
-                              {selectedItem?.productName} — {selectedItem?.sku}
-                          </DialogDescription>
+                      <div className="flex-1 min-w-0 text-left">
+                          <DialogTitle className="font-bold text-xl text-foreground leading-tight">Lịch sử nhập kho: {selectedItem?.productName}</DialogTitle>
+                          <div className="flex wrap items-center gap-2 mt-2">
+                             <Badge variant="secondary" className="px-1.5 py-0 text-[10px] h-5 font-bold uppercase tracking-wider bg-primary/10 text-primary border-none">
+                                {selectedItem?.sku}
+                             </Badge>
+                             <p className="text-[10px] text-muted-foreground font-bold flex items-center gap-1.5 uppercase tracking-widest">
+                                <Layers className="h-3 w-3" />
+                                {selectedItem?.attributes || "Mặc định"}
+                             </p>
+                          </div>
                       </div>
                   </div>
               </DialogHeader>
@@ -621,21 +633,13 @@ export default function InventoryPage() {
                                               <p className="text-[10px] text-muted-foreground italic">Còn lại: {lot.remainingQuantity}</p>
                                           </div>
                                       </div>
-                                      <div className="mt-4 pt-4 border-t border-border/50 grid grid-cols-2 gap-4">
+                                      <div className="mt-4 pt-4 border-t border-border/50">
                                           <div>
                                               <p className="text-[10px] text-muted-foreground uppercase tracking-widest font-bold">Giá nhập</p>
                                               <p className="font-bold text-sm text-foreground">
                                                   {lot.unitCost.toLocaleString("vi-VN")} <span className="text-[10px]">VNĐ</span>
                                               </p>
                                           </div>
-                                          {lot.sellingPrice && (
-                                              <div className="text-right">
-                                                  <p className="text-[10px] text-muted-foreground uppercase tracking-widest font-bold">Giá bán khi nhập</p>
-                                                  <p className="font-bold text-sm text-primary">
-                                                      {lot.sellingPrice.toLocaleString("vi-VN")} <span className="text-[10px]">VNĐ</span>
-                                                  </p>
-                                              </div>
-                                          )}
                                       </div>
                                   </div>
                               ))}

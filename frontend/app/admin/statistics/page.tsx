@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  AreaChart, Area,
+  BarChart, Bar,
 } from "recharts";
 import {
   Package, ShoppingCart, TrendingUp, DollarSign, ArrowUpRight, ArrowDownRight, Trophy, Loader2,
@@ -37,21 +37,25 @@ const StatisticsPage = () => {
     setLoading(true);
     try {
       const rangeParams: any = { groupBy: "day" };
+      const now = new Date();
       
       if (currentPeriod === "day") {
         rangeParams.days = 1;
       } else if (currentPeriod === "week") {
-        rangeParams.days = 7;
+        const dayOfWeek = now.getDay();
+        rangeParams.days = dayOfWeek === 0 ? 7 : dayOfWeek; 
       } else if (currentPeriod === "month") {
-        rangeParams.months = 1;
+        rangeParams.days = now.getDate();
       } else if (currentPeriod === "quarter") {
         rangeParams.groupBy = "month";
-        rangeParams.quarters = 1;
-        rangeParams.months = 3;
+        rangeParams.months = (now.getMonth() % 3) + 1;
       }
 
       const topParams = { 
-        days: currentPeriod === 'day' ? 1 : currentPeriod === 'week' ? 7 : currentPeriod === 'month' ? 30 : 90, 
+        days: currentPeriod === 'day' ? 1 : 
+              currentPeriod === 'week' ? (now.getDay() === 0 ? 7 : now.getDay()) : 
+              currentPeriod === 'month' ? now.getDate() : 
+              ((now.getMonth() % 3) + 1) * 30, // Approx days in quarter
         limit: 10,
         sortBy: currentSortBy
       };
@@ -74,8 +78,8 @@ const StatisticsPage = () => {
         topProductsRes,
         lotsRes
       ] = await Promise.all([
-        safeFetch(orderApi.getRevenueStats(rangeParams), { summary: null, chartData: [] }),
-        safeFetch(orderApi.getProfitStats(rangeParams), { summary: null, chartData: [] }),
+        safeFetch(orderApi.getRevenueStats(rangeParams), { summary: { current: {}, previous: {}, growth: {} }, chartData: [] }),
+        safeFetch(orderApi.getProfitStats(rangeParams), { summary: { current: {}, previous: {}, growth: {} }, chartData: [] }),
         safeFetch(inventoryApi.getStockInStats(rangeParams), { summary: {} }),
         safeFetch(orderApi.getTopSkus(topParams), { items: [] }),
         safeFetch(orderApi.getTopProducts(topParams), { items: [] }),
@@ -159,16 +163,20 @@ const StatisticsPage = () => {
   }
 
   const GrowthBadge = ({ value, trend, label }: { value: number; trend: string; label?: string }) => {
-    if (trend === 'flat' || !value) return null;
+    if (!trend) return null;
     const isUp = trend === 'up';
+    const isFlat = trend === 'flat';
+    
     return (
       <div className="flex items-center">
         <span className={cn(
           "flex items-center gap-0.5 text-[10px] font-bold px-1.5 py-0.5 rounded-full ml-2",
-          isUp ? "bg-emerald-500/10 text-emerald-600" : "bg-destructive/10 text-destructive"
+          isUp ? "bg-emerald-500/10 text-emerald-600" : 
+          isFlat ? "bg-muted text-muted-foreground" : 
+          "bg-destructive/10 text-destructive"
         )}>
-          {isUp ? <ArrowUpRight className="h-3 w-3" /> : <ArrowDownRight className="h-3 w-3" />}
-          {Math.abs(value)}%
+          {isUp ? <ArrowUpRight className="h-3 w-3" /> : isFlat ? <ArrowRightLeft className="h-3 w-3" /> : <ArrowDownRight className="h-3 w-3" />}
+          {isFlat ? "0" : Math.abs(value)}%
         </span>
         {label && <span className="text-[11px] text-muted-foreground ml-1.5 font-medium italic">{label}</span>}
       </div>
@@ -238,7 +246,12 @@ const StatisticsPage = () => {
           </div>
           <CardContent className="p-6">
             <p className="text-xs font-semibold text-muted-foreground uppercase opacity-70 mb-1">Lợi nhuận ròng</p>
-            <p className={cn("text-2xl font-bold", data.profit.current?.netProfit > 0 ? "text-emerald-600" : "text-destructive")}>
+            <p className={cn(
+              "text-2xl font-bold", 
+              (data.profit.current?.netProfit || 0) > 0 ? "text-emerald-600" : 
+              (data.profit.current?.netProfit || 0) < 0 ? "text-destructive" : 
+              "text-card-foreground"
+            )}>
               {formatCurrency(data.profit.current?.netProfit)}
             </p>
             <div className="flex items-center justify-end mt-2">
@@ -277,21 +290,7 @@ const StatisticsPage = () => {
         <CardContent>
           <div className="h-[400px] w-full mt-4">
             <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={data.chartItems} margin={{ top: 10, right: 10, left: 10, bottom: 0 }}>
-                <defs>
-                  <linearGradient id="gRevenue" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.25} />
-                    <stop offset="95%" stopColor="hsl(var(--primary))" stopOpacity={0.02} />
-                  </linearGradient>
-                  <linearGradient id="gCost" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="hsl(var(--destructive))" stopOpacity={0.15} />
-                    <stop offset="95%" stopColor="hsl(var(--destructive))" stopOpacity={0.01} />
-                  </linearGradient>
-                  <linearGradient id="gProfit" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="hsl(var(--success))" stopOpacity={0.25} />
-                    <stop offset="95%" stopColor="hsl(var(--success))" stopOpacity={0.02} />
-                  </linearGradient>
-                </defs>
+            <BarChart data={data.chartItems} margin={{ top: 10, right: 10, left: 10, bottom: 0 }} barGap={4}>
                 <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border) / 0.4)" vertical={false} />
                 <XAxis 
                   dataKey="label" 
@@ -315,6 +314,7 @@ const StatisticsPage = () => {
                   tickFormatter={(v) => formatCurrency(v)} 
                 />
                 <Tooltip
+                  cursor={{ fill: 'hsl(var(--muted) / 0.2)' }}
                   contentStyle={{ 
                     backgroundColor: "hsl(var(--card))", 
                     border: "1px solid hsl(var(--border) / 0.5)", 
@@ -328,10 +328,10 @@ const StatisticsPage = () => {
                     name === "revenue" ? "Doanh thu" : name === "cost" ? "Giá vốn" : "Lợi nhuận gộp",
                   ]}
                 />
-                <Area type="monotone" dataKey="revenue" name="revenue" stroke="hsl(var(--primary))" strokeWidth={3} fill="url(#gRevenue)" animationDuration={1500} />
-                <Area type="monotone" dataKey="cost" name="cost" stroke="hsl(var(--destructive))" strokeWidth={3} fill="url(#gCost)" animationDuration={1800} />
-                <Area type="monotone" dataKey="profit" name="profit" stroke="hsl(var(--success))" strokeWidth={3} fill="url(#gProfit)" animationDuration={2000} />
-              </AreaChart>
+                <Bar dataKey="revenue" name="revenue" fill="hsl(var(--primary))" radius={[4, 4, 0, 0]} animationDuration={1000} />
+                <Bar dataKey="cost" name="cost" fill="hsl(var(--destructive) / 0.7)" radius={[4, 4, 0, 0]} animationDuration={1200} />
+                <Bar dataKey="profit" name="profit" fill="hsl(var(--success))" radius={[4, 4, 0, 0]} animationDuration={1400} />
+              </BarChart>
             </ResponsiveContainer>
           </div>
         </CardContent>

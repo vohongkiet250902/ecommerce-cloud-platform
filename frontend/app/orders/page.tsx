@@ -309,8 +309,8 @@ export default function MyOrdersPage() {
     }
   };
 
-  const handleOpenReviewModal = (product: any) => {
-    setSelectedProduct(product);
+  const handleOpenReviewModal = (product: any, orderId: string) => {
+    setSelectedProduct({ ...product, orderId });
     setReviewRating(5);
     setReviewComment("");
     setIsReviewModalOpen(true);
@@ -337,7 +337,7 @@ export default function MyOrdersPage() {
       });
 
       const userId = user?.id || "guest";
-      const itemKey = `${selectedProduct.productId}-${selectedProduct.sku}`;
+      const itemKey = `${selectedProduct.orderId}-${selectedProduct.productId}-${selectedProduct.sku}`;
       const updatedReviewedItems = { ...reviewedItems, [itemKey]: reviewRating };
       setReviewedItems(updatedReviewedItems);
       localStorage.setItem(`reviewed_items_${userId}`, JSON.stringify(updatedReviewedItems));
@@ -582,13 +582,13 @@ export default function MyOrdersPage() {
                                                  <p className="text-xs font-bold text-muted-foreground">Số lượng: <span className="text-foreground">x{item.quantity}</span></p>
                                              </div>
                                          </div>
-                                       {order.status === 'completed' && !reviewedItems[`${item.productId}-${item.sku}`] && (
-                                           <Button variant="outline" size="sm" className="h-7 px-3 rounded-full border-primary/20 text-primary hover:bg-primary hover:text-white text-[9px] font-bold uppercase transition-all" onClick={() => handleOpenReviewModal(item)}><Star className="w-3 h-3 mr-1 fill-current" />Đánh giá</Button>
+                                       {order.status === 'completed' && !reviewedItems[`${order._id}-${item.productId}-${item.sku}`] && (
+                                           <Button variant="outline" size="sm" className="h-7 px-3 rounded-full border-primary/20 text-primary hover:bg-primary hover:text-white text-[9px] font-bold uppercase transition-all" onClick={() => handleOpenReviewModal(item, order._id)}><Star className="w-3 h-3 mr-1 fill-current" />Đánh giá</Button>
                                        )}
-                                       {reviewedItems[`${item.productId}-${item.sku}`] && (
+                                       {reviewedItems[`${order._id}-${item.productId}-${item.sku}`] && (
                                            <div className="flex items-center gap-1 bg-warning/5 px-2 py-0.5 rounded-full border border-warning/10">
                                                <Star className="w-2.5 h-2.5 fill-warning text-warning" />
-                                               <span className="text-[9px] font-bold text-warning">{reviewedItems[`${item.productId}-${item.sku}`]}</span>
+                                               <span className="text-[9px] font-bold text-warning">{reviewedItems[`${order._id}-${item.productId}-${item.sku}`]}</span>
                                            </div>
                                        )}
                                     </div>

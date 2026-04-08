@@ -441,7 +441,7 @@ export default function ProductsPage() {
       },
       {
         key: "category",
-        header: "Danh mục",
+        header: "Danh mục/Thương hiệu",
         render: (product: Product) => {
           // Extract IDs robustly (might be populated objects or IDs)
           const catId = typeof product.categoryId === "object" 

@@ -11,6 +11,7 @@ export interface CartItem {
   sku: string;
   price: number;
   quantity: number;
+  stock?: number; // Thêm trường stock (tùy chọn để tránh lỗi build)
   image: string;
   attributes?: { key: string; value: string }[];
   originalPrice?: number;
@@ -61,6 +62,7 @@ export function CartProvider({ children }: { children: React.ReactNode }): React
                   originalPrice = matchedVariant.price ?? fullProduct.price ?? originalPrice;
                   discountPercentage = matchedVariant.discountPercentage || 0;
                   finalPrice = originalPrice * (1 - discountPercentage / 100);
+                  it.variant.stock = matchedVariant.stock; // Sync stock from full product data
                 }
               }
             } catch (error) {
@@ -76,6 +78,7 @@ export function CartProvider({ children }: { children: React.ReactNode }): React
               originalPrice,
               discountPercentage,
               quantity: it.quantity,
+              stock: it.variant?.stock || 0, // Ánh xạ stock vào item
               image: it.variant?.image?.url || it.product?.images?.[0]?.url || "",
               attributes: it.variant?.attributes || [],
             };
