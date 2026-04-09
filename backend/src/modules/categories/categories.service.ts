@@ -10,6 +10,7 @@ import { Category } from './schemas/category.schema';
 import { Product } from '../products/schemas/product.schema';
 import { CreateCategoryDto } from './dto/create-category.dto';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
+import type { Cache } from 'cache-manager';
 @Injectable()
 export class CategoriesService {
   constructor(

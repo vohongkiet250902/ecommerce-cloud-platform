@@ -9,7 +9,7 @@ import { Model } from 'mongoose';
 import { Brand } from './schemas/brand.schema';
 import { Product } from '../products/schemas/product.schema';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
-import { Cache } from 'cache-manager';
+import type { Cache } from 'cache-manager';
 @Injectable()
 export class BrandsService {
   constructor(
