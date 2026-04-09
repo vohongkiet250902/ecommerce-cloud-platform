@@ -2,19 +2,25 @@ import {
   BadRequestException,
   Injectable,
   NotFoundException,
+  Inject,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { Category } from './schemas/category.schema';
 import { Product } from '../products/schemas/product.schema';
 import { CreateCategoryDto } from './dto/create-category.dto';
-
+import { CACHE_MANAGER } from '@nestjs/cache-manager';
 @Injectable()
 export class CategoriesService {
   constructor(
     @InjectModel(Category.name) private readonly categoryModel: Model<Category>,
     @InjectModel(Product.name) private readonly productModel: Model<Product>,
+    @Inject(CACHE_MANAGER) private cacheManager: Cache,
   ) {}
+
+  private async clearCache() {
+    await this.cacheManager.del('categories_public_list');
+  }
 
   async create(dto: CreateCategoryDto) {
     const exists = await this.categoryModel.findOne({ slug: dto.slug });
@@ -29,7 +35,9 @@ export class CategoriesService {
       parentId = new Types.ObjectId(dto.parentId);
     }
 
-    return this.categoryModel.create({ ...dto, parentId });
+    const newCategory = await this.categoryModel.create({ ...dto, parentId });
+    await this.clearCache(); // 🔥 Xóa cache
+    return newCategory;
   }
 
   private async assertNoCycle(categoryId: string, newParentId: string) {
@@ -86,6 +94,8 @@ export class CategoriesService {
       { new: true },
     );
     if (!category) throw new NotFoundException('Không tìm thấy danh mục');
+
+    await this.clearCache(); // 🔥 Xóa cache
     return category;
   }
 
@@ -98,6 +108,8 @@ export class CategoriesService {
       { new: true },
     );
     if (!category) throw new NotFoundException('Không tìm thấy danh mục');
+
+    await this.clearCache(); // 🔥 Xóa cache
     return category;
   }
 
@@ -127,6 +139,7 @@ export class CategoriesService {
     const deleted = await this.categoryModel.findByIdAndDelete(id);
     if (!deleted) throw new NotFoundException('Không tìm thấy danh mục');
 
+    await this.clearCache(); // 🔥 Xóa cache
     return deleted;
   }
 
