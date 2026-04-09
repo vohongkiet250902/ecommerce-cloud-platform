@@ -70,9 +70,14 @@ export class AuthController {
   }
 
   // 8. Đăng xuất (Giữ nguyên mức Rate Limit mặc định)
+  // 8. Đăng xuất
   @UseGuards(JwtGuard)
   @Post('logout')
-  logout(@Req() req: any, @Res({ passthrough: true }) res: Response) {
-    return this.authService.logout(req.user.id, res);
+  logout(
+    @Req() req: Request & { user: any },
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    // 🔥 Truyền cả 'req' xuống service thay vì chỉ req.user.id
+    return this.authService.logout(req.user.id, req, res);
   }
 }
