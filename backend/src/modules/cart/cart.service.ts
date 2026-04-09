@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  Inject,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -9,7 +10,9 @@ import { Cart } from './schemas/cart.schema';
 import { Product } from '../products/schemas/product.schema';
 import { UpsertCartItemDto, RemoveCartItemDto } from './dto/cart.dto';
 import { OrdersService } from '../orders/orders.service';
-import { CouponsService } from '../coupons/coupons.service'; // <-- Import CouponsService
+import { CouponsService } from '../coupons/coupons.service';
+import { CACHE_MANAGER } from '@nestjs/cache-manager';
+import type { Cache } from 'cache-manager';
 
 type ExpandedCartItem = {
   productId: string;
@@ -44,8 +47,15 @@ export class CartService {
     @InjectModel(Cart.name) private readonly cartModel: Model<Cart>,
     @InjectModel(Product.name) private readonly productModel: Model<Product>,
     private readonly ordersService: OrdersService,
-    private readonly couponsService: CouponsService, // <-- Inject vào constructor
+    private readonly couponsService: CouponsService,
+    @Inject(CACHE_MANAGER) private cacheManager: Cache,
   ) {}
+
+  // 🔥 XÓA CACHE GIỎ HÀNG CỦA USER
+  private async clearCartCache(userId: string) {
+    await this.cacheManager.del(`cart_${userId}_true`);
+    await this.cacheManager.del(`cart_${userId}_false`);
+  }
 
   private toObjectId(id: string, field = 'id') {
     if (!Types.ObjectId.isValid(id)) {
@@ -107,6 +117,14 @@ export class CartService {
   }
 
   async getCart(userId: string, expand = false) {
+    const cacheKey = `cart_${userId}_${expand}`;
+
+    // 🔥 1. Đọc từ Cache
+    const cachedCart = await this.cacheManager.get(cacheKey);
+    if (cachedCart) {
+      return cachedCart;
+    }
+
     const cart = await this.getOrCreateCartDoc(userId);
 
     const plain = {
@@ -121,7 +139,11 @@ export class CartService {
       updatedAt: (cart as any).updatedAt,
     };
 
-    if (!expand) return plain;
+    if (!expand) {
+      // 🔥 2. Lưu vào Cache nếu không expand
+      await this.cacheManager.set(cacheKey, plain, 7 * 24 * 60 * 60 * 1000); // 7 ngày
+      return plain;
+    }
 
     const ids = plain.items.map((i) =>
       this.toObjectId(i.productId, 'productId'),
@@ -199,7 +221,7 @@ export class CartService {
       }
     }
 
-    return {
+    const result = {
       ...plain,
       items: expandedItems,
       total,
@@ -207,12 +229,18 @@ export class CartService {
       finalTotal,
       couponCode: appliedCoupon,
     };
+
+    // 🔥 3. Lưu toàn bộ kết quả đã expand vào Cache
+    await this.cacheManager.set(cacheKey, result, 7 * 24 * 60 * 60 * 1000); // 7 ngày
+
+    return result;
   }
 
   async applyCoupon(userId: string, code: string) {
     const cart = await this.getOrCreateCartDoc(userId);
     cart.couponCode = code.toUpperCase();
     await cart.save();
+    await this.clearCartCache(userId); // 🔥 XÓA CACHE
     return this.getCart(userId, true);
   }
 
@@ -220,6 +248,7 @@ export class CartService {
     const cart = await this.getOrCreateCartDoc(userId);
     cart.couponCode = undefined;
     await cart.save();
+    await this.clearCartCache(userId); // 🔥 XÓA CACHE
     return this.getCart(userId, true);
   }
 
@@ -233,7 +262,6 @@ export class CartService {
     const cart = await this.getOrCreateCartDoc(userId);
 
     const items = cart.items || [];
-    const key = `${pid.toString()}:${sku}`;
     const idx = items.findIndex(
       (x: any) =>
         String(x.productId) === pid.toString() && String(x.sku) === sku,
@@ -250,7 +278,7 @@ export class CartService {
 
     cart.items = items as any;
     await cart.save();
-
+    await this.clearCartCache(userId); // 🔥 XÓA CACHE
     return this.getCart(userId, true);
   }
 
@@ -268,6 +296,7 @@ export class CartService {
 
     if ((cart.items?.length || 0) !== before) {
       await cart.save();
+      await this.clearCartCache(userId); // 🔥 XÓA CACHE
     }
 
     return this.getCart(userId, true);
@@ -276,8 +305,9 @@ export class CartService {
   async clear(userId: string) {
     const cart = await this.getOrCreateCartDoc(userId);
     cart.items = [] as any;
-    cart.couponCode = undefined; // Clear luôn mã giảm giá nếu có
+    cart.couponCode = undefined;
     await cart.save();
+    await this.clearCartCache(userId); // 🔥 XÓA CACHE
     return this.getCart(userId, true);
   }
 
@@ -314,6 +344,8 @@ export class CartService {
     cart.items = [] as any;
     cart.couponCode = undefined;
     await cart.save();
+
+    await this.clearCartCache(userId); // 🔥 XÓA CACHE
 
     return order;
   }

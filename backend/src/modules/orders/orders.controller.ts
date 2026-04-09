@@ -17,6 +17,7 @@ import {
 import { OrdersService } from './orders.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { JwtGuard } from '../../common/guards/jwt.guard';
+import { Throttle } from '@nestjs/throttler';
 
 @UseGuards(JwtGuard)
 @Controller('orders')
@@ -27,6 +28,7 @@ export class OrdersController {
     private readonly paymentsService: PaymentsService,
   ) {}
 
+  @Throttle({ default: { limit: 5, ttl: 60000 } }) // 🔥 Tối đa 5 đơn/phút
   @Post()
   create(
     @Req() req,

@@ -19,6 +19,7 @@ import {
   RemoveCartItemDto,
   UpsertCartItemDto,
 } from './dto/cart.dto';
+import { Throttle } from '@nestjs/throttler';
 
 @UseGuards(JwtGuard)
 @Controller('cart')
@@ -45,6 +46,7 @@ export class CartController {
   /**
    * Upsert item: set quantity
    */
+  @Throttle({ default: { limit: 40, ttl: 60000 } }) // 🔥 Thêm/sửa item tối đa 40 lần/phút
   @Patch('items')
   upsertItem(@Req() req, @Body() dto: UpsertCartItemDto) {
     return this.cartService.upsertItem(req.user.id, dto);
@@ -63,6 +65,7 @@ export class CartController {
   /**
    * Checkout toàn bộ cart -> tạo order pending -> clear cart
    */
+  @Throttle({ default: { limit: 5, ttl: 60000 } }) // 🔥 Bấm thanh toán tối đa 5 lần/phút
   @Patch('checkout')
   checkout(
     @Req() req,
