@@ -31,9 +31,9 @@ services:
       - redis_cache
       - meilisearch
     environment:
-      - REDIS_HOST=ecommerce_redis
-      - REDIS_PORT=6379
+      - REDIS_URL=redis://ecommerce_redis:6379
       - MEILI_HOST=http://ecommerce_meilisearch:7700
+      - MEILI_API_KEY=EcommerceSearchKey_2026_SecretString
 
   # 3. Next.js Frontend (PHẦN THÊM MỚI)
   frontend:

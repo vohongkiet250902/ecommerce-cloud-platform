@@ -1,4 +1,6 @@
 import axios, { AxiosInstance, AxiosResponse, AxiosError, InternalAxiosRequestConfig } from 'axios';
+import { toast } from '@/hooks/use-toast';
+
 
 const BASE_URL =
   process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080/api/v1';
@@ -79,6 +81,18 @@ apiClient.interceptors.response.use(
         // Redirection to /auth should be managed by protected routes/layouts.
         return Promise.reject(err);
       }
+    }
+
+    // 2. Handle Rate Limiting (429)
+    if (error.response?.status === 429) {
+      if (typeof window !== 'undefined') {
+        toast({
+          variant: "destructive",
+          title: "Thao tác quá nhanh",
+          description: "Bạn đang thao tác quá nhanh. Vui lòng thử lại sau ít giây nhé!",
+        });
+      }
+      return Promise.reject(error);
     }
 
     return Promise.reject(error);

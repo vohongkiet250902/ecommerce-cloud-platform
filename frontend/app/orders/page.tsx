@@ -77,6 +77,67 @@ export type OrderStatus =
   | 'returned'
   | 'cancelled';
 
+function OrderCountdown({ 
+  id,
+  expiresAt, 
+  createdAt, 
+  onExpire 
+}: { 
+  id: string,
+  expiresAt?: string, 
+  createdAt: string, 
+  onExpire?: (id: string) => void 
+}) {
+  const [timeLeft, setTimeLeft] = useState<{ min: string, sec: string } | null>(null);
+  const [isExpired, setIsExpired] = useState(false);
+
+  useEffect(() => {
+    const expiry = expiresAt ? new Date(expiresAt).getTime() : new Date(createdAt).getTime() + 15 * 60 * 1000;
+    
+    const updateTimer = () => {
+      const now = new Date().getTime();
+      const diff = expiry - now;
+      
+      if (diff <= 0) {
+        setTimeLeft(null);
+        setIsExpired(true);
+        onExpire?.(id);
+        return true;
+      }
+      
+      const m = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+      const s = Math.floor((diff % (1000 * 60)) / 1000);
+      setTimeLeft({
+        min: m.toString().padStart(2, '0'),
+        sec: s.toString().padStart(2, '0')
+      });
+      return false;
+    };
+
+    const isDoneInitial = updateTimer();
+    if (isDoneInitial) return;
+
+    const timer = setInterval(() => {
+      const isDone = updateTimer();
+      if (isDone) clearInterval(timer);
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [id, expiresAt, createdAt, onExpire]);
+
+  if (isExpired) return <span className="text-destructive font-bold text-[9px] uppercase tracking-wider">Hết hạn</span>;
+  if (!timeLeft) return null;
+
+  return (
+    <div className="flex items-center gap-1 bg-warning/10 px-1.5 py-0.5 rounded-full border border-warning/20">
+      <Clock className="w-2.5 h-2.5 text-warning" />
+      <span className="text-[9px] font-black text-warning font-mono">
+        {timeLeft.min}:{timeLeft.sec}
+      </span>
+    </div>
+  );
+}
+
 export default function MyOrdersPage() {
   const [orders, setOrders] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -149,9 +210,54 @@ export default function MyOrdersPage() {
   const [orderToProcess, setOrderToProcess] = useState<string | null>(null);
   const [isCancelling, setIsCancelling] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [expiredOrders, setExpiredOrders] = useState<Set<string>>(new Set());
+  const [mounted, setMounted] = useState(false);
   const { user, isAuthenticated, loading: authLoading } = useAuth();
   const router = useRouter();
   const { toast } = useToast();
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  const handleOrderExpire = React.useCallback(async (orderId: string) => {
+    setExpiredOrders(prev => {
+      if (prev.has(orderId)) return prev;
+      return new Set(prev).add(orderId);
+    });
+
+    try {
+      await orderApi.cancelMyOrder(orderId);
+      
+      // Update local state for immediate UI feedback
+      setOrders(prev => prev.map(o => o._id === orderId ? { ...o, status: 'cancelled' } : o));
+      
+      if (selectedOrderDetail && selectedOrderDetail._id === orderId) {
+        setSelectedOrderDetail((prev: any) => prev ? { ...prev, status: 'cancelled' } : prev);
+      }
+
+      toast({
+        title: "Đơn hàng đã hết hạn",
+        description: `Đơn hàng #${orderId.substring(orderId.length - 8).toUpperCase()} đã tự động hủy.`,
+      });
+    } catch (error) {
+      console.error("Auto-cancel failed:", error);
+    }
+  }, [selectedOrderDetail, toast]);
+
+  const isOrderExpired = (order: any) => {
+    if (!order || !mounted) return false;
+    if (expiredOrders.has(order._id)) return true;
+    const expiry = order.expiresAt ? new Date(order.expiresAt).getTime() : new Date(order.createdAt).getTime() + 15 * 60 * 1000;
+    return new Date().getTime() > expiry;
+  };
+
+  const isAnyItemReviewed = (order: any) => {
+    if (!order || !order.items) return false;
+    return order.items.some((item: any) => 
+      reviewedItems[`${item.productId}-${item.sku}`]
+    );
+  };
 
   useEffect(() => {
     if (user) {
@@ -337,7 +443,7 @@ export default function MyOrdersPage() {
       });
 
       const userId = user?.id || "guest";
-      const itemKey = `${selectedProduct.orderId}-${selectedProduct.productId}-${selectedProduct.sku}`;
+      const itemKey = `${selectedProduct.productId}-${selectedProduct.sku}`;
       const updatedReviewedItems = { ...reviewedItems, [itemKey]: reviewRating };
       setReviewedItems(updatedReviewedItems);
       localStorage.setItem(`reviewed_items_${userId}`, JSON.stringify(updatedReviewedItems));
@@ -582,13 +688,13 @@ export default function MyOrdersPage() {
                                                  <p className="text-xs font-bold text-muted-foreground">Số lượng: <span className="text-foreground">x{item.quantity}</span></p>
                                              </div>
                                          </div>
-                                       {order.status === 'completed' && !reviewedItems[`${order._id}-${item.productId}-${item.sku}`] && (
+                                       {order.status === 'completed' && !reviewedItems[`${item.productId}-${item.sku}`] && (
                                            <Button variant="outline" size="sm" className="h-7 px-3 rounded-full border-primary/20 text-primary hover:bg-primary hover:text-white text-[9px] font-bold uppercase transition-all" onClick={() => handleOpenReviewModal(item, order._id)}><Star className="w-3 h-3 mr-1 fill-current" />Đánh giá</Button>
                                        )}
-                                       {reviewedItems[`${order._id}-${item.productId}-${item.sku}`] && (
+                                       {reviewedItems[`${item.productId}-${item.sku}`] && (
                                            <div className="flex items-center gap-1 bg-warning/5 px-2 py-0.5 rounded-full border border-warning/10">
                                                <Star className="w-2.5 h-2.5 fill-warning text-warning" />
-                                               <span className="text-[9px] font-bold text-warning">{reviewedItems[`${order._id}-${item.productId}-${item.sku}`]}</span>
+                                               <span className="text-[9px] font-bold text-warning">{reviewedItems[`${item.productId}-${item.sku}`]}</span>
                                            </div>
                                        )}
                                     </div>
@@ -603,7 +709,17 @@ export default function MyOrdersPage() {
                             <div className="w-8 h-8 rounded-full bg-card flex items-center justify-center border border-border/50 shadow-sm"><AlertCircle className="h-4 w-4 text-muted-foreground" /></div>
                             <div>
                                 <p className="text-[9px] font-black text-muted-foreground uppercase tracking-wider">Thanh toán</p>
-                                <p className="text-xs font-bold leading-tight uppercase">{(order.paymentMethod || "cod")} {order.paymentStatus === 'paid' && <span className="ml-1 text-success">● ĐÃ TRẢ</span>}</p>
+                                <div className="flex items-center gap-2">
+                                  <p className="text-xs font-bold leading-tight uppercase">{(order.paymentMethod || "cod")} {order.paymentStatus === 'paid' && <span className="text-success ml-1">● ĐÃ TRẢ</span>}</p>
+                                  {(order.paymentMethod?.toLowerCase() === 'vnpay' && order.paymentStatus !== 'paid' && order.status !== 'cancelled' && order.status !== 'completed') && (
+                                    <OrderCountdown 
+                                      id={order._id}
+                                      expiresAt={order.expiresAt} 
+                                      createdAt={order.createdAt} 
+                                      onExpire={handleOrderExpire} 
+                                    />
+                                  )}
+                                </div>
                             </div>
                           </div>
                           <div className="flex items-center gap-5 w-full sm:w-auto">
@@ -616,7 +732,20 @@ export default function MyOrdersPage() {
                                 <Eye className="h-3.5 w-3.5" />Chi tiết
                               </Button>
                               {(order.paymentStatus === 'failed' || (order.paymentMethod?.toLowerCase() === 'vnpay' && order.paymentStatus !== 'paid' && order.status !== 'cancelled')) && order.status !== 'cancelled' && (
-                                <Button variant="default" size="sm" className="rounded-xl bg-primary hover:bg-primary/90 text-primary-foreground font-bold px-5 h-9 text-xs transition-all active:scale-95 shadow-md shadow-primary/10 cursor-pointer" onClick={() => handleRetryPayment(order._id)}>Thanh toán lại</Button>
+                                <Button 
+                                  variant={isOrderExpired(order) ? "ghost" : "default"} 
+                                  size="sm" 
+                                  className={cn(
+                                    "rounded-xl font-bold px-5 h-9 text-xs transition-all active:scale-95 shadow-md cursor-pointer",
+                                    isOrderExpired(order) 
+                                      ? "bg-muted text-muted-foreground opacity-50 cursor-not-allowed border-none shadow-none" 
+                                      : "bg-primary hover:bg-primary/90 text-primary-foreground shadow-primary/10"
+                                  )} 
+                                  onClick={() => !isOrderExpired(order) && handleRetryPayment(order._id)}
+                                  disabled={isOrderExpired(order)}
+                                >
+                                  {isOrderExpired(order) ? "Đơn hàng đã hết hạn" : "Thanh toán lại"}
+                                </Button>
                               )}
                                 {order.status === 'pending' && (
                                   <Button variant="outline" size="sm" className="rounded-xl border-destructive/20 text-destructive hover:bg-destructive hover:text-destructive-foreground font-bold px-4 h-9 text-xs transition-all active:scale-95 cursor-pointer" onClick={() => handleCancelOrder(order._id)}>Hủy đơn</Button>
@@ -633,7 +762,7 @@ export default function MyOrdersPage() {
                                     Chưa nhận hàng
                                   </Button>
                                 )}
-                                {['delivered', 'completed'].includes(order.status) && (
+                                {['delivered', 'completed'].includes(order.status) && !isAnyItemReviewed(order) && (
                                   <Button variant="outline" size="sm" className="rounded-xl border-destructive/20 text-destructive hover:bg-destructive hover:text-white font-bold px-4 h-9 text-xs transition-all active:scale-95 cursor-pointer flex items-center gap-1.5" onClick={() => handleReturnOrder(order._id)}>
                                     <History className="h-3.5 w-3.5" />
                                     Trả hàng
@@ -695,8 +824,21 @@ export default function MyOrdersPage() {
                           <div className="space-y-3">
                               <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-primary/60"><CreditCard className="w-3 h-3" />Phương thức thanh toán</div>
                               <Card className="rounded-2xl border-border/40 bg-card/50 p-4 flex flex-col justify-between shadow-sm border h-[130px]">
-                                  <div className="flex items-center justify-between"><div className="flex items-center gap-3 text-base font-black text-primary">{(selectedOrderDetail?.paymentMethod || 'cod').toUpperCase()}</div>{selectedOrderDetail?.paymentStatus === 'paid' ? <Badge className="bg-success text-success-foreground font-black px-2 py-0.5 rounded-full text-[9px] uppercase border-none shadow-sm shadow-success/10">Đã trả</Badge> : <Badge className="bg-warning/10 text-warning border-warning/20 font-black px-2 py-0.5 rounded-full text-[9px] uppercase">Chờ trả</Badge>}</div>
-                                  <div className="pt-3 border-t border-border/40 flex justify-between items-end"><div className="space-y-0.5"><p className="text-[9px] font-black text-muted-foreground uppercase">Tổng tiền</p><p className="text-xl font-black text-primary leading-tight">{formatPrice(selectedOrderDetail?.totalAmount || 0)}</p></div><CheckCircle className="w-6 h-6 text-success/20" /></div>
+                                   <div className="flex items-center justify-between">
+                                      <div className="flex items-center gap-3 text-base font-black text-primary">{(selectedOrderDetail?.paymentMethod || 'cod').toUpperCase()}</div>
+                                      <div className="flex items-center gap-2">
+                                        {(selectedOrderDetail?.paymentMethod?.toLowerCase() === 'vnpay' && selectedOrderDetail?.paymentStatus !== 'paid' && selectedOrderDetail?.status !== 'cancelled' && selectedOrderDetail?.status !== 'completed') && (
+                                          <OrderCountdown 
+                                            id={selectedOrderDetail._id}
+                                            expiresAt={selectedOrderDetail?.expiresAt} 
+                                            createdAt={selectedOrderDetail?.createdAt} 
+                                            onExpire={handleOrderExpire} 
+                                          />
+                                        )}
+                                        {selectedOrderDetail?.paymentStatus === 'paid' ? <Badge className="bg-success text-success-foreground font-black px-2 py-0.5 rounded-full text-[9px] uppercase border-none shadow-sm shadow-success/10">Đã trả</Badge> : <Badge className="bg-warning/10 text-warning border-warning/20 font-black px-2 py-0.5 rounded-full text-[9px] uppercase">Chờ trả</Badge>}
+                                      </div>
+                                   </div>
+                                   <div className="pt-3 border-t border-border/40 flex justify-between items-end"><div className="space-y-0.5"><p className="text-[9px] font-black text-muted-foreground uppercase">Tổng tiền</p><p className="text-xl font-black text-primary leading-tight">{formatPrice(selectedOrderDetail?.totalAmount || 0)}</p></div><CheckCircle className="w-6 h-6 text-success/20" /></div>
                               </Card>
                           </div>
                       </div>
@@ -775,8 +917,17 @@ export default function MyOrdersPage() {
                         </Button>
                       )}
                       {(selectedOrderDetail?.paymentStatus === 'failed' || (selectedOrderDetail?.paymentMethod?.toLowerCase() === 'vnpay' && selectedOrderDetail?.paymentStatus !== 'paid' && selectedOrderDetail?.status !== 'cancelled')) && selectedOrderDetail?.status !== 'cancelled' && (
-                        <Button className="rounded-xl font-bold h-10 px-6 text-xs gradient-hero shadow-md shadow-primary/10 transition-all duration-300 hover:scale-105 active:scale-95 hover:shadow-primary/20" onClick={() => handleRetryPayment(selectedOrderDetail._id)}>
-                          Thanh toán lại
+                        <Button 
+                          className={cn(
+                            "rounded-xl font-bold h-10 px-6 text-xs transition-all duration-300 active:scale-95 shadow-md",
+                            isOrderExpired(selectedOrderDetail)
+                              ? "bg-muted text-muted-foreground opacity-50 cursor-not-allowed border-none shadow-none"
+                              : "gradient-hero shadow-primary/10 hover:scale-105 hover:shadow-primary/20"
+                          )} 
+                          onClick={() => !isOrderExpired(selectedOrderDetail) && handleRetryPayment(selectedOrderDetail._id)}
+                          disabled={isOrderExpired(selectedOrderDetail)}
+                        >
+                          {isOrderExpired(selectedOrderDetail) ? "Đơn hàng đã hết hạn" : "Thanh toán lại"}
                         </Button>
                       )}
                       {['shipping', 'delivered'].includes(selectedOrderDetail?.status) && (
@@ -789,7 +940,7 @@ export default function MyOrdersPage() {
                           <AlertTriangle className="w-3.5 h-3.5" /> Chưa nhận được hàng
                         </Button>
                       )}
-                      {['delivered', 'completed'].includes(selectedOrderDetail?.status) && (
+                      {['delivered', 'completed'].includes(selectedOrderDetail?.status) && !isAnyItemReviewed(selectedOrderDetail) && (
                         <Button variant="outline" className="rounded-xl font-bold h-10 px-6 text-xs border-destructive/20 text-destructive hover:bg-destructive hover:text-white transition-all duration-300 hover:scale-105 active:scale-95 flex items-center gap-2" onClick={() => handleReturnOrder(selectedOrderDetail._id)}>
                           <History className="w-3.5 h-3.5" /> Trả hàng
                         </Button>
