@@ -10,6 +10,7 @@ import { CouponsModule } from '../coupons/coupons.module';
 import { PaymentsModule } from '../payments/payments.module';
 import { InventoryModule } from '../inventory/inventory.module';
 import { GhnModule } from '../ghn/ghn.module';
+import { OrdersCron } from './orders.cron';
 
 @Module({
   imports: [
@@ -23,7 +24,7 @@ import { GhnModule } from '../ghn/ghn.module';
     CouponsModule,
   ],
   controllers: [OrdersController, AdminOrdersController, GhnWebhookController],
-  providers: [OrdersService],
+  providers: [OrdersService, OrdersCron],
   exports: [OrdersService],
 })
 export class OrdersModule {}

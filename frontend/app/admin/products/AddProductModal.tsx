@@ -459,15 +459,15 @@ export default function AddProductModal({ open, onOpenChange, initialData, onSuc
       return;
     }
 
-    // Validate variants content (Chỉ yêu cầu ít nhất một thuộc tính)
+    // Validate variants content (Chỉ yêu cầu ít nhất một thuộc tính và phải có giá bán)
     const invalidVariants = variants.some(v => 
-      v.attributes.filter((a) => a.key.trim() && a.value.trim()).length === 0
+      v.attributes.filter((a) => a.key.trim() && a.value.trim()).length === 0 || v.price <= 0
     );
 
     if (invalidVariants) {
       toast({ 
         title: "Lỗi dữ liệu", 
-        description: "Vui lòng nhập đầy đủ ít nhất một thuộc tính cho các biến thể.", 
+        description: "Vui lòng nhập đầy đủ giá bán và ít nhất một thuộc tính cho mỗi biến thể.", 
         variant: "destructive" 
       });
       return;
@@ -959,7 +959,7 @@ export default function AddProductModal({ open, onOpenChange, initialData, onSuc
                                   id={`variant-import-price-${i}`}
                                   type="number"
                                   disabled
-                                  value={variant.importPrice}
+                                  value={variant.importPrice === 0 ? "" : variant.importPrice}
                                   className="mt-1.5 bg-muted/40 cursor-not-allowed"
                                   title="Giá nhập đồng bộ từ tồn kho"
                                 />
@@ -973,7 +973,7 @@ export default function AddProductModal({ open, onOpenChange, initialData, onSuc
                                   type="number"
                                   min="0"
                                   placeholder="0"
-                                  value={variant.price}
+                                  value={variant.price === 0 ? "" : variant.price}
                                   onChange={(e) => updateVariant(i, "price", Math.max(0, Number(e.target.value)))}
                                   className="mt-1.5"
                                 />
@@ -992,7 +992,7 @@ export default function AddProductModal({ open, onOpenChange, initialData, onSuc
                                   min="0"
                                   disabled
                                   placeholder="0"
-                                  value={variant.stock}
+                                  value={variant.stock === 0 ? "" : variant.stock}
                                   onChange={(e) => updateVariant(i, "stock", Math.max(0, Math.floor(Number(e.target.value))))}
                                   className="mt-1.5 bg-muted/40"
                                 />
@@ -1007,7 +1007,7 @@ export default function AddProductModal({ open, onOpenChange, initialData, onSuc
                                   min="0"
                                   max="100"
                                   placeholder="0"
-                                  value={variant.discountPercentage}
+                                  value={variant.discountPercentage === 0 ? "" : variant.discountPercentage}
                                   onChange={(e) => {
                                     let val = Number(e.target.value);
                                     if (val < 0) val = 0;

@@ -281,6 +281,9 @@ export class Order {
 
   @Prop()
   expiresAt?: Date;
+
+  @Prop()
+  vnpayTransactionDate?: string;
 }
 
 export const OrderSchema = SchemaFactory.createForClass(Order);

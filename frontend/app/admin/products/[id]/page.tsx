@@ -646,7 +646,6 @@ export default function ProductDetailPage() {
                                                 <TableHead className="text-[10px] font-bold uppercase tracking-wider h-10 w-[60px]">Ảnh</TableHead>
                                                 <TableHead className="text-[10px] font-bold uppercase tracking-wider h-10">SKU</TableHead>
                                                 <TableHead className="text-[10px] font-bold uppercase tracking-wider h-10">Phân loại</TableHead>
-                                                <TableHead className="text-[10px] font-bold uppercase tracking-wider h-10 text-right">Giá nhập</TableHead>
                                                 <TableHead className="text-[10px] font-bold uppercase tracking-wider h-10 text-right">Giá bán</TableHead>
                                                 <TableHead className="text-[10px] font-bold uppercase tracking-wider h-10 text-right">Kho</TableHead>
                                             </TableRow>
@@ -678,9 +677,7 @@ export default function ProductDetailPage() {
                                                             ))}
                                                         </div>
                                                     </TableCell>
-                                                    <TableCell className="text-right font-medium text-xs text-muted-foreground italic">
-                                                        {v.importPrice ? formatPrice(v.importPrice) : "---"}
-                                                    </TableCell>
+
                                                     <TableCell className="text-right font-medium text-sm">
                                                         <div className="flex flex-col items-end">
                                                             {v.discountPercentage > 0 ? (

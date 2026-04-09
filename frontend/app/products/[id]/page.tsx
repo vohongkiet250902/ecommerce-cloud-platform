@@ -23,12 +23,14 @@ import {
   ChevronRight,
   Loader2,
   Box,
+  ArrowRight,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "@/hooks/use-toast";
 import { productApi, reviewApi, cartApi } from "@/services/api";
 import { useCart } from "@/hooks/useCart";
 import { useAuth } from "@/hooks/useAuth";
+import { ProductCard } from "@/components/ProductCard";
 
 type Product = {
   _id: string;
@@ -39,8 +41,8 @@ type Product = {
   price: number;
   originalPrice?: number;
   images: { url: string; publicId: string }[];
-  category: { _id: string; name: string; isActive?: boolean };
-  brand: { _id: string; name: string; isActive?: boolean };
+  categoryId: { _id: string; name: string; isActive?: boolean };
+  brandId: { _id: string; name: string; isActive?: boolean };
   averageRating: number;
   featured?: boolean;
   reviewCount: number;
@@ -92,7 +94,10 @@ export default function ProductDetailPage() {
   const [reviewsPage, setReviewsPage] = useState(1);
   const reviewsLimit = 10;
   
-  const [isSubmittingReview, setIsSubmittingReview] = useState(false); // Maybe keep this if needed for a modal later, but the user wants it GONE from here. Actually, the user says 'bỏ phần đánh giá ở trang chi tiết' so let's remove it.
+  const [relatedProducts, setRelatedProducts] = useState<any[]>([]);
+  const [relatedLoading, setRelatedLoading] = useState(false);
+  
+  const [isSubmittingReview, setIsSubmittingReview] = useState(false);
   
   const scrollGallery = (direction: 'left' | 'right') => {
     if (scrollContainerRef.current) {
@@ -121,7 +126,7 @@ export default function ProductDetailPage() {
           const res = await productApi.getProductDetail(idParam);
           const data = res.data.data || res.data;
           
-          if (!data || (data.category && data.category.isActive === false) || (data.brand && data.brand.isActive === false)) {
+          if (!data || (data.categoryId && data.categoryId.isActive === false) || (data.brandId && data.brandId.isActive === false)) {
             toast({ title: "Thông báo", description: "Sản phẩm hiện không khả dụng!", variant: "destructive" });
             router.push("/products");
             return;
@@ -215,6 +220,26 @@ export default function ProductDetailPage() {
 
     fetchReviews();
   }, [product?._id, reviewsPage]);
+
+  useEffect(() => {
+    const fetchRelated = async () => {
+      if (!product || (!product.categoryId?._id && !product.categoryId)) return;
+      try {
+        setRelatedLoading(true);
+        const categoryId = typeof product.categoryId === 'object' ? product.categoryId._id : product.categoryId;
+        const res = await productApi.getProducts({ categoryId, limit: 11 });
+        const list = res.data.data || res.data || [];
+        // Exclude current product
+        setRelatedProducts(list.filter((p: any) => p._id !== product._id).slice(0, 10));
+      } catch (error) {
+        console.error("Failed to fetch related products", error);
+      } finally {
+        setRelatedLoading(false);
+      }
+    };
+
+    fetchRelated();
+  }, [product?._id, product?.categoryId]);
 
   const handleLoadMoreReviews = () => {
     if (reviews.length < reviewsTotal) {
@@ -335,6 +360,7 @@ export default function ProductDetailPage() {
       originalPrice: basePrice,
       discountPercentage: currentDiscount,
       quantity: quantity,
+      stock: currentStock,
       image: currentVariant?.image?.url || images[0] || "",
       attributes: currentVariant?.attributes || [],
     });
@@ -371,6 +397,7 @@ export default function ProductDetailPage() {
       originalPrice: basePrice,
       discountPercentage: currentDiscount,
       quantity: quantity,
+      stock: currentStock,
       image: currentVariant?.image?.url || images[0] || "",
       attributes: currentVariant?.attributes || [],
     };
@@ -539,7 +566,7 @@ export default function ProductDetailPage() {
           <div className="space-y-8">
             <div className="space-y-2">
               <div className="flex items-center gap-3 flex-wrap">
-                <p className="text-sm text-primary font-bold tracking-wide uppercase">{product.brand?.name}</p>
+                <p className="text-sm text-primary font-bold tracking-wide uppercase">{product.brandId?.name}</p>
               </div>
               <h1 className="text-2xl lg:text-4.5xl font-black text-foreground leading-tight tracking-tight">
                 {product.name}
@@ -937,6 +964,50 @@ export default function ProductDetailPage() {
             </div>
           </TabsContent>
         </Tabs>
+
+        {/* Related Products Section */}
+        {relatedProducts.length > 0 && (
+          <section className="mt-20 lg:mt-32 pb-16">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-8 gap-4">
+              <div>
+                <h2 className="text-2xl lg:text-3xl font-bold text-foreground mb-2">
+                  Sản phẩm tương tự
+                </h2>
+                <div className="h-1 w-12 bg-primary rounded-full"></div>
+              </div>
+              <Link href={`/products?category=${typeof product.categoryId === 'object' ? product.categoryId._id : product.categoryId}`}>
+                <Button variant="ghost" className="text-primary hover:text-primary/80 hover:bg-primary/5 font-bold gap-2">
+                  Xem thêm <ArrowRight className="w-4 h-4" />
+                </Button>
+              </Link>
+            </div>
+
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 lg:gap-6">
+              {relatedProducts.map((p, idx) => (
+                <motion.div
+                  key={p._id || idx}
+                  initial={{ opacity: 0, y: 20 }}
+                  whileInView={{ opacity: 1, y: 0 }}
+                  viewport={{ once: true }}
+                  transition={{ delay: idx * 0.05 }}
+                >
+                  <ProductCard 
+                    id={p.slug}
+                    name={p.name}
+                    brandName={typeof p.brandId === 'object' ? p.brandId?.name : undefined}
+                    price={p.price || 0}
+                    originalPrice={p.originalPrice}
+                    image={p.images?.[0]?.url || ""}
+                    rating={p.averageRating || 0}
+                    reviewCount={p.reviewCount || 0}
+                    variants={p.variants}
+                    discountPercentage={p.discountPercentage}
+                  />
+                </motion.div>
+              ))}
+            </div>
+          </section>
+        )}
       </main>
 
       <Footer />

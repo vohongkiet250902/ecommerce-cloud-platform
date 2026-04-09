@@ -21,7 +21,7 @@ import { CacheModule } from '@nestjs/cache-manager';
 import { redisStore } from 'cache-manager-redis-yet';
 import { AiChatModule } from './modules/ai-chat/ai-chat.module';
 import { InventoryModule } from './modules/inventory/inventory.module';
-
+import { ScheduleModule } from '@nestjs/schedule';
 @Module({
   imports: [
     UsersModule,
@@ -35,6 +35,7 @@ import { InventoryModule } from './modules/inventory/inventory.module';
     PaymentsModule,
     CartModule,
     UploadModule,
+    ScheduleModule.forRoot(),
     //config DB
     MongooseModule.forRootAsync({
       imports: [ConfigModule],
@@ -63,13 +64,16 @@ import { InventoryModule } from './modules/inventory/inventory.module';
     ReviewsModule,
     CacheModule.registerAsync({
       isGlobal: true,
-      useFactory: async () => ({
+      imports: [ConfigModule], // 🔥 Bắt buộc phải import ConfigModule
+      useFactory: async (configService: ConfigService) => ({
         store: await redisStore({
-          //url: 'redis://localhost:6379',
-          url: 'redis://ecommerce_redis:6379',
+          // 🔥 Lấy từ biến môi trường, mặc định là localhost nếu chạy dev
+          url:
+            configService.get<string>('REDIS_URL') || 'redis://localhost:6379',
           ttl: 60 * 1000,
         }),
       }),
+      inject: [ConfigService], // 🔥 Inject ConfigService vào
     }),
     AiChatModule,
     InventoryModule,

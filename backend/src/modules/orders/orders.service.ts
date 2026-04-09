@@ -2,6 +2,8 @@ import {
   BadRequestException,
   Injectable,
   NotFoundException,
+  Inject,
+  forwardRef,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { HydratedDocument, Model, Types } from 'mongoose';
@@ -15,6 +17,7 @@ import { Product } from '../products/schemas/product.schema';
 import { CouponsService } from '../coupons/coupons.service';
 import { InventoryService } from '../inventory/inventory.service';
 import { GhnService } from '../ghn/ghn.service';
+import { PaymentsService } from '../payments/payments.service';
 
 // ─────────────────────────────────────────────────────────────
 //  Transition maps
@@ -90,6 +93,8 @@ export class OrdersService {
     private readonly couponsService: CouponsService,
     private readonly inventoryService: InventoryService,
     private readonly ghnService: GhnService,
+    @Inject(forwardRef(() => PaymentsService))
+    private readonly paymentsService: PaymentsService,
   ) {}
 
   // ─────────────────────────────────────────────────────────────
@@ -667,6 +672,23 @@ export class OrdersService {
 
     if (['completed', 'cancelled', 'returned'].includes(order.status)) {
       throw new BadRequestException('Đơn hàng đã kết thúc, không thể hủy');
+    }
+
+    // 🔥 LOGIC REFUND VNPAY TỰ ĐỘNG (Dành cho Admin)
+    if (order.paymentMethod === 'vnpay' && order.paymentStatus === 'paid') {
+      const refundResult = await this.paymentsService.refundTransaction(
+        order,
+        'admin',
+      );
+
+      if (!refundResult.success) {
+        throw new BadRequestException(
+          `Hoàn tiền VNPay thất bại: ${refundResult.message}`,
+        );
+      }
+
+      order.paymentStatus = 'refunded';
+      await order.save();
     }
 
     await this.cancelExternalShipmentIfNeeded(order);
@@ -1331,14 +1353,27 @@ export class OrdersService {
       );
     }
 
+    // 🔥 LOGIC REFUND VNPAY TỰ ĐỘNG
     if (order.paymentMethod === 'vnpay' && order.paymentStatus === 'paid') {
-      throw new BadRequestException(
-        'Đơn đã thanh toán online, admin cần xử lý hoàn tiền trước khi hủy',
+      // Nhờ PaymentsService gọi API Refund
+      const refundResult = await this.paymentsService.refundTransaction(
+        order,
+        userId,
       );
+
+      if (!refundResult.success) {
+        throw new BadRequestException(
+          `Không thể hủy đơn. Yêu cầu hoàn tiền VNPay thất bại: ${refundResult.message}`,
+        );
+      }
+
+      // Đánh dấu trạng thái thanh toán là đã hoàn
+      order.paymentStatus = 'refunded';
+      await order.save();
     }
 
     await this.cancelExternalShipmentIfNeeded(order);
-    return this.updateStatus(orderId, { status: 'cancelled' }, 'admin');
+    return this.updateStatus(orderId, { status: 'cancelled' }, 'admin'); // (Hoặc 'user')
   }
 
   async findByUser(
@@ -1378,7 +1413,8 @@ export class OrdersService {
   //  Payment callbacks (source: 'system')
   // ─────────────────────────────────────────────────────────────
 
-  async confirmVnpayPayment(orderId: string) {
+  // Thêm tham số vnpayTransactionDate vào đây
+  async confirmVnpayPayment(orderId: string, vnpayTransactionDate?: string) {
     const order = await this.orderModel.findById(orderId);
     if (!order) throw new NotFoundException('Không tìm thấy đơn hàng');
 
@@ -1389,6 +1425,12 @@ export class OrdersService {
     if (order.paymentStatus !== 'paid') {
       order.paymentStatus = 'paid';
       order.paidAt = new Date();
+
+      // 🔥 Lưu lại thời gian giao dịch thực tế của VNPay
+      if (vnpayTransactionDate) {
+        order.vnpayTransactionDate = vnpayTransactionDate;
+      }
+
       await order.save();
     }
 

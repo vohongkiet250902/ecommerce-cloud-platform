@@ -1,20 +1,24 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell,
-  AreaChart, Area,
+  XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+  BarChart, Bar,
 } from "recharts";
 import {
   Package, ShoppingCart, TrendingUp, DollarSign, ArrowUpRight, ArrowDownRight, Trophy, Loader2,
+  Filter, ArrowRightLeft,
 } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { orderApi, inventoryApi } from "@/services/api";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
-type Period = "day" | "week" | "month";
+type Period = "day" | "week" | "month" | "quarter";
+type SortBy = "quantity" | "revenue" | "profit";
 
 const formatCurrency = (value: number) => {
   if (!value) return "0đ";
@@ -23,89 +27,112 @@ const formatCurrency = (value: number) => {
   return value.toLocaleString("vi-VN") + "đ";
 };
 
-const COLORS = [
-  "hsl(var(--primary))",
-  "hsl(var(--success))",
-  "hsl(var(--warning))",
-  "hsl(var(--info))",
-  "hsl(var(--destructive))",
-];
-
 const StatisticsPage = () => {
   const [period, setPeriod] = useState<Period>("week");
+  const [sortBy, setSortBy] = useState<SortBy>("quantity");
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState<any>(null);
 
-  const fetchData = async (currentPeriod: Period) => {
+  const fetchData = useCallback(async (currentPeriod: Period, currentSortBy: SortBy) => {
     setLoading(true);
     try {
-      const rangeParams: any = {
-        groupBy: "day",
-      };
+      const rangeParams: any = { groupBy: "day" };
+      const now = new Date();
       
-      if (currentPeriod === "day") rangeParams.days = 1;
-      else if (currentPeriod === "week") rangeParams.days = 7;
-      else if (currentPeriod === "month") rangeParams.months = 1;
+      if (currentPeriod === "day") {
+        rangeParams.days = 1;
+      } else if (currentPeriod === "week") {
+        const dayOfWeek = now.getDay();
+        rangeParams.days = dayOfWeek === 0 ? 7 : dayOfWeek; 
+      } else if (currentPeriod === "month") {
+        rangeParams.days = now.getDate();
+      } else if (currentPeriod === "quarter") {
+        rangeParams.groupBy = "month";
+        rangeParams.months = (now.getMonth() % 3) + 1;
+      }
 
-      const [revenueRes, profitRes, inventoryStatsRes, topProductsRes, lotsRes] = await Promise.all([
-        orderApi.getRevenueStats(rangeParams),
-        orderApi.getProfitStats(rangeParams),
-        inventoryApi.getStockInStats(rangeParams),
-        orderApi.getTopSkus({ days: currentPeriod === 'day' ? 1 : currentPeriod === 'week' ? 7 : 30, limit: 10 }),
-        inventoryApi.getLots() // Recently imported lots
+      const topParams = { 
+        days: currentPeriod === 'day' ? 1 : 
+              currentPeriod === 'week' ? (now.getDay() === 0 ? 7 : now.getDay()) : 
+              currentPeriod === 'month' ? now.getDate() : 
+              ((now.getMonth() % 3) + 1) * 30, // Approx days in quarter
+        limit: 10,
+        sortBy: currentSortBy
+      };
+
+      const safeFetch = async (promise: Promise<any>, defaultValue: any) => {
+        try {
+          const res = await promise;
+          return res.data;
+        } catch (error) {
+          console.error("API Call failed:", error);
+          return defaultValue;
+        }
+      };
+
+      const [
+        rev, 
+        prof, 
+        inv, 
+        topSkusRes, 
+        topProductsRes,
+        lotsRes
+      ] = await Promise.all([
+        safeFetch(orderApi.getRevenueStats(rangeParams), { summary: { current: {}, previous: {}, growth: {} }, chartData: [] }),
+        safeFetch(orderApi.getProfitStats(rangeParams), { summary: { current: {}, previous: {}, growth: {} }, chartData: [] }),
+        safeFetch(inventoryApi.getStockInStats(rangeParams), { summary: {} }),
+        safeFetch(orderApi.getTopSkus(topParams), { items: [] }),
+        safeFetch(orderApi.getTopProducts(topParams), { items: [] }),
+        safeFetch(inventoryApi.getLots(), [])
       ]);
 
-      const revenueData = revenueRes.data;
-      const profitData = profitRes.data;
-      const inventoryData = inventoryStatsRes.data;
-      const topProducts = topProductsRes.data?.items || [];
-      const recentLots = (lotsRes.data || []).slice(0, 10);
+      const topSkus = topSkusRes?.items || [];
+      const topProducts = topProductsRes?.items || [];
+      const recentLots = (Array.isArray(lotsRes) ? lotsRes : []).slice(0, 10);
 
       // Transform profit chart data
-      const chartItems = (profitData.items || []).map((item: any) => ({
+      const chartItems = (prof?.chartData || []).map((item: any) => ({
         label: item.period,
         revenue: item.netRevenue || 0,
         cost: item.cogs || 0,
-        profit: item.profit || 0,
+        profit: item.netProfit || 0,
       }));
 
       setData({
-        importTotal: inventoryData.summary.totalStockInCost || 0,
-        importQuantity: inventoryData.summary.totalQuantity || 0,
-        importProducts: inventoryData.summary.totalLots || 0,
-        salesTotal: revenueData.summary.totalNetRevenue || 0,
-        salesQuantity: revenueData.summary.totalOrders || 0,
-        salesProducts: topProducts.length,
-        profit: profitData.summary.totalProfit || 0,
-        profitMargin: (revenueData.summary.totalNetRevenue > 0) 
-          ? ((profitData.summary.totalProfit / revenueData.summary.totalNetRevenue) * 100).toFixed(1) 
-          : 0,
-        importDetails: recentLots.map((lot: any) => ({
+        // Summaries
+        revenue: rev?.summary || {},
+        profit: prof?.summary || {},
+        inventory: inv?.summary || {},
+        
+        // Detailed data
+        chartItems,
+        topSkus: topSkus.map((p: any) => ({
+          name: p.name,
+          sku: p.sku || "N/A",
+          attributes: p.attributes || [],
+          image: p.imageUrl || p.image,
+          quantity: p.quantitySold,
+          revenue: p.grossRevenue,
+          profit: p.grossProfit,
+        })),
+        topProducts: topProducts.map((p: any) => ({
+          id: p.productId,
+          name: p.name,
+          image: p.imageUrl,
+          skus: p.skus || [],
+          quantitySold: p.quantitySold,
+          grossRevenue: p.grossRevenue,
+          grossProfit: p.grossProfit,
+          orderCount: p.orderCount,
+        })),
+        recentLots: recentLots.map((lot: any) => ({
           name: lot.productId?.name || "N/A",
           sku: lot.sku || "N/A",
           attributes: lot.variant?.attributes || [],
           image: lot.imageUrl,
           quantity: lot.originalQuantity,
-          cost: lot.originalQuantity * lot.unitCost,
+          cost: (lot.unitCost || 0) * (lot.originalQuantity || 0),
         })),
-        salesDetails: topProducts.slice(0, 10).map((p: any) => ({
-          name: p.name,
-          sku: p.sku || "N/A",
-          attributes: p.attributes || [],
-          image: p.imageUrl || p.image,
-          quantity: p.quantitySold || p.quantity,
-          revenue: p.grossRevenue || p.revenue,
-        })),
-        bestSellers: topProducts.map((p: any) => ({
-          name: p.name,
-          sku: p.sku || "N/A",
-          attributes: p.attributes || [],
-          sold: p.quantitySold || p.quantity,
-          revenue: p.grossRevenue || p.revenue,
-          change: 0,
-          image: p.imageUrl || p.image,
-        })),
-        profitChart: chartItems,
       });
 
     } catch (error) {
@@ -113,13 +140,18 @@ const StatisticsPage = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
-    fetchData(period);
-  }, [period]);
+    fetchData(period, sortBy);
+  }, [period, sortBy, fetchData]);
 
-  const periodLabel = { day: "hôm nay", week: "tuần này", month: "tháng này" }[period];
+  const periodLabel = { 
+    day: "hôm nay", 
+    week: "7 ngày qua", 
+    month: "30 ngày qua",
+    quarter: "quý này" 
+  }[period];
 
   if (loading || !data) {
     return (
@@ -130,119 +162,135 @@ const StatisticsPage = () => {
     );
   }
 
-  const pieData = data.bestSellers.slice(0, 5).map((item: any) => ({
-    name: item.name,
-    value: item.sold,
-  }));
+  const GrowthBadge = ({ value, trend, label }: { value: number; trend: string; label?: string }) => {
+    if (!trend) return null;
+    const isUp = trend === 'up';
+    const isFlat = trend === 'flat';
+    
+    return (
+      <div className="flex items-center">
+        <span className={cn(
+          "flex items-center gap-0.5 text-[10px] font-bold px-1.5 py-0.5 rounded-full ml-2",
+          isUp ? "bg-emerald-500/10 text-emerald-600" : 
+          isFlat ? "bg-muted text-muted-foreground" : 
+          "bg-destructive/10 text-destructive"
+        )}>
+          {isUp ? <ArrowUpRight className="h-3 w-3" /> : isFlat ? <ArrowRightLeft className="h-3 w-3" /> : <ArrowDownRight className="h-3 w-3" />}
+          {isFlat ? "0" : Math.abs(value)}%
+        </span>
+        {label && <span className="text-[11px] text-muted-foreground ml-1.5 font-medium italic">{label}</span>}
+      </div>
+    );
+  };
+
+  const comparisonLabel = {
+    day: "hôm qua",
+    week: "tuần trước",
+    month: "tháng trước",
+    quarter: "quý trước"
+  }[period];
 
   return (
-    <div className="space-y-6 animate-fade-in">
+    <div className="space-y-6 animate-fade-in pb-10">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-foreground">Thống kê</h1>
-          <p className="text-sm text-muted-foreground font-medium italic">Báo cáo chi tiết hiệu suất kinh doanh</p>
+          <h1 className="text-2xl font-bold text-foreground">Báo cáo Thống kê</h1>
+          <p className="text-sm text-muted-foreground font-medium">Tổng quan hiệu suất kinh doanh qua các kỳ</p>
         </div>
-        <Tabs value={period} onValueChange={(v) => setPeriod(v as Period)} className="w-full md:w-auto">
-          <TabsList className="grid grid-cols-3 w-full">
-            <TabsTrigger value="day">Ngày</TabsTrigger>
-            <TabsTrigger value="week">Tuần</TabsTrigger>
-            <TabsTrigger value="month">Tháng</TabsTrigger>
-          </TabsList>
-        </Tabs>
+        <div className="flex items-center gap-3">
+          <Tabs value={period} onValueChange={(v) => setPeriod(v as Period)} className="w-full md:w-auto">
+            <TabsList className="grid grid-cols-4 w-full">
+              <TabsTrigger value="day">Ngày</TabsTrigger>
+              <TabsTrigger value="week">Tuần</TabsTrigger>
+              <TabsTrigger value="month">Tháng</TabsTrigger>
+              <TabsTrigger value="quarter">Quý</TabsTrigger>
+            </TabsList>
+          </Tabs>
+        </div>
       </div>
 
       {/* Summary Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        <Card className="card-shadow hover:card-shadow-md transition-shadow border-border/40">
+        <Card className="card-shadow hover:card-shadow-md transition-all border-border/40 overflow-hidden relative group">
+          <div className="absolute top-0 right-0 p-3 bg-primary/5 rounded-bl-3xl group-hover:scale-110 transition-transform">
+             <Package className="h-5 w-5 text-primary/40" />
+          </div>
           <CardContent className="p-6">
-            <div className="flex items-start justify-between">
-              <div className="space-y-1">
-                <p className="text-xs font-semibold text-muted-foreground uppercase opacity-70">Tổng nhập kho</p>
-                <p className="text-2xl font-bold text-card-foreground">{formatCurrency(data.importTotal)}</p>
-                <p className="text-xs text-muted-foreground font-medium">{data.importQuantity} sản phẩm / {data.importProducts} lô nhập</p>
-              </div>
-              <div className="p-3 rounded-2xl bg-primary/10">
-                <Package className="h-6 w-6 text-primary" />
-              </div>
+            <p className="text-xs font-semibold text-muted-foreground uppercase opacity-70 mb-1">Tổng nhập kho</p>
+            <p className="text-2xl font-bold text-card-foreground">{formatCurrency(data.inventory.totalStockInCost)}</p>
+            <p className="text-xs text-muted-foreground font-medium mt-2">
+              <span className="text-primary font-bold">{data.inventory.totalQuantity}</span> sản phẩm / <span className="font-bold">{data.inventory.totalLots}</span> lô nhập
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card className="card-shadow hover:card-shadow-md transition-all border-border/40 overflow-hidden relative group">
+          <div className="absolute top-0 right-0 p-3 bg-emerald-500/5 rounded-bl-3xl group-hover:scale-110 transition-transform">
+             <ShoppingCart className="h-5 w-5 text-emerald-500/40" />
+          </div>
+          <CardContent className="p-6">
+            <p className="text-xs font-semibold text-muted-foreground uppercase opacity-70 mb-1">Doanh thu thuần</p>
+            <p className="text-2xl font-bold text-card-foreground">{formatCurrency(data.revenue.current?.netRevenue)}</p>
+            <div className="flex items-center justify-between mt-2">
+              <p className="text-xs text-muted-foreground font-medium">
+                <span className="text-emerald-500 font-bold">{data.revenue.current?.orderCount}</span> đơn hàng
+              </p>
+              <GrowthBadge value={data.revenue.growth?.netRevenue} trend={data.revenue.growth?.trend} label={comparisonLabel} />
             </div>
           </CardContent>
         </Card>
 
-        <Card className="card-shadow hover:card-shadow-md transition-shadow border-border/40">
+        <Card className="card-shadow hover:card-shadow-md transition-all border-border/40 overflow-hidden relative group">
+          <div className="absolute top-0 right-0 p-3 bg-amber-500/5 rounded-bl-3xl group-hover:scale-110 transition-transform">
+             <DollarSign className="h-5 w-5 text-amber-500/40" />
+          </div>
           <CardContent className="p-6">
-            <div className="flex items-start justify-between">
-              <div className="space-y-1">
-                <p className="text-xs font-semibold text-muted-foreground uppercase opacity-70">Tổng bán ra</p>
-                <p className="text-2xl font-bold text-card-foreground">{formatCurrency(data.salesTotal)}</p>
-                <p className="text-xs text-muted-foreground font-medium">{data.salesQuantity} đơn hàng</p>
-              </div>
-              <div className="p-3 rounded-2xl bg-emerald-500/10">
-                <ShoppingCart className="h-6 w-6 text-emerald-500" />
-              </div>
+            <p className="text-xs font-semibold text-muted-foreground uppercase opacity-70 mb-1">Lợi nhuận ròng</p>
+            <p className={cn(
+              "text-2xl font-bold", 
+              (data.profit.current?.netProfit || 0) > 0 ? "text-emerald-600" : 
+              (data.profit.current?.netProfit || 0) < 0 ? "text-destructive" : 
+              "text-card-foreground"
+            )}>
+              {formatCurrency(data.profit.current?.netProfit)}
+            </p>
+            <div className="flex items-center justify-end mt-2">
+              <GrowthBadge value={data.profit.growth?.netProfit} trend={data.profit.growth?.trend} label={comparisonLabel} />
             </div>
           </CardContent>
         </Card>
 
-        <Card className="card-shadow hover:card-shadow-md transition-shadow border-border/40">
+        <Card className="card-shadow hover:card-shadow-md transition-all border-border/40 overflow-hidden relative group">
+          <div className="absolute top-0 right-0 p-3 bg-indigo-500/5 rounded-bl-3xl group-hover:scale-110 transition-transform">
+             <Trophy className="h-5 w-5 text-indigo-500/40" />
+          </div>
           <CardContent className="p-6">
-            <div className="flex items-start justify-between">
-              <div className="space-y-1">
-                <p className="text-xs font-semibold text-muted-foreground uppercase opacity-70">Lợi nhuận</p>
-                <p className="text-2xl font-bold text-emerald-600">{formatCurrency(data.profit)}</p>
-                <div className="flex items-center gap-1.5 mt-1">
-                  <span className="text-xs text-muted-foreground font-medium">tổng lợi nhuận</span>
-                </div>
-              </div>
-              <div className="p-3 rounded-2xl bg-amber-500/10">
-                <DollarSign className="h-6 w-6 text-amber-500" />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="card-shadow hover:card-shadow-md transition-shadow border-border/40">
-          <CardContent className="p-6">
-            <div className="flex items-start justify-between">
-              <div className="space-y-1">
-                <p className="text-xs font-semibold text-muted-foreground uppercase opacity-70">Sản phẩm top</p>
-                <p className="text-lg font-bold text-card-foreground line-clamp-1">{data.bestSellers[0]?.name || "N/A"}</p>
-                <div className="flex items-center gap-1.5 mt-1">
-                  <Trophy className="h-3.5 w-3.5 text-amber-500" />
-                  <span className="text-xs text-muted-foreground font-medium">{data.bestSellers[0]?.sold || 0} đã bán {periodLabel}</span>
-                </div>
-              </div>
-              <div className="p-3 rounded-2xl bg-indigo-500/10">
-                <TrendingUp className="h-6 w-6 text-indigo-500" />
-              </div>
-            </div>
+            <p className="text-xs font-semibold text-muted-foreground uppercase opacity-70 mb-1">Sản phẩm bán chạy</p>
+            <p className="text-lg font-bold text-card-foreground line-clamp-1">{data.topProducts[0]?.name || "N/A"}</p>
+            <p className="text-xs text-muted-foreground font-medium mt-2">
+              <span className="text-indigo-600 font-bold">{data.topProducts[0]?.quantitySold || 0}</span> sản phẩm {periodLabel}
+            </p>
           </CardContent>
         </Card>
       </div>
 
-      {/* Profit Chart */}
+      {/* Chart Section */}
       <Card className="card-shadow border-border/40">
-        <CardHeader className="pb-2">
-          <CardTitle className="text-lg font-bold">Biểu đồ Tài chính</CardTitle>
-          <p className="text-xs text-muted-foreground">Sự tương quan giữa Doanh thu, Chi phí nhập và Lợi nhuận</p>
+        <CardHeader className="pb-2 flex flex-row items-center justify-between">
+          <div>
+            <CardTitle className="text-lg font-bold">Dòng chảy Tài chính</CardTitle>
+            <p className="text-xs text-muted-foreground">Phân tích tương quan Doanh thu - Chi phí - Lợi nhuận</p>
+          </div>
+          <div className="p-2 border border-border/50 rounded-lg bg-muted/20 flex gap-4 text-[11px] font-bold uppercase tracking-tight">
+             <div className="flex items-center gap-1.5"><div className="w-2.5 h-2.5 rounded-full bg-primary" /> Doanh thu</div>
+             <div className="flex items-center gap-1.5"><div className="w-2.5 h-2.5 rounded-full bg-destructive/60" /> Phí vốn</div>
+             <div className="flex items-center gap-1.5"><div className="w-2.5 h-2.5 rounded-full bg-emerald-500" /> Lợi nhuận</div>
+          </div>
         </CardHeader>
         <CardContent>
-          <div className="h-[350px] w-full mt-4">
+          <div className="h-[400px] w-full mt-4">
             <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={data.profitChart} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-                <defs>
-                  <linearGradient id="gRevenue" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.2} />
-                    <stop offset="95%" stopColor="hsl(var(--primary))" stopOpacity={0} />
-                  </linearGradient>
-                  <linearGradient id="gCost" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="hsl(var(--destructive))" stopOpacity={0.15} />
-                    <stop offset="95%" stopColor="hsl(var(--destructive))" stopOpacity={0} />
-                  </linearGradient>
-                  <linearGradient id="gProfit" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="hsl(var(--success))" stopOpacity={0.2} />
-                    <stop offset="95%" stopColor="hsl(var(--success))" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
+            <BarChart data={data.chartItems} margin={{ top: 10, right: 10, left: 10, bottom: 0 }} barGap={4}>
                 <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border) / 0.4)" vertical={false} />
                 <XAxis 
                   dataKey="label" 
@@ -252,8 +300,9 @@ const StatisticsPage = () => {
                   axisLine={false} 
                   tickFormatter={(v) => {
                     const parts = v.split('-');
-                    if (parts.length === 3) return `${parts[2]}/${parts[1]}`; // DD/MM for Daily
-                    if (parts.length === 2) return parts[1]; // WXX or MM for Weekly/Monthly
+                    if (parts.length === 3) return `${parts[2]}/${parts[1]}`;
+                    if (parts.length === 2 && parts[1].startsWith('W')) return parts[1];
+                    if (parts.length === 2) return `${parts[1]}/${parts[0]}`;
                     return v;
                   }}
                 />
@@ -265,87 +314,71 @@ const StatisticsPage = () => {
                   tickFormatter={(v) => formatCurrency(v)} 
                 />
                 <Tooltip
+                  cursor={{ fill: 'hsl(var(--muted) / 0.2)' }}
                   contentStyle={{ 
                     backgroundColor: "hsl(var(--card))", 
-                    border: "1px solid hsl(var(--border) / 0.3)", 
-                    borderRadius: "12px",
-                    boxShadow: "0 10px 15px -3px rgba(0,0,0,0.1)"
+                    border: "1px solid hsl(var(--border) / 0.5)", 
+                    borderRadius: "14px",
+                    boxShadow: "0 20px 25px -5px rgba(0,0,0,0.1), 0 10px 10px -5px rgba(0,0,0,0.04)"
                   }}
-                  itemStyle={{ fontSize: '12px', fontWeight: '600' }}
+                  itemStyle={{ fontSize: '12px', padding: '2px 0' }}
+                  labelStyle={{ fontWeight: '800', marginBottom: '8px', opacity: 0.6 }}
                   formatter={(value: any, name?: string) => [
-                    formatCurrency(Number(value) || 0),
-                    name === "revenue" ? "Doanh thu" : name === "cost" ? "Chi phí nhập" : "Lợi nhuận",
+                    <span key={name} className="font-bold">{formatCurrency(Number(value) || 0)}</span>,
+                    name === "revenue" ? "Doanh thu" : name === "cost" ? "Giá vốn" : "Lợi nhuận gộp",
                   ]}
                 />
-                <Area type="monotone" dataKey="revenue" name="revenue" stroke="hsl(var(--primary))" strokeWidth={3} fill="url(#gRevenue)" />
-                <Area type="monotone" dataKey="cost" name="cost" stroke="hsl(var(--destructive))" strokeWidth={3} fill="url(#gCost)" />
-                <Area type="monotone" dataKey="profit" name="profit" stroke="hsl(var(--success))" strokeWidth={3} fill="url(#gProfit)" />
-              </AreaChart>
+                <Bar dataKey="revenue" name="revenue" fill="hsl(var(--primary))" radius={[4, 4, 0, 0]} animationDuration={1000} />
+                <Bar dataKey="cost" name="cost" fill="hsl(var(--destructive) / 0.7)" radius={[4, 4, 0, 0]} animationDuration={1200} />
+                <Bar dataKey="profit" name="profit" fill="hsl(var(--success))" radius={[4, 4, 0, 0]} animationDuration={1400} />
+              </BarChart>
             </ResponsiveContainer>
-          </div>
-          <div className="flex items-center justify-center gap-8 mt-6">
-            <div className="flex items-center gap-2">
-              <div className="w-3 h-3 rounded-full bg-primary" />
-              <span className="text-xs font-bold text-muted-foreground uppercase tracking-tight">Doanh thu</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="w-3 h-3 rounded-full bg-destructive" />
-              <span className="text-xs font-bold text-muted-foreground uppercase tracking-tight">Chi phí nhập</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="w-3 h-3 rounded-full bg-success" />
-              <span className="text-xs font-bold text-muted-foreground uppercase tracking-tight">Lợi nhuận</span>
-            </div>
           </div>
         </CardContent>
       </Card>
 
-      {/* Import & Sales Tables */}
+      {/* Tables Section */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <Card className="card-shadow border-border/40">
-          <CardHeader className="pb-4">
-            <div className="flex items-center justify-between">
-              <CardTitle className="text-lg font-bold">Lô hàng nhập gần đây</CardTitle>
-              <Badge variant="secondary" className="bg-muted text-muted-foreground font-bold">{periodLabel}</Badge>
+          <CardHeader className="pb-4 flex flex-row items-center justify-between">
+            <CardTitle className="text-lg font-bold">Dòng nhập kho gần đây</CardTitle>
+            <div className="flex items-center gap-2">
+              <Package className="h-4 w-4 text-muted-foreground" />
+              <span className="text-xs font-bold text-muted-foreground uppercase">{periodLabel}</span>
             </div>
           </CardHeader>
           <CardContent>
             <Table>
               <TableHeader>
-                <TableRow className="hover:bg-transparent border-border/30">
-                  <TableHead className="font-bold text-[11px] uppercase tracking-wider text-muted-foreground/70">Sản phẩm</TableHead>
-                  <TableHead className="text-right font-bold text-[11px] uppercase tracking-wider text-muted-foreground/70">Số lượng</TableHead>
-                  <TableHead className="text-right font-bold text-[11px] uppercase tracking-wider text-muted-foreground/70">Tổng phí</TableHead>
+                <TableRow className="hover:bg-transparent border-border/40">
+                  <TableHead className="text-[10px] uppercase font-bold text-muted-foreground/60">Sản phẩm / SKU</TableHead>
+                  <TableHead className="text-right text-[10px] uppercase font-bold text-muted-foreground/60 px-2">SL</TableHead>
+                  <TableHead className="text-right text-[10px] uppercase font-bold text-muted-foreground/60">Vốn nhập</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {data.importDetails.length > 0 ? (
-                  data.importDetails.map((item: any, idx: number) => (
+                {data.recentLots.length > 0 ? (
+                  data.recentLots.map((item: any, idx: number) => (
                     <TableRow key={idx} className="border-border/30 hover:bg-muted/30 transition-colors">
                       <TableCell className="py-3">
                         <div className="flex items-center gap-3">
-                          <div className="h-10 w-10 rounded-lg overflow-hidden shrink-0 border border-border/20 shadow-sm">
-                            <img src={item.image} alt={item.name} className="w-full h-full object-cover" />
+                          <div className="h-9 w-9 rounded-lg overflow-hidden shrink-0 border border-border/10">
+                            <img src={item.image} alt="" className="w-full h-full object-cover" />
                           </div>
-                          <div className="flex flex-col">
-                            <span className="font-medium text-sm text-foreground">{item.name}</span>
-                            <span className="text-[10px] text-muted-foreground/80 font-mono mt-0.5">
-                              SKU: {item.sku}
-                              {item.attributes?.length > 0 && 
-                                ` • ${item.attributes.map((a: any) => `${a.value}`).join(" / ")}`
-                              }
+                          <div className="flex flex-col min-w-0">
+                            <span className="font-bold text-[13px] truncate">{item.name}</span>
+                            <span className="text-[10px] text-muted-foreground font-mono truncate">
+                              {item.sku} {item.attributes?.length > 0 && `• ${item.attributes.map((a: any) => a.value).join("/")}`}
                             </span>
                           </div>
                         </div>
                       </TableCell>
-                      <TableCell className="text-right text-sm font-semibold">{item.quantity}</TableCell>
+                      <TableCell className="text-right font-bold text-sm px-2">{item.quantity}</TableCell>
                       <TableCell className="text-right text-sm font-bold text-indigo-600">{formatCurrency(item.cost)}</TableCell>
                     </TableRow>
                   ))
                 ) : (
-                  <TableRow>
-                    <TableCell colSpan={3} className="text-center py-6 text-muted-foreground italic">Không có dữ liệu nhập kho</TableCell>
-                  </TableRow>
+                  <TableRow><TableCell colSpan={3} className="text-center py-6 text-muted-foreground italic">Không có lô hàng mới</TableCell></TableRow>
                 )}
               </TableBody>
             </Table>
@@ -353,49 +386,50 @@ const StatisticsPage = () => {
         </Card>
 
         <Card className="card-shadow border-border/40">
-          <CardHeader className="pb-4">
-            <div className="flex items-center justify-between">
-              <CardTitle className="text-lg font-bold">Sản phẩm bán ra nhiều nhất</CardTitle>
-              <Badge variant="secondary" className="bg-muted text-muted-foreground font-bold">{periodLabel}</Badge>
+          <CardHeader className="pb-4 flex flex-row items-center justify-between">
+            <CardTitle className="text-lg font-bold">Biến động sản phẩm bán chạy</CardTitle>
+            <div className="flex items-center gap-2">
+              <TrendingUp className="h-4 w-4 text-muted-foreground" />
+              <span className="text-xs font-bold text-muted-foreground uppercase">{periodLabel}</span>
             </div>
           </CardHeader>
           <CardContent>
             <Table>
               <TableHeader>
-                <TableRow className="hover:bg-transparent border-border/30">
-                  <TableHead className="font-bold text-[11px] uppercase tracking-wider text-muted-foreground/70">Sản phẩm</TableHead>
-                  <TableHead className="text-right font-bold text-[11px] uppercase tracking-wider text-muted-foreground/70">Số lượng bán</TableHead>
-                  <TableHead className="text-right font-bold text-[11px] uppercase tracking-wider text-muted-foreground/70">Doanh thu</TableHead>
+                <TableRow className="hover:bg-transparent border-border/40">
+                  <TableHead className="text-[10px] uppercase font-bold text-muted-foreground/60">Sản phẩm Chi tiết</TableHead>
+                  <TableHead className="text-right text-[10px] uppercase font-bold text-muted-foreground/60 px-2">SL</TableHead>
+                  <TableHead className="text-right text-[10px] uppercase font-bold text-muted-foreground/60">Doanh thu</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {data.salesDetails.length > 0 ? (
-                  data.salesDetails.map((item: any, idx: number) => (
+                {data.topSkus.length > 0 ? (
+                  data.topSkus.map((item: any, idx: number) => (
                     <TableRow key={idx} className="border-border/30 hover:bg-muted/30 transition-colors">
                       <TableCell className="py-3">
                         <div className="flex items-center gap-3">
-                          <div className="h-10 w-10 rounded-lg overflow-hidden shrink-0 border border-border/20 shadow-sm">
-                            <img src={item.image} alt={item.name} className="w-full h-full object-cover" />
+                          <div className="h-9 w-9 rounded-lg overflow-hidden shrink-0 border border-border/10">
+                            <img src={item.image} alt="" className="w-full h-full object-cover" />
                           </div>
-                          <div className="flex flex-col">
-                            <span className="font-medium text-sm text-foreground truncate max-w-[150px]">{item.name}</span>
-                            <span className="text-[10px] text-muted-foreground/80 font-mono mt-0.5">
-                              SKU: {item.sku}
-                              {item.attributes?.length > 0 && 
-                                ` • ${item.attributes.map((a: any) => `${a.value}`).join(" / ")}`
-                              }
+                          <div className="flex flex-col min-w-0">
+                            <span className="font-bold text-[13px] truncate">{item.name}</span>
+                            <span className="text-[10px] text-muted-foreground font-mono truncate">
+                              {item.sku} {item.attributes?.length > 0 && `• ${item.attributes.map((a: any) => a.value).join("/")}`}
                             </span>
                           </div>
                         </div>
                       </TableCell>
-                      <TableCell className="text-right text-sm font-semibold">{item.quantity}</TableCell>
-                      <TableCell className="text-right text-sm font-bold text-emerald-600">{formatCurrency(item.revenue)}</TableCell>
+                      <TableCell className="text-right font-bold text-sm px-2">{item.quantity} sản phẩm</TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex flex-col items-end">
+                           <span className="text-sm font-bold text-emerald-600">{formatCurrency(item.revenue)}</span>
+                           <span className="text-[9px] text-emerald-500/70 font-bold uppercase tracking-tighter">Lợi nhuận: {formatCurrency(item.profit)}</span>
+                        </div>
+                      </TableCell>
                     </TableRow>
                   ))
                 ) : (
-                  <TableRow>
-                    <TableCell colSpan={3} className="text-center py-6 text-muted-foreground italic">Không có dữ liệu bán hàng</TableCell>
-                  </TableRow>
+                  <TableRow><TableCell colSpan={3} className="text-center py-6 text-muted-foreground italic">Chưa có giao dịch</TableCell></TableRow>
                 )}
               </TableBody>
             </Table>
@@ -403,41 +437,63 @@ const StatisticsPage = () => {
         </Card>
       </div>
 
-      {/* Best Sellers Ranking */}
+      {/* Main Ranking */}
       <Card className="card-shadow border-border/40">
-        <CardHeader>
-          <CardTitle className="text-lg font-bold">Bảng xếp hạng hiệu suất sản phẩm</CardTitle>
-          <p className="text-xs text-muted-foreground">Top 10 sản phẩm đóng góp doanh thu lớn nhất</p>
+        <CardHeader className="flex flex-row items-center justify-between gap-4 pb-2">
+          <div>
+            <CardTitle className="text-lg font-bold">Xếp hạng Hiệu suất Sản phẩm</CardTitle>
+            <p className="text-xs text-muted-foreground">Top 10 sản phẩm dẫn đầu thị trường của bạn</p>
+          </div>
+          <Trophy className="h-5 w-5 text-amber-500" />
         </CardHeader>
         <CardContent>
-          <div className="flex flex-col gap-2">
-            {data.bestSellers.map((item: any, index: number) => (
-              <div key={index} className="flex items-center gap-4 p-4 rounded-2xl bg-muted/20 hover:bg-muted/40 transition-all group border border-border/20 hover:border-border/40">
-                <span className={`text-2xl font-black w-10 text-center italic ${index === 0 ? "text-amber-500 scale-125" : index === 1 ? "text-slate-400" : index === 2 ? "text-amber-700" : "text-muted-foreground/30"}`}>
+          <div className="grid grid-cols-1 gap-4 mt-4">
+            {data.topProducts.map((item: any, index: number) => (
+              <div key={index} className="flex items-center gap-4 p-4 rounded-2xl bg-muted/10 hover:bg-muted/30 transition-all border border-border/10 hover:border-primary/20 group relative overflow-hidden">
+                <div className="absolute top-0 right-0 p-2 opacity-5 scale-150 rotate-12 transition-transform group-hover:scale-125">
+                   {sortBy === 'revenue' ? <DollarSign className="h-10 w-10" /> : sortBy === 'profit' ? <TrendingUp className="h-10 w-10" /> : <Package className="h-10 w-10" />}
+                </div>
+                
+                <span className={cn(
+                  "text-2xl font-bold w-10 text-center italic shrink-0",
+                  index === 0 ? "text-amber-500 drop-shadow-sm" : index === 1 ? "text-slate-400" : index === 2 ? "text-amber-800" : "text-muted-foreground/20"
+                )}>
                   {index + 1}
                 </span>
-                <div className="h-12 w-12 rounded-xl overflow-hidden shrink-0 shadow-sm border border-border/20">
-                  <img src={item.image} alt={item.name} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" />
+                
+                <div className="h-14 w-14 rounded-xl overflow-hidden shrink-0 shadow-sm border border-border/10">
+                  <img src={item.image} alt="" className="w-full h-full object-cover group-hover:scale-110 transition-duration-500" />
                 </div>
+                
                 <div className="flex-1 min-w-0">
-                  <p className="font-bold text-sm text-card-foreground truncate leading-snug">{item.name}</p>
-                  <div className="flex flex-col mt-0.5">
-                    <p className="text-[10px] text-muted-foreground/80 font-mono">
-                      SKU: {item.sku}
-                      {item.attributes?.length > 0 && 
-                        ` • ${item.attributes.map((a: any) => `${a.value}`).join(" / ")}`
-                      }
-                    </p>
-                    <p className="text-[11px] text-muted-foreground font-semibold mt-0.5">{item.sold} sản phẩm đã giao</p>
+                  <p className="font-bold text-sm text-card-foreground truncate leading-snug uppercase tracking-tight">{item.name}</p>
+                  <div className="flex flex-wrap items-center gap-x-3 mt-1 gap-y-1">
+                    <div className="flex items-center gap-1 text-[10px] text-muted-foreground font-bold">
+                       <ShoppingCart className="h-3 w-3" /> {item.quantitySold} sản phẩm
+                    </div>
+                    <div className="flex items-center gap-1 text-[10px] text-muted-foreground font-bold">
+                       <ArrowRightLeft className="h-3 w-3" /> {item.orderCount} đơn
+                    </div>
+                    <div className="text-[10px] text-muted-foreground font-mono">
+                       {item.skus.length} SKU biến thể
+                    </div>
                   </div>
                 </div>
+
                 <div className="text-right shrink-0">
-                  <p className="font-black text-base text-foreground">{formatCurrency(item.revenue)}</p>
+                  <p className="font-bold text-[15px] text-foreground">
+                    {sortBy === 'revenue' ? formatCurrency(item.grossRevenue) : sortBy === 'profit' ? formatCurrency(item.grossProfit) : formatCurrency(item.grossRevenue)}
+                  </p>
+                  <p className="text-[9px] font-bold text-muted-foreground/60 uppercase tracking-widest mt-0.5">
+                    {sortBy === 'revenue' ? "Doanh thu" : sortBy === 'profit' ? "Lợi nhuận gộp" : "Doanh thu"}
+                  </p>
                 </div>
               </div>
             ))}
-            {data.bestSellers.length === 0 && (
-              <div className="col-span-full py-10 text-center text-muted-foreground italic">Chưa có dữ liệu xếp hạng</div>
+            {data.topProducts.length === 0 && (
+              <div className="col-span-full py-16 text-center text-muted-foreground/60 italic border-2 border-dashed border-border/40 rounded-3xl">
+                Chưa có dữ liệu xếp hạng trong kỳ này
+              </div>
             )}
           </div>
         </CardContent>

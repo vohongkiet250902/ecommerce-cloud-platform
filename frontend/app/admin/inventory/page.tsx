@@ -48,6 +48,7 @@ interface InventoryItem {
   sku: string;
   image: string;
   stock: number;
+  price: number;
   attributes: string;
   lastUpdated: string;
   // Raw product for update
@@ -96,6 +97,7 @@ export default function InventoryPage() {
                         sku: v.sku,
                         image: v.image?.url || p.images?.[0]?.url || "",
                         stock: v.stock || 0,
+                        price: v.price || 0,
                         attributes: v.attributes?.map((a: any) => `${a.key}: ${a.value}`).join(", ") || "",
                         lastUpdated: p.updatedAt,
                         rawProduct: p,
@@ -111,6 +113,7 @@ export default function InventoryPage() {
                     sku: p.sku || "N/A",
                     image: p.images?.[0]?.url || "",
                     stock: p.stock ?? p.totalStock ?? 0,
+                    price: p.price ?? 0,
                     attributes: "Mặc định",
                     lastUpdated: p.updatedAt,
                     rawProduct: p,
@@ -136,7 +139,7 @@ export default function InventoryPage() {
       setSelectedItem(item);
       setImportQuantity(0);
       setUnitCost(0);
-      setSellingPrice(0);
+      setSellingPrice(item.price);
       setNote("");
       setIsUpdateOpen(true);
   }
@@ -169,7 +172,6 @@ export default function InventoryPage() {
             sku: selectedItem.sku,
             quantity: importQuantity,
             unitCost: unitCost,
-            sellingPrice: sellingPrice,
             sourceType: 'purchase',
             note: note || undefined
           });
@@ -470,47 +472,82 @@ export default function InventoryPage() {
                             <Input 
                                 type="number" 
                                 min={1} 
-                                value={importQuantity} 
+                                value={importQuantity === 0 ? "" : importQuantity} 
                                 onChange={(e) => setImportQuantity(Number(e.target.value))} 
                                 className="h-12 bg-muted/30"
                             />
                           </div>
                           
                           <div className="col-span-1 space-y-2">
-                            <Label className="text-sm font-semibold ml-1">Đơn giá nhập (VND)</Label>
-                            <Input 
-                                type="number" 
-                                min={0} 
-                                value={unitCost} 
-                                onChange={(e) => setUnitCost(Number(e.target.value))} 
-                                className="h-12 bg-muted/30"
-                            />
-                          </div>
+                             <Label className="text-sm font-semibold ml-1">Đơn giá nhập (VND)</Label>
+                             <Input 
+                                 type="number" 
+                                 min={0} 
+                                 value={unitCost === 0 ? "" : unitCost} 
+                                 onChange={(e) => setUnitCost(Number(e.target.value))} 
+                                 className="h-12 bg-muted/30"
+                             />
+                           </div>
 
                           <div className="col-span-1 space-y-2">
-                            <Label className="text-sm font-semibold ml-1">Giá bán mới (VND)</Label>
-                            <Input 
-                                type="number" 
-                                min={0} 
-                                value={sellingPrice} 
-                                onChange={(e) => setSellingPrice(Number(e.target.value))} 
-                                className="h-12 bg-muted/30"
-                            />
-                          </div>
+                             <Label className="text-sm font-semibold ml-1">Giá bán hiện tại (VND)</Label>
+                             <div className="h-12 bg-muted/20 border border-border/50 rounded-md flex items-center px-3 font-bold text-primary">
+                                 {sellingPrice.toLocaleString("vi-VN")}
+                             </div>
+                             <p className="text-[10px] text-muted-foreground ml-1 italic">* Giá bán cố định, đã thiết lập trước</p>
+                           </div>
+ 
+                           {/* Gross Margin Calculation */}
+                           {unitCost > 0 && (
+                             <div className={cn(
+                               "col-span-2 p-4 rounded-xl border flex items-center justify-between",
+                               unitCost >= sellingPrice 
+                                 ? "bg-destructive/5 border-destructive/20 text-destructive" 
+                                 : "bg-success/5 border-success/20 text-success"
+                             )}>
+                               <div>
+                                 <p className="text-[10px] font-bold uppercase tracking-wider opacity-70">Biên lợi nhuận dự tính</p>
+                                 <p className="text-xl font-black">
+                                   {sellingPrice > 0 
+                                     ? (((sellingPrice - unitCost) / sellingPrice) * 100).toFixed(1) 
+                                     : "-100"}%
+                                 </p>
+                               </div>
+                               <div className="text-right">
+                                 {unitCost >= sellingPrice ? (
+                                   <div className="flex flex-col items-end">
+                                      <div className="flex items-center gap-1.5 font-bold text-sm">
+                                        <AlertTriangle className="h-4 w-4" />
+                                        Cảnh báo bán lỗ!
+                                      </div>
+                                      <p className="text-[10px] opacity-80">Giá nhập cao hơn hoặc bằng giá bán</p>
+                                   </div>
+                                 ) : (
+                                   <div className="flex flex-col items-end">
+                                      <div className="flex items-center gap-1.5 font-bold text-sm">
+                                        <TrendingDown className="h-4 w-4 rotate-180" />
+                                        Biên độ an toàn
+                                      </div>
+                                      <p className="text-[10px] opacity-80">Lợi nhuận: {(sellingPrice - unitCost).toLocaleString("vi-VN")} đ/sp</p>
+                                   </div>
+                                 )}
+                               </div>
+                             </div>
+                           )}
+ 
+                           <div className="col-span-2 space-y-2">
+                             <Label className="text-sm font-semibold ml-1">Ghi chú</Label>
+                             <Input 
+                                 type="text" 
+                                 value={note} 
+                                 placeholder="Nhập ghi chú khi nhập kho"
+                                 onChange={(e) => setNote(e.target.value)} 
+                                 className="h-10 bg-muted/30"
+                             />
+                           </div>
+                       </div>
 
-                          <div className="col-span-2 space-y-2">
-                            <Label className="text-sm font-semibold ml-1">Ghi chú</Label>
-                            <Input 
-                                type="text" 
-                                value={note} 
-                                placeholder="Nhập ghi chú khi nhập kho"
-                                onChange={(e) => setNote(e.target.value)} 
-                                className="h-10 bg-muted/30"
-                            />
-                          </div>
-                      </div>
-
-                      <div className="flex items-center justify-end gap-3 pt-4">
+                       <div className="flex items-center justify-end gap-3 pt-4">
                           <Button 
                               variant="outline" 
                               className="border-border/60"
@@ -529,16 +566,28 @@ export default function InventoryPage() {
       {/* Batch History Detail Dialog */}
       <Dialog open={isDetailOpen} onOpenChange={setIsDetailOpen}>
           <DialogContent className="max-w-3xl p-0 overflow-hidden rounded-2xl shadow-2xl border-none">
-              <DialogHeader className="p-6 bg-muted/30 border-b border-border/50">
-                  <div className="flex items-center gap-4">
-                      <div className="p-2 rounded-xl bg-primary/10">
-                          <Layers className="h-6 w-6 text-primary" />
+              <DialogHeader className="p-0 border-b border-border/50">
+                  <div className="bg-gradient-to-r from-primary/20 to-primary/5 p-6 flex items-center gap-5">
+                      <div className="h-20 w-20 relative rounded-2xl overflow-hidden bg-background border-4 border-background shadow-xl shrink-0">
+                          {selectedItem?.image ? (
+                              <Image src={selectedItem.image} alt={selectedItem.productName} fill className="object-cover" />
+                          ) : (
+                              <div className="flex items-center justify-center h-full bg-muted text-muted-foreground">
+                                  <Box className="h-8 w-8" />
+                              </div>
+                          )}
                       </div>
-                      <div>
-                          <DialogTitle className="text-xl font-bold">Chi tiết nhập kho theo đợt</DialogTitle>
-                          <DialogDescription className="text-xs uppercase tracking-widest font-bold text-muted-foreground mt-0.5">
-                              {selectedItem?.productName} — {selectedItem?.sku}
-                          </DialogDescription>
+                      <div className="flex-1 min-w-0 text-left">
+                          <DialogTitle className="font-bold text-xl text-foreground leading-tight">Lịch sử nhập kho: {selectedItem?.productName}</DialogTitle>
+                          <div className="flex wrap items-center gap-2 mt-2">
+                             <Badge variant="secondary" className="px-1.5 py-0 text-[10px] h-5 font-bold uppercase tracking-wider bg-primary/10 text-primary border-none">
+                                {selectedItem?.sku}
+                             </Badge>
+                             <p className="text-[10px] text-muted-foreground font-bold flex items-center gap-1.5 uppercase tracking-widest">
+                                <Layers className="h-3 w-3" />
+                                {selectedItem?.attributes || "Mặc định"}
+                             </p>
+                          </div>
                       </div>
                   </div>
               </DialogHeader>
@@ -584,21 +633,13 @@ export default function InventoryPage() {
                                               <p className="text-[10px] text-muted-foreground italic">Còn lại: {lot.remainingQuantity}</p>
                                           </div>
                                       </div>
-                                      <div className="mt-4 pt-4 border-t border-border/50 grid grid-cols-2 gap-4">
+                                      <div className="mt-4 pt-4 border-t border-border/50">
                                           <div>
                                               <p className="text-[10px] text-muted-foreground uppercase tracking-widest font-bold">Giá nhập</p>
                                               <p className="font-bold text-sm text-foreground">
                                                   {lot.unitCost.toLocaleString("vi-VN")} <span className="text-[10px]">VNĐ</span>
                                               </p>
                                           </div>
-                                          {lot.sellingPrice && (
-                                              <div className="text-right">
-                                                  <p className="text-[10px] text-muted-foreground uppercase tracking-widest font-bold">Giá bán khi nhập</p>
-                                                  <p className="font-bold text-sm text-primary">
-                                                      {lot.sellingPrice.toLocaleString("vi-VN")} <span className="text-[10px]">VNĐ</span>
-                                                  </p>
-                                              </div>
-                                          )}
                                       </div>
                                   </div>
                               ))}

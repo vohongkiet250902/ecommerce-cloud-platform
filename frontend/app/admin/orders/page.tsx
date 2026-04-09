@@ -614,7 +614,7 @@ export default function OrdersPage() {
             </div>
             <div className="mt-1 flex items-center gap-1 text-xs text-success font-medium">
                <ArrowUpRight className="h-3.5 w-3.5" />
-               <span>Tổng tiền đã thanh toán</span>
+               <span>Tổng doanh thu</span>
             </div>
           </div>
 

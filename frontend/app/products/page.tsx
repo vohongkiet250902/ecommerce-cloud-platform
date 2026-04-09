@@ -395,10 +395,6 @@ function ProductsContent() {
                     </div>
                   </SheetContent>
                 </Sheet>
-
-                <span className="text-sm text-muted-foreground">
-                  {filteredProducts.length} sản phẩm
-                </span>
               </div>
 
               <div className="flex items-center gap-3">
