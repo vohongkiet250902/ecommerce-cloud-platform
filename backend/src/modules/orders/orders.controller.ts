@@ -28,7 +28,10 @@ export class OrdersController {
     private readonly paymentsService: PaymentsService,
   ) {}
 
-  @Throttle({ default: { limit: 5, ttl: 60000 } }) // 🔥 Tối đa 5 đơn/phút
+  @Throttle({
+    short: { limit: 1, ttl: 1000 },
+    default: { limit: 5, ttl: 60000 },
+  })
   @Post()
   create(
     @Req() req,
@@ -77,17 +80,14 @@ export class OrdersController {
     return this.ordersService.findOneByUser(id, req.user.id);
   }
 
-  // Trong OrdersController
+  @Throttle({ default: { limit: 3, ttl: 60000 } })
   @Post(':id/retry-payment')
   async retryPayment(
     @Param('id') orderId: string,
     @Req() req,
-    @Ip() ipAddr: string, // Bổ sung decorator @Ip() từ @nestjs/common
+    @Ip() ipAddr: string,
   ) {
-    // 1. Kiểm tra đơn hàng có hợp lệ để thanh toán lại không
     const order = await this.ordersService.retryPayment(orderId, req.user.id);
-
-    // 2. Nhờ PaymentService tạo link VNPay mới tinh
     const result = await this.paymentsService.createVNPayUrl(
       order._id.toString(),
       req.user.id,

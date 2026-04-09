@@ -1,6 +1,6 @@
 import { Body, Controller, Get, Post, Query } from '@nestjs/common';
 import { SearchService } from './search.service';
-
+import { Throttle } from '@nestjs/throttler';
 type AttributeFilters = Record<string, string[]>;
 
 @Controller('search')
