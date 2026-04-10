@@ -17,6 +17,15 @@ export class Coupon extends Document {
 
   @Prop({ default: true })
   isActive: boolean;
+
+  @Prop()
+  minOrderValue?: number;
+
+  @Prop()
+  usageLimit?: number;
+
+  @Prop({ default: 0 })
+  usedCount: number;
 }
 
 export const CouponSchema = SchemaFactory.createForClass(Coupon);

@@ -408,8 +408,27 @@ export class OrdersService {
           code: dto.couponCode,
           orderTotal: subTotal,
         });
-        finalTotal = discountResult.finalTotal;
-        discountAmount = discountResult.discountAmount;
+
+        // 🛑 1. SANITY CHECKS: Đảm bảo dữ liệu trả về hợp lệ
+        if (
+          typeof discountResult.discountAmount !== 'number' ||
+          typeof discountResult.finalTotal !== 'number' ||
+          discountResult.discountAmount < 0 ||
+          discountResult.finalTotal < 0
+        ) {
+          throw new BadRequestException(
+            'Hệ thống tính toán giảm giá gặp sự cố. Vui lòng thử lại.',
+          );
+        }
+
+        // 🛑 2. BOUNDARY CHECKS: Giảm giá tối đa không được vượt quá subTotal
+        discountAmount = Math.min(discountResult.discountAmount, subTotal);
+        finalTotal = Math.max(0, subTotal - discountAmount);
+
+        // 🛑 3. CONSUME COUPON: Ghi nhận lượt sử dụng bên trong Transaction (Sẽ định nghĩa ở bước 2)
+        if (session) {
+          await this.couponsService.consumeCoupon(dto.couponCode, session);
+        }
       } catch (error: any) {
         this.throwReadableOrderError(error);
       }
