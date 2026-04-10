@@ -11,7 +11,7 @@ import {
 import { PaymentsService } from './payments.service';
 import { JwtGuard } from '../../common/guards/jwt.guard';
 import type { Response, Request } from 'express';
-
+import { SkipThrottle } from '@nestjs/throttler';
 @Controller('payments')
 export class PaymentsController {
   constructor(private readonly paymentsService: PaymentsService) {}
@@ -49,6 +49,7 @@ export class PaymentsController {
     }
   }
 
+  @SkipThrottle()
   @Get('vnpay/ipn')
   async vnpayIpn(@Query() query: any, @Res() res: Response) {
     const result = await this.paymentsService.handleVnPayIpn(query);

@@ -44,6 +44,18 @@ export class CouponsService {
       throw new BadRequestException('Mã khuyến mãi này đã hết hạn');
     }
 
+    // Kiểm tra giới hạn số lượng
+    if (coupon.usageLimit && coupon.usedCount >= coupon.usageLimit) {
+      throw new BadRequestException('Mã khuyến mãi này đã hết lượt sử dụng');
+    }
+
+    // Kiểm tra giá trị tối thiểu của đơn hàng
+    if (coupon.minOrderValue && dto.orderTotal < coupon.minOrderValue) {
+      throw new BadRequestException(
+        `Đơn hàng phải từ ${coupon.minOrderValue}đ để áp dụng mã này`,
+      );
+    }
+
     let discountAmount = dto.orderTotal * (coupon.discountPercentage / 100);
 
     if (coupon.maxDiscountAmount && discountAmount > coupon.maxDiscountAmount) {
@@ -57,6 +69,33 @@ export class CouponsService {
       finalTotal: dto.orderTotal - discountAmount,
       couponCode: coupon.code,
     };
+  }
+
+  async consumeCoupon(code: string, session: any) {
+    const updatedCoupon = await this.couponModel.findOneAndUpdate(
+      {
+        code: code.toUpperCase(),
+        isActive: true,
+        $expr: {
+          $or: [
+            { $eq: [{ $type: '$usageLimit' }, 'missing'] }, // Không có giới hạn
+            { $lt: ['$usedCount', '$usageLimit'] }, // Hoặc số lượng dùng < giới hạn
+          ],
+        },
+      },
+      {
+        $inc: { usedCount: 1 },
+      },
+      { session, new: true },
+    );
+
+    if (!updatedCoupon) {
+      throw new BadRequestException(
+        'Mã khuyến mãi đã hết lượt sử dụng trong lúc bạn đang đặt hàng',
+      );
+    }
+
+    return updatedCoupon;
   }
 
   async findAll() {

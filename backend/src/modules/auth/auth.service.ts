@@ -4,6 +4,7 @@ import {
   ForbiddenException,
   BadRequestException,
   NotFoundException,
+  Inject,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
@@ -15,13 +16,15 @@ import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { LoginDto } from './dto/login.dto';
 import { ResendOtpDto, VerifyAccountDto } from './dto/verify-account.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
-
+import { CACHE_MANAGER } from '@nestjs/cache-manager';
+import type { Cache } from 'cache-manager';
 @Injectable()
 export class AuthService {
   constructor(
     private readonly usersService: UsersService,
     private readonly jwtService: JwtService,
     private readonly mailerService: MailerService,
+    @Inject(CACHE_MANAGER) private cacheManager: Cache,
   ) {}
 
   // --- PRIVATE HELPER: TẠO & GỬI OTP ---
@@ -273,10 +276,28 @@ export class AuthService {
     return { message: 'Refresh thành công' };
   }
 
-  async logout(userId: string, res: Response) {
+  async logout(userId: string, req: Request, res: Response) {
+    const accessToken = req.cookies?.accessToken;
+
+    if (accessToken) {
+      // 1. Giải mã token để xem bao giờ nó hết hạn
+      const payload = this.jwtService.decode(accessToken) as any;
+
+      if (payload && payload.exp) {
+        // 2. Tính toán số mili-giây còn lại của token
+        const ttl = payload.exp * 1000 - Date.now();
+
+        // 3. Nếu token chưa hết hạn, ném nó vào Blacklist trong Redis
+        if (ttl > 0) {
+          await this.cacheManager.set(`bl_${accessToken}`, true, ttl);
+        }
+      }
+    }
+
     // ✅ clear hash trong DB
     await this.usersService.clearRefreshToken(userId);
 
+    // Xóa cookie ở trình duyệt
     res.clearCookie('accessToken');
     res.clearCookie('refreshToken');
 

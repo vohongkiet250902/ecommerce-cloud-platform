@@ -81,3 +81,25 @@ export class CreateOrderDto {
   @Type(() => ShippingInfoDto)
   shippingInfo: ShippingInfoDto;
 }
+
+// 🔥 THÊM MỚI: DTO cho API xem trước giỏ hàng
+export class PreviewOrderDto {
+  @IsArray()
+  @ArrayMinSize(1)
+  @ValidateNested({ each: true })
+  @Type(() => CreateOrderItemDto)
+  items: CreateOrderItemDto[];
+
+  @IsOptional()
+  @IsString()
+  couponCode?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  ghnDistrictId?: number;
+
+  @IsOptional()
+  @IsString()
+  ghnWardCode?: string;
+}

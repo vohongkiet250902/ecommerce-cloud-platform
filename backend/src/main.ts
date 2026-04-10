@@ -6,6 +6,7 @@ import { AllExceptionsFilter } from './common/filters/http-exception.filter';
 import cookieParser from 'cookie-parser';
 import { configCloudinary } from './config/cloudinary.config';
 import { NestExpressApplication } from '@nestjs/platform-express'; // 🔥 Thêm import này
+import { ThrottlerExceptionFilter } from './common/filters/throttler-exception.filter';
 
 async function bootstrap() {
   console.log('🔥 NEST APP STARTED');
@@ -43,6 +44,8 @@ async function bootstrap() {
     origin: 'http://localhost:3000',
     credentials: true,
   });
+
+  app.useGlobalFilters(new ThrottlerExceptionFilter());
 
   await app.listen(port);
   console.log(`🚀 Backend E-commerce is running on port ${port}`);
