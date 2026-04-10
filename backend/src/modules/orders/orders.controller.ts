@@ -15,7 +15,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { OrdersService } from './orders.service';
-import { CreateOrderDto } from './dto/create-order.dto';
+import { CreateOrderDto, PreviewOrderDto } from './dto/create-order.dto';
 import { JwtGuard } from '../../common/guards/jwt.guard';
 import { Throttle } from '@nestjs/throttler';
 
@@ -98,5 +98,10 @@ export class OrdersController {
       message: 'Tạo link thanh toán mới thành công',
       paymentUrl: result.paymentUrl,
     };
+  }
+
+  @Post('preview')
+  preview(@Body() dto: PreviewOrderDto) {
+    return this.ordersService.previewOrder(dto);
   }
 }

@@ -399,9 +399,10 @@ export class OrdersService {
       throw new BadRequestException('Đơn hàng rỗng');
     }
 
-    let finalTotal = subTotal;
     let discountAmount = 0;
+    let finalTotal = subTotal;
 
+    // 🔥 1. Tính mã giảm giá (Sanity check + Consume)
     if (dto.couponCode) {
       try {
         const discountResult = await this.couponsService.calculateDiscount({
@@ -409,23 +410,17 @@ export class OrdersService {
           orderTotal: subTotal,
         });
 
-        // 🛑 1. SANITY CHECKS: Đảm bảo dữ liệu trả về hợp lệ
         if (
           typeof discountResult.discountAmount !== 'number' ||
-          typeof discountResult.finalTotal !== 'number' ||
-          discountResult.discountAmount < 0 ||
-          discountResult.finalTotal < 0
+          discountResult.discountAmount < 0
         ) {
           throw new BadRequestException(
-            'Hệ thống tính toán giảm giá gặp sự cố. Vui lòng thử lại.',
+            'Hệ thống tính toán giảm giá gặp sự cố.',
           );
         }
 
-        // 🛑 2. BOUNDARY CHECKS: Giảm giá tối đa không được vượt quá subTotal
         discountAmount = Math.min(discountResult.discountAmount, subTotal);
-        finalTotal = Math.max(0, subTotal - discountAmount);
 
-        // 🛑 3. CONSUME COUPON: Ghi nhận lượt sử dụng bên trong Transaction (Sẽ định nghĩa ở bước 2)
         if (session) {
           await this.couponsService.consumeCoupon(dto.couponCode, session);
         }
@@ -434,21 +429,33 @@ export class OrdersService {
       }
     }
 
+    // 🔥 2. Tính phí ship tự động lưu vào Database
+    let expectedShippingFee = 0;
+    if (dto.shippingInfo?.ghnDistrictId && dto.shippingInfo?.ghnWardCode) {
+      expectedShippingFee = await this.calculateExpectedShippingFee(
+        orderItems,
+        dto.shippingInfo.ghnDistrictId,
+        dto.shippingInfo.ghnWardCode,
+        subTotal,
+      );
+    }
+
+    // 🔥 3. Chốt tổng thanh toán
+    finalTotal = Math.max(0, subTotal + expectedShippingFee - discountAmount);
+
     const payload: any = {
       userId: new Types.ObjectId(userId),
       items: orderItems,
       shippingInfo: dto.shippingInfo,
-      shipping:
-        paymentMethod === 'cod'
-          ? {
-              provider: 'ghn',
-              env: this.ghnService.getEnv(),
-              syncStatus: 'not_created',
-              codAmount: finalTotal,
-              clientOrderCode: undefined,
-              statusHistory: [],
-            }
-          : undefined,
+      // 🔥 Khởi tạo sẵn object shipping để lưu phí vận chuyển
+      shipping: {
+        provider: 'ghn',
+        env: this.ghnService.getEnv(),
+        syncStatus: 'not_created',
+        fee: expectedShippingFee, // LƯU PHÍ SHIP VÀO ĐÂY
+        codAmount: paymentMethod === 'cod' ? finalTotal : 0,
+        statusHistory: [],
+      },
       totalAmount: finalTotal,
       couponCode: dto.couponCode,
       discountAmount,
@@ -468,6 +475,53 @@ export class OrdersService {
       : await this.orderModel.create([payload]);
 
     return docs[0];
+  }
+
+  /**
+   * Helper: Tính phí ship GHN dự kiến
+   */
+  private async calculateExpectedShippingFee(
+    items: any[],
+    ghnDistrictId: number,
+    ghnWardCode: string,
+    orderSubTotal: number,
+  ): Promise<number> {
+    try {
+      if (!this.ghnService.hasConfig()) return 0;
+
+      const fromCfg = this.ghnService.getFromConfig();
+      const parcel = this.buildParcelSnapshot({ items });
+
+      const services = await this.ghnService.getAvailableServices(
+        ghnDistrictId,
+        fromCfg.districtId,
+      );
+      const service = this.chooseBestGhnService(services);
+
+      const feeData = await this.ghnService.calculateFee({
+        from_district_id: fromCfg.districtId,
+        from_ward_code: fromCfg.wardCode,
+        service_id: service.service_id,
+        to_district_id: ghnDistrictId,
+        to_ward_code: ghnWardCode,
+        height: parcel.height,
+        length: parcel.length,
+        width: parcel.width,
+        weight: parcel.weight,
+        insurance_value: Math.min(orderSubTotal, 5000000),
+      });
+
+      return Number(
+        feeData?.total ?? feeData?.total_fee ?? feeData?.main_service ?? 0,
+      );
+    } catch (error: any) {
+      console.error(
+        'Lỗi tính phí ship GHN (Preview):',
+        error?.response?.data || error.message,
+      );
+      // Trả về 0 hoặc một mức phí mặc định (vd: 30000) để không làm gãy luồng đặt hàng nếu GHN lỗi
+      return 0;
+    }
   }
 
   // ─────────────────────────────────────────────────────────────
@@ -531,6 +585,96 @@ export class OrdersService {
     else await order.save();
 
     return order;
+  }
+
+  /**
+   * API Tính giá tạm tính: SubTotal + Phí Ship - Giảm Giá
+   */
+  async previewOrder(dto: any) {
+    let subTotal = 0;
+    const previewItems: any[] = [];
+
+    // 1. Tính tiền hàng dựa trên Database
+    for (const item of dto.items) {
+      const product = await this.productModel.findOne({
+        _id: new Types.ObjectId(item.productId),
+        'variants.sku': item.sku,
+      });
+
+      if (!product)
+        throw new BadRequestException(
+          `Sản phẩm không tồn tại (SKU: ${item.sku})`,
+        );
+
+      const variant = (product as any).variants.find(
+        (v: any) => v.sku === item.sku,
+      );
+      if (!variant)
+        throw new BadRequestException(
+          `Phiên bản không tồn tại (SKU: ${item.sku})`,
+        );
+
+      this.assertCanSell(product, variant, item.sku);
+
+      const sellPrice = this.getSellPrice(variant);
+      const lineTotal = sellPrice * item.quantity;
+
+      previewItems.push({
+        productId: product._id,
+        name: (product as any).name,
+        sku: item.sku,
+        price: sellPrice,
+        quantity: item.quantity,
+        lineTotal,
+      });
+
+      subTotal += lineTotal;
+    }
+
+    let shippingFee = 0;
+    let discountAmount = 0;
+    let couponDetails: { code: string; discountPercentage: number } | null =
+      null;
+
+    // 2. Tính phí ship GHN (Nếu Frontend gửi lên thông tin địa chỉ)
+    if (dto.ghnDistrictId && dto.ghnWardCode) {
+      shippingFee = await this.calculateExpectedShippingFee(
+        previewItems,
+        dto.ghnDistrictId,
+        dto.ghnWardCode,
+        subTotal,
+      );
+    }
+
+    // 3. Tính mã giảm giá
+    if (dto.couponCode) {
+      try {
+        const discountResult = await this.couponsService.calculateDiscount({
+          code: dto.couponCode,
+          orderTotal: subTotal,
+        });
+        discountAmount = Math.min(discountResult.discountAmount, subTotal);
+        couponDetails = {
+          code: discountResult.couponCode,
+          discountPercentage: discountResult.discountPercentage,
+        };
+      } catch (error: any) {
+        throw new BadRequestException(error.message);
+      }
+    }
+
+    const finalTotal = Math.max(0, subTotal + shippingFee - discountAmount);
+
+    return {
+      items: previewItems,
+      pricing: {
+        subTotal,
+        shippingFee,
+        discountAmount,
+        finalTotal,
+      },
+      coupon: couponDetails,
+    };
   }
 
   /**
