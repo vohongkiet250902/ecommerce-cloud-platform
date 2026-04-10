@@ -397,7 +397,7 @@ export default function MyOrdersPage() {
 
   const handleRetryPayment = async (orderId: string) => {
     try {
-      setLoading(true);
+      setIsProcessing(true);
       const res = await orderApi.retryPayment(orderId);
       const paymentUrl = res.data?.paymentUrl || res.data?.data?.paymentUrl;
       if (paymentUrl) {
@@ -411,7 +411,7 @@ export default function MyOrdersPage() {
         description: getErrorMessage(error, "Không thể khởi tạo lại thanh toán"),
         variant: "destructive"
       });
-      setLoading(false);
+      setIsProcessing(false);
     }
   };
 
@@ -742,9 +742,15 @@ export default function MyOrdersPage() {
                                       : "bg-primary hover:bg-primary/90 text-primary-foreground shadow-primary/10"
                                   )} 
                                   onClick={() => !isOrderExpired(order) && handleRetryPayment(order._id)}
-                                  disabled={isOrderExpired(order)}
+                                  disabled={isOrderExpired(order) || isProcessing}
                                 >
-                                  {isOrderExpired(order) ? "Đơn hàng đã hết hạn" : "Thanh toán lại"}
+                                  {isProcessing ? (
+                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                  ) : isOrderExpired(order) ? (
+                                    "Đơn hàng đã hết hạn"
+                                  ) : (
+                                    "Thanh toán lại"
+                                  )}
                                 </Button>
                               )}
                                 {order.status === 'pending' && (
@@ -838,7 +844,19 @@ export default function MyOrdersPage() {
                                         {selectedOrderDetail?.paymentStatus === 'paid' ? <Badge className="bg-success text-success-foreground font-black px-2 py-0.5 rounded-full text-[9px] uppercase border-none shadow-sm shadow-success/10">Đã trả</Badge> : <Badge className="bg-warning/10 text-warning border-warning/20 font-black px-2 py-0.5 rounded-full text-[9px] uppercase">Chờ trả</Badge>}
                                       </div>
                                    </div>
-                                   <div className="pt-3 border-t border-border/40 flex justify-between items-end"><div className="space-y-0.5"><p className="text-[9px] font-black text-muted-foreground uppercase">Tổng tiền</p><p className="text-xl font-black text-primary leading-tight">{formatPrice(selectedOrderDetail?.totalAmount || 0)}</p></div><CheckCircle className="w-6 h-6 text-success/20" /></div>
+                                   <div className="pt-3 border-t border-border/40 flex flex-col gap-2">
+                                       <div className="flex justify-between items-center text-[10px] font-black text-muted-foreground uppercase tracking-wider">
+                                           <span>Phí vận chuyển</span>
+                                           <span>{selectedOrderDetail?.shipping?.fee ? formatPrice(selectedOrderDetail.shipping.fee) : "0đ"}</span>
+                                       </div>
+                                       <div className="flex justify-between items-end">
+                                           <div className="space-y-0.5">
+                                               <p className="text-[9px] font-black text-muted-foreground uppercase">Tổng tiền</p>
+                                               <p className="text-xl font-black text-primary leading-tight">{formatPrice(selectedOrderDetail?.totalAmount || 0)}</p>
+                                           </div>
+                                           <CheckCircle className="w-6 h-6 text-success/20" />
+                                       </div>
+                                   </div>
                               </Card>
                           </div>
                       </div>

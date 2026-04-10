@@ -1,5 +1,5 @@
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { orderApi } from "@/services/api";
 import { useCart } from "@/hooks/useCart";
@@ -12,11 +12,13 @@ import { Separator } from "@/components/ui/separator";
 import { motion, AnimatePresence } from "framer-motion";
 
 interface CartItem {
-  id: string | number;
+  id: string;
+  productId: string;
   name: string;
+  sku: string;
   price: number;
   quantity: number;
-  stock?: number; // Thêm trường stock (tùy chọn)
+  stock?: number;
   image: string;
   attributes?: { key: string; value: string }[];
   originalPrice?: number;
@@ -25,8 +27,8 @@ interface CartItem {
 
 interface CartSidebarProps {
   cartItems: CartItem[];
-  onUpdateQuantity: (id: string | number, quantity: number) => void;
-  onRemoveItem: (id: string | number) => void;
+  onUpdateQuantity: (id: string, quantity: number) => void;
+  onRemoveItem: (id: string) => void;
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
 }
@@ -64,15 +66,76 @@ export function CartSidebar({
   const router = useRouter();
   const { toast } = useToast();
   const { clearCart } = useCart();
-  const { isAuthenticated } = useAuth();
+  const { user, isAuthenticated } = useAuth();
   const [isProcessing, setIsProcessing] = useState(false);
 
-  const subtotal = cartItems.reduce(
-    (sum, item) => sum + item.price * item.quantity,
-    0
-  );
-  const shippingFee = subtotal >= 500000 ? 0 : 30000;
-  const total = subtotal + shippingFee;
+  const [pricing, setPricing] = useState<{
+    subTotal: number;
+    shippingFee: number;
+    discountAmount: number;
+    finalTotal: number;
+  }>({
+    subTotal: 0,
+    shippingFee: 0,
+    discountAmount: 0,
+    finalTotal: 0
+  });
+  const [isPreviewLoading, setIsPreviewLoading] = useState(false);
+
+  const { couponCode: appliedCouponCode } = useCart();
+
+  useEffect(() => {
+    const fetchPreview = async () => {
+      if (cartItems.length === 0) {
+        setPricing({ subTotal: 0, shippingFee: 0, discountAmount: 0, finalTotal: 0 });
+        return;
+      }
+      
+      setIsPreviewLoading(true);
+      try {
+        const items = cartItems.map(item => ({
+          productId: item.productId,
+          sku: (item.sku && item.sku !== "N/A" && item.sku !== "DEFAULT") ? item.sku : "DEFAULT",
+          quantity: item.quantity
+        }));
+
+        const res = await orderApi.previewOrder({
+          items,
+          couponCode: appliedCouponCode || undefined
+        });
+
+        const data = res.data.data || res.data;
+        if (data.pricing) {
+          setPricing(data.pricing);
+        }
+      } catch (err) {
+        console.error("Failed to fetch cart preview", err);
+        // Fallback for guests if API is protected by JwtGuard
+        if (!isAuthenticated) {
+          const subTotal = cartItems.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+          setPricing({
+            subTotal,
+            shippingFee: 0,
+            discountAmount: 0,
+            finalTotal: subTotal
+          });
+        }
+      } finally {
+        setIsPreviewLoading(false);
+      }
+    };
+
+    if (isOpen) {
+      // Debounce the preview API call by 500ms
+      const timer = setTimeout(() => {
+        fetchPreview();
+      }, 500);
+      
+      return () => clearTimeout(timer);
+    }
+  }, [cartItems, appliedCouponCode, isOpen, isAuthenticated]);
+
+  const { subTotal: subtotal, shippingFee, finalTotal: total } = pricing;
 
   const handleCheckout = () => {
     if (cartItems.length === 0) return;
@@ -251,37 +314,19 @@ export function CartSidebar({
 
                 <div className="p-6 bg-background border-t space-y-4">
                   <div className="space-y-2">
-                    <div className="flex justify-between text-sm">
-                      <span className="text-muted-foreground text-base">Tạm tính</span>
-                      <span className="font-semibold text-base">{formatPrice(subtotal)}</span>
-                    </div>
-                    <div className="flex justify-between text-sm">
-                      <span className="text-muted-foreground text-base">Phí vận chuyển</span>
-                      <span>
-                        {shippingFee === 0 ? (
-                          <span className="text-green-600 font-semibold text-base">Miễn phí</span>
-                        ) : (
-                          <span className="font-semibold text-base">{formatPrice(shippingFee)}</span>
-                        )}
-                      </span>
-                    </div>
-                    {subtotal < 500000 && (
-                      <div className="bg-primary/5 p-3 rounded-lg border border-primary/10">
-                        <p className="text-xs text-primary font-medium">
-                          Mua thêm <span className="font-bold">{formatPrice(500000 - subtotal)}</span> để được miễn phí vận chuyển
-                        </p>
-                        <div className="w-full bg-muted rounded-full h-1.5 mt-2">
-                          <div 
-                            className="bg-primary h-1.5 rounded-full transition-all duration-1000" 
-                            style={{ width: `${(subtotal / 500000) * 100}%` }}
-                          />
-                        </div>
+                    {pricing.discountAmount > 0 && (
+                      <div className="flex justify-between text-sm">
+                        <span className="text-muted-foreground text-base font-bold">Giảm giá</span>
+                        <span className="font-bold text-base text-success">-{formatPrice(pricing.discountAmount)}</span>
                       </div>
                     )}
+
                     <Separator className="my-2" />
                     <div className="flex justify-between font-bold text-xl py-2">
                       <span>Tổng tiền</span>
-                      <span className="text-primary">{formatPrice(total)}</span>
+                      <div className="text-right flex flex-col items-end">
+                        <span className="text-primary leading-tight">{formatPrice(total)}</span>
+                      </div>
                     </div>
                   </div>
 

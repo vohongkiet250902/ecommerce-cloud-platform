@@ -16,6 +16,7 @@ import {
 import { cn } from "@/lib/utils";
 import { orderApi, inventoryApi } from "@/services/api";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { useAuth } from "@/context/AuthContext";
 
 type Period = "day" | "week" | "month" | "quarter";
 type SortBy = "quantity" | "revenue" | "profit";
@@ -28,6 +29,7 @@ const formatCurrency = (value: number) => {
 };
 
 const StatisticsPage = () => {
+  const { isAuthenticated } = useAuth();
   const [period, setPeriod] = useState<Period>("week");
   const [sortBy, setSortBy] = useState<SortBy>("quantity");
   const [loading, setLoading] = useState(true);
@@ -39,23 +41,20 @@ const StatisticsPage = () => {
       const rangeParams: any = { groupBy: "day" };
       const now = new Date();
       
+      // Sử dụng khoảng thời gian trượt (Rolling Window) để luôn có dữ liệu hiển thị và so sánh
       if (currentPeriod === "day") {
         rangeParams.days = 1;
       } else if (currentPeriod === "week") {
-        const dayOfWeek = now.getDay();
-        rangeParams.days = dayOfWeek === 0 ? 7 : dayOfWeek; 
+        rangeParams.days = 7; // Xem 7 ngày gần nhất
       } else if (currentPeriod === "month") {
-        rangeParams.days = now.getDate();
+        rangeParams.days = 30; // Xem 30 ngày gần nhất (Khắc phục lỗi tab Tháng bị trống)
       } else if (currentPeriod === "quarter") {
         rangeParams.groupBy = "month";
-        rangeParams.months = (now.getMonth() % 3) + 1;
+        rangeParams.days = 90; // Xem 90 ngày gần nhất
       }
 
       const topParams = { 
-        days: currentPeriod === 'day' ? 1 : 
-              currentPeriod === 'week' ? (now.getDay() === 0 ? 7 : now.getDay()) : 
-              currentPeriod === 'month' ? now.getDate() : 
-              ((now.getMonth() % 3) + 1) * 30, // Approx days in quarter
+        days: rangeParams.days || 30,
         limit: 10,
         sortBy: currentSortBy
       };
@@ -90,13 +89,31 @@ const StatisticsPage = () => {
       const topProducts = topProductsRes?.items || [];
       const recentLots = (Array.isArray(lotsRes) ? lotsRes : []).slice(0, 10);
 
-      // Transform profit chart data
-      const chartItems = (prof?.chartData || []).map((item: any) => ({
-        label: item.period,
-        revenue: item.netRevenue || 0,
-        cost: item.cogs || 0,
-        profit: item.netProfit || 0,
-      }));
+      // Merge revenue and profit data for the chart to avoid empty bars when no profit is yet realized
+      const revChart = rev?.chartData || [];
+      const profChart = prof?.chartData || [];
+      
+      const chartMap = new Map();
+      
+      revChart.forEach((item: any) => {
+        chartMap.set(item.period, {
+          label: item.period,
+          revenue: item.netRevenue || 0,
+          cost: 0,
+          profit: 0
+        });
+      });
+
+      profChart.forEach((item: any) => {
+        const existing = chartMap.get(item.period) || { label: item.period, revenue: 0 };
+        chartMap.set(item.period, {
+          ...existing,
+          cost: item.cogs || 0,
+          profit: item.netProfit || 0
+        });
+      });
+
+      const chartItems = Array.from(chartMap.values()).sort((a, b) => a.label.localeCompare(b.label));
 
       setData({
         // Summaries
@@ -140,7 +157,7 @@ const StatisticsPage = () => {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [isAuthenticated]);
 
   useEffect(() => {
     fetchData(period, sortBy);

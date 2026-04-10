@@ -85,14 +85,41 @@ apiClient.interceptors.response.use(
 
     // 2. Handle Rate Limiting (429)
     if (error.response?.status === 429) {
-      if (typeof window !== 'undefined') {
-        toast({
-          variant: "destructive",
-          title: "Thao tác quá nhanh",
-          description: "Bạn đang thao tác quá nhanh. Vui lòng thử lại sau ít giây nhé!",
-        });
+      const url = originalRequest.url || '';
+      let message = "Bạn đang thao tác quá nhanh. Vui lòng đợi một chút rồi thử lại nhé.";
+
+      if (url.includes('/auth/login')) {
+        message = "Bạn đã đăng nhập sai quá nhiều lần. Vui lòng thử lại sau 5 phút để bảo vệ tài khoản.";
+      } else if (url.includes('/auth/forgot-password') || url.includes('/auth/resend-activation')) {
+        message = "Hệ thống đã gửi email cho bạn rồi. Vui lòng kiểm tra hộp thư (kể cả mục Spam) hoặc thử lại sau 15 phút.";
       }
-      return Promise.reject(error);
+
+      toast({
+        variant: "destructive",
+        title: "Thao tác quá nhanh",
+        description: message,
+      });
+      
+      return Promise.reject(new Error(message));
+    }
+
+    // 3. Handle 401 (Session Expired/Blacklisted) - If refresh already failed or not applicable
+    if (error.response?.status === 401 && !isAuthRequest) {
+        // If we reach here, it means even refresh failed or was skipped
+        if (typeof window !== 'undefined') {
+          console.warn("Session expired or blacklisted. Redirecting to login...");
+          
+          toast({
+            variant: "destructive",
+            title: "Phiên làm việc hết hạn",
+            description: "Vui lòng đăng nhập lại để tiếp tục.",
+          });
+
+          // Prevent multiple redirects
+          if (!window.location.pathname.includes('/auth')) {
+            window.location.href = '/auth';
+          }
+        }
     }
 
     return Promise.reject(error);
@@ -233,7 +260,14 @@ export const orderApi = {
   getGhnDetail: (id: string) => apiClient.get(`/admin/orders/${id}/shipping/ghn/detail`),
   simulateGhnStatus: (id: string, data: { status: string; type?: string }) => apiClient.post(`/admin/orders/${id}/shipping/ghn/simulate-status`, data),
   
-  // STATS
+  // PREVIEW
+  previewOrder: (data: {
+    items: { productId: string; sku: string; quantity: number }[];
+    ghnDistrictId?: number;
+    ghnWardCode?: string;
+    couponCode?: string;
+  }) => apiClient.post('/orders/preview', data),
+
   getRevenueStats: (params?: any) => apiClient.get('/admin/orders/stats/revenue', { params }),
   getProfitStats: (params?: any) => apiClient.get('/admin/orders/stats/profit', { params }),
   getTopSkus: (params?: any) => apiClient.get('/admin/orders/stats/top-skus', { params }),

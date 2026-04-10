@@ -118,6 +118,7 @@ function AuthContent() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [targetEmail, setTargetEmail] = useState("");
+  const [countdown, setCountdown] = useState(0);
   const { isDarkMode, toggleDarkMode } = useTheme();
 
   const router = useRouter();
@@ -143,6 +144,14 @@ function AuthContent() {
     resolver: zodResolver(otpSchema),
     defaultValues: { otp: "" },
   });
+
+  // Countdown timer effect
+  useEffect(() => {
+    if (countdown > 0) {
+      const timer = setTimeout(() => setCountdown(countdown - 1), 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [countdown]);
 
   useEffect(() => {
     setError(null);
@@ -192,6 +201,7 @@ function AuthContent() {
         if ((res as any).status === 403) {
           setTargetEmail(data.email);
           setAuthState("verify");
+          setCountdown(60); // Start 60s cooldown
           toast({ 
             title: "🔐 Tài khoản chưa kích hoạt", 
             description: "Vui lòng kiểm tra email và nhập mã OTP để kích hoạt tài khoản của bạn." 
@@ -230,6 +240,7 @@ function AuthContent() {
       }
       setTargetEmail(data.email);
       setAuthState("verify");
+      setCountdown(60); // Start 60s cooldown
       toast({ 
         variant: "success", 
         title: "📧 Đăng ký thành công", 
@@ -269,11 +280,16 @@ function AuthContent() {
   };
 
   const handleResendOtp = async () => {
+    if (countdown > 0) return;
     setIsLoading(true);
     try {
       const { error } = await resendActivation(targetEmail);
-      if (error) toast({ variant: "destructive", title: "❌ Lỗi", description: error.message });
-      else toast({ variant: "success", title: "✅ Đã gửi lại mã", description: "Vui lòng kiểm tra hộp thư đến." });
+      if (error) {
+        toast({ variant: "destructive", title: "❌ Lỗi", description: error.message });
+      } else {
+        toast({ variant: "success", title: "✅ Đã gửi lại mã", description: "Vui lòng kiểm tra hộp thư đến." });
+        setCountdown(60);
+      }
     } finally {
       setIsLoading(false);
     }
@@ -501,7 +517,16 @@ function AuthContent() {
                          {isLoading ? <Loader2 className="animate-spin h-5 w-5" /> : "Kích hoạt tài khoản"}
                       </Button>
                       <div className="flex flex-col gap-3 pt-2">
-                        <Button variant="outline" type="button" className="h-10 text-sm gap-2" onClick={handleResendOtp} disabled={isLoading}><RefreshCw className={cn("h-4 w-4", isLoading && "animate-spin")} /> Gửi lại mã OTP</Button>
+                        <Button 
+                          variant="outline" 
+                          type="button" 
+                          className="h-10 text-sm gap-2" 
+                          onClick={handleResendOtp} 
+                          disabled={isLoading || countdown > 0}
+                        >
+                          <RefreshCw className={cn("h-4 w-4", isLoading && "animate-spin")} /> 
+                          {countdown > 0 ? `Gửi lại mã (${countdown}s)` : "Gửi lại mã OTP"}
+                        </Button>
                         <Button variant="ghost" type="button" className="h-10 text-sm text-muted-foreground" onClick={() => setAuthState("login")}>Hủy bỏ và quay lại</Button>
                       </div>
                     </form>

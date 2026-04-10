@@ -1,8 +1,9 @@
 "use client";
 
-import React, { createContext, useContext, useState, useEffect } from "react";
+import React, { createContext, useContext, useState, useEffect, useRef } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import { cartApi, productApi } from "@/services/api";
+import { toast } from "@/hooks/use-toast";
 
 export interface CartItem {
   id: string; // Unique key: productId-sku
@@ -39,6 +40,9 @@ export function CartProvider({ children }: { children: React.ReactNode }): React
   const [couponCode, setCouponCode] = useState<string | undefined>(undefined);
   const [discountAmount, setDiscountAmount] = useState<number | undefined>(undefined);
   const { isAuthenticated } = useAuth();
+  
+  // Ref to store the debounce timeout
+  const debounceTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     if (isAuthenticated) {
@@ -124,8 +128,16 @@ export function CartProvider({ children }: { children: React.ReactNode }): React
            sku: item.sku,
            quantity: item.quantity
         });
-      } catch (e) {
+      } catch (e: any) {
         console.error("Failed to sync cart", e);
+        if (e.response?.status === 400) {
+          const errorMessage = e.response?.data?.message || "Không thể thêm vào giỏ hàng";
+          toast({
+            variant: "destructive",
+            title: "Lỗi giỏ hàng",
+            description: errorMessage,
+          });
+        }
       }
     }
   };
@@ -142,15 +154,40 @@ export function CartProvider({ children }: { children: React.ReactNode }): React
   };
 
   const updateQuantity = async (id: string | number, quantity: number) => {
+    // 1. Update local state immediately for snappy UI
     setCartItems((prev) =>
       prev.map((item) => (item.id === id ? { ...item, quantity } : item))
     );
     
+    // 2. Debounce the API call to avoid spamming the server
     const itemToUpdate = cartItems.find(i => i.id === id);
     if (isAuthenticated && itemToUpdate) {
-       try {
-          await cartApi.addItem({ productId: itemToUpdate.productId, sku: itemToUpdate.sku, quantity: quantity });
-       } catch (e) {}
+       if (debounceTimeoutRef.current) {
+         clearTimeout(debounceTimeoutRef.current);
+       }
+
+       debounceTimeoutRef.current = setTimeout(async () => {
+         try {
+            await cartApi.addItem({ 
+              productId: itemToUpdate.productId, 
+              sku: itemToUpdate.sku, 
+              quantity: quantity 
+            });
+         } catch (e: any) {
+            console.error("Failed to sync cart", e);
+            if (e.response?.status === 400) {
+              const errorMessage = e.response?.data?.message || "Không thể cập nhật giỏ hàng";
+              toast({
+                variant: "destructive",
+                title: "Lỗi giỏ hàng",
+                description: errorMessage,
+              });
+              
+              // Tùy chọn: Nếu lỗi 400, có thể fetch lại giỏ hàng từ server để đảm bảo logic số lượng đúng
+              // refreshCart();
+            }
+         }
+       }, 500); // 500ms debounce
     }
   };
 

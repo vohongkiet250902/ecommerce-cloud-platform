@@ -101,6 +101,16 @@ function CheckoutContent() {
   const [discountAmount, setDiscountAmount] = useState(0);
   const [appliedCouponCode, setAppliedCouponCode] = useState<string | null>(null);
 
+  // Dynamic pricing from backend
+  const [pricing, setPricing] = useState({
+    subTotal: 0,
+    shippingFee: 0,
+    discountAmount: 0,
+    finalTotal: 0
+  });
+  const [isPreviewLoading, setIsPreviewLoading] = useState(false);
+  const [idempotencyKey] = useState(() => `idemp_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`);
+
   // Sync coupon from cart if not Buy Now
   useEffect(() => {
     if (!isBuyNow && cartCouponCode) {
@@ -437,6 +447,47 @@ function CheckoutContent() {
     setShowAddressBook(false);
   };
 
+  // Fetch Order Preview from Backend
+  useEffect(() => {
+    const fetchPreview = async () => {
+      if (checkoutItems.length === 0) return;
+      
+      setIsPreviewLoading(true);
+      try {
+        const items = checkoutItems.map(item => {
+          // If item.id is composite (productId-sku), extract productId
+          const realProductId = item.productId || (item.id.includes('-') ? item.id.split('-')[0] : item.id);
+          
+          return {
+            productId: realProductId,
+            sku: (item.sku && item.sku !== "N/A") ? item.sku : "DEFAULT",
+            quantity: item.quantity || 1
+          };
+        });
+
+        const res = await orderApi.previewOrder({
+          items,
+          ghnDistrictId: selectedDistrictCode ? Number(selectedDistrictCode) : undefined,
+          ghnWardCode: selectedWardCode ? selectedWardCode : undefined,
+          couponCode: appliedCouponCode || undefined
+        });
+
+        const data = res.data.data || res.data;
+        if (data.pricing) {
+          setPricing(data.pricing);
+          // Sync local discount amount for UI consistency if needed
+          setDiscountAmount(data.pricing.discountAmount || 0);
+        }
+      } catch (err) {
+        console.error("Failed to fetch order preview", err);
+      } finally {
+        setIsPreviewLoading(false);
+      }
+    };
+
+    fetchPreview();
+  }, [checkoutItems, selectedDistrictCode, selectedWardCode, appliedCouponCode]);
+
   // Coupon handling
   const handleApplyCoupon = async () => {
     if (!couponCode.trim()) return;
@@ -446,16 +497,14 @@ function CheckoutContent() {
         // For cart, apply to server-side cart
         const res = await cartApi.applyCoupon(couponCode);
         const cartData = res.data.data || res.data;
-        setDiscountAmount(cartData.discountAmount || 0);
+        // setDiscountAmount will be updated by the preview effect
         setAppliedCouponCode(couponCode);
       } else {
-        // For Buy Now, we'll just send it during order creation
-        // but we could call a dummy calculate API if it existed.
-        // Since we are not supposed to modify BE, we just allow the user to enter it.
+        // For Buy Now, just record the code, the preview effect will handle calculation
         setAppliedCouponCode(couponCode);
         toast({
           title: "Mã giảm giá đã được ghi nhận",
-          description: "Mã sẽ được áp dụng khi đặt hàng.",
+          description: "Đang tính toán lại tổng tiền...",
           variant: "success"
         });
       }
@@ -486,9 +535,7 @@ function CheckoutContent() {
 
 
 
-  const subtotal = checkoutItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
-  const shippingFee = subtotal >= 500000 ? 0 : 30000;
-  const total = subtotal + shippingFee - discountAmount;
+  const { subTotal, shippingFee, finalTotal } = pricing;
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
@@ -540,7 +587,7 @@ function CheckoutContent() {
         shippingInfo,
         paymentMethod: formData.paymentMethod === "VNPAYQR" ? "vnpay" : "cod",
         couponCode: appliedCouponCode || undefined,
-        idempotencyKey: isBuyNow ? `ord_${Date.now()}_${Math.random().toString(36).substring(2, 11)}` : `ord_cart_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`
+        idempotencyKey: idempotencyKey
       };
 
       // Ensure we use orderApi for ALL checkouts since cartApi.checkout DTO rejects GHN fields
@@ -979,19 +1026,21 @@ function CheckoutContent() {
                     <div className="space-y-3">
                       <div className="flex justify-between text-sm">
                         <span className="text-muted-foreground">Tạm tính</span>
-                        <span className="font-bold">{formatPrice(subtotal)}</span>
+                        <span className="font-bold">{formatPrice(subTotal)}</span>
                       </div>
                       <div className="flex justify-between text-sm">
                         <span className="text-muted-foreground">Phí vận chuyển</span>
-                        {shippingFee === 0 ? (
+                        {isPreviewLoading ? (
+                           <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                        ) : shippingFee === 0 ? (
                           <span className="text-success font-bold">Miễn phí</span>
                         ) : (
                           <span className="font-bold">{formatPrice(shippingFee)}</span>
                         )}
                       </div>
-                      {subtotal < 500000 && (
+                      {subTotal < 500000 && (
                         <div className="bg-primary/10 p-2 rounded-lg border border-primary/20 text-[10px] text-primary font-medium text-center">
-                          Mua thêm <span className="font-bold">{formatPrice(500000 - subtotal)}</span> để được miễn phí vận chuyển
+                          Mua thêm <span className="font-bold">{formatPrice(500000 - subTotal)}</span> để được miễn phí vận chuyển
                         </div>
                       )}
                       <Separator className="my-2" />
@@ -1045,8 +1094,12 @@ function CheckoutContent() {
                       <Separator className="my-2" />
                       <div className="flex justify-between items-end pt-2">
                         <span className="font-bold text-base">Tổng cộng</span>
-                        <div className="text-right">
-                          <p className="text-2xl font-black text-primary leading-tight">{formatPrice(total)}</p>
+                        <div className="text-right flex flex-col items-end">
+                          {isPreviewLoading ? (
+                            <Loader2 className="h-6 w-6 animate-spin text-primary mb-2" />
+                          ) : (
+                            <p className="text-2xl font-black text-primary leading-tight">{formatPrice(finalTotal)}</p>
+                          )}
                           <p className="text-[10px] text-muted-foreground mt-0.5">(Đã bao gồm VAT nếu có)</p>
                         </div>
                       </div>

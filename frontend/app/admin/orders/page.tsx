@@ -166,7 +166,7 @@ export default function OrdersPage() {
     .reduce((sum, o) => sum + o.totalAmount, 0);
 
   const exportToCSV = () => {
-    const headers = ["Mã đơn", "Khách hàng", "Email", "Tổng tiền", "Thanh toán", "Trạng thái", "Ngày đặt"];
+    const headers = ["Mã đơn", "Khách hàng", "Email", "Tổng tiền", "Phí ship", "Thanh toán", "Trạng thái", "Ngày đặt"];
     const csvContent = [
       headers.join(","),
       ...allOrders.map(o => [
@@ -174,6 +174,7 @@ export default function OrdersPage() {
         o.userId?.fullName || o.userId?.name || "Khách",
         o.userId?.email || "N/A",
         o.totalAmount,
+        o.shipping?.fee || 0,
         o.paymentStatus,
         o.status,
         new Date(o.createdAt).toLocaleDateString("vi-VN")
@@ -446,6 +447,15 @@ export default function OrdersPage() {
       header: "Tổng tiền",
       render: (order: Order) => (
         <span className="font-semibold">{formatPrice(order.totalAmount)}</span>
+      ),
+    },
+    {
+      key: "shippingFee",
+      header: "Phí ship",
+      render: (order: Order) => (
+        <span className="text-muted-foreground text-xs">
+          {order.shipping?.fee ? formatPrice(order.shipping.fee) : "0đ"}
+        </span>
       ),
     },
     {
@@ -907,6 +917,14 @@ export default function OrdersPage() {
                       <div className="h-[1px] bg-border/20 my-1" />
                       
                       <div className="flex flex-col items-end gap-1">
+                        <div className="flex flex-col items-end gap-0.5 mb-2 w-full">
+                          <div className="flex justify-between items-center text-xs w-full">
+                            <span className="text-muted-foreground font-medium">Phí vận chuyển:</span>
+                            <span className="font-bold text-foreground">
+                              {selectedOrder.shipping?.fee ? formatPrice(selectedOrder.shipping.fee) : '0đ'}
+                            </span>
+                          </div>
+                        </div>
                         <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Tổng cộng</span>
                         <span className="text-2xl font-bold text-primary tracking-tight">
                           {formatPrice(selectedOrder.totalAmount || 0)}

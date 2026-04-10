@@ -168,6 +168,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } finally {
       setUser(null);
       setIsAuthenticated(false);
+      // Xóa thông tin giỏ hàng và các state khác trong localStorage khi đăng xuất
+      localStorage.removeItem('cart');
+      localStorage.removeItem('buyNowItem');
       router.push('/auth');
     }
   }, [router]);

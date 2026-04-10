@@ -18,6 +18,7 @@ import {
   Eye,
   EyeOff,
   AlertTriangle,
+  RefreshCw,
 } from "lucide-react";
 import Image from "next/image";
 import { motion, AnimatePresence } from "framer-motion";
@@ -97,6 +98,7 @@ export default function ForgotPasswordPage() {
   const [userEmail, setUserEmail] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [countdown, setCountdown] = useState(0);
   
   const { isDarkMode, toggleDarkMode } = useTheme();
 
@@ -151,6 +153,14 @@ export default function ForgotPasswordPage() {
   const { forgotPassword, resetPassword, verifyResetOtp } = useAuth();
   const [otpCode, setOtpCode] = useState("");
 
+  // Countdown timer effect
+  useEffect(() => {
+    if (countdown > 0) {
+      const timer = setTimeout(() => setCountdown(countdown - 1), 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [countdown]);
+
   /* =======================
      Handlers
   ======================= */
@@ -170,6 +180,7 @@ export default function ForgotPasswordPage() {
       }
       setUserEmail(data.email);
       setStep(2);
+      setCountdown(60); // Start timer on first send
       toast({
         variant: "success",
         title: "🔑 Đã gửi mã OTP",
@@ -177,6 +188,22 @@ export default function ForgotPasswordPage() {
       });
     } catch (err) {
       setError("Không thể kết nối đến máy chủ. Vui lòng kiểm tra internet.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const onResendOtp = async () => {
+    if (countdown > 0) return;
+    setIsLoading(true);
+    try {
+      const { error } = await forgotPassword(userEmail);
+      if (error) {
+        toast({ variant: "destructive", title: "❌ Lỗi", description: error.message });
+      } else {
+        toast({ variant: "success", title: "✅ Đã gửi lại mã", description: "Vui lòng kiểm tra hộp thư đến." });
+        setCountdown(60);
+      }
     } finally {
       setIsLoading(false);
     }
@@ -381,15 +408,27 @@ export default function ForgotPasswordPage() {
                         <Button type="submit" className="w-full h-11 text-base font-medium cursor-pointer" disabled={isLoading}>
                           {isLoading ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Đang xác thực...</> : "Xác nhận OTP"}
                         </Button>
-                        <Button
-                          type="button" 
-                          variant="ghost" 
-                          className="w-full text-sm cursor-pointer" 
-                          onClick={() => setStep(1)}
-                          disabled={isLoading}
-                        >
-                          Thay đổi email
-                        </Button>
+                        <div className="flex flex-col gap-2">
+                          <Button 
+                            type="button" 
+                            variant="outline" 
+                            className="w-full h-10 text-sm gap-2" 
+                            onClick={onResendOtp}
+                            disabled={isLoading || countdown > 0}
+                          >
+                            <RefreshCw className={cn("w-4 h-4", isLoading && "animate-spin")} />
+                            {countdown > 0 ? `Gửi lại mã (${countdown}s)` : "Gửi lại mã OTP"}
+                          </Button>
+                          <Button
+                            type="button" 
+                            variant="ghost" 
+                            className="w-full text-sm cursor-pointer" 
+                            onClick={() => setStep(1)}
+                            disabled={isLoading}
+                          >
+                            Thay đổi email
+                          </Button>
+                        </div>
                       </div>
                     </form>
                   </Form>
