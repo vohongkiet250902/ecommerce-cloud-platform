@@ -2036,6 +2036,7 @@ export class OrdersService {
           grossRevenue: { $sum: '$grossRevenue' },
           netRevenue: { $sum: { $ifNull: ['$totalAmount', 0] } },
           cogs: { $sum: '$cogs' },
+          shippingCost: { $sum: { $ifNull: ['$shipping.fee', 0] } },
         },
       },
       {
@@ -2048,15 +2049,27 @@ export class OrdersService {
           netRevenue: 1,
           cogs: 1,
           grossProfit: { $subtract: ['$grossRevenue', '$cogs'] },
-          netProfit: { $subtract: ['$netRevenue', '$cogs'] },
+          netProfit: {
+            $subtract: ['$netRevenue', { $add: ['$cogs', '$shippingCost'] }],
+          },
         },
       },
       { $sort: { firstDate: 1 } },
     ]);
 
     const currentItems: any[] = [];
-    const currentSummary = { netRevenue: 0, cogs: 0, netProfit: 0 };
-    const previousSummary = { netRevenue: 0, cogs: 0, netProfit: 0 };
+    const currentSummary = {
+      netRevenue: 0,
+      cogs: 0,
+      shippingCost: 0,
+      netProfit: 0,
+    };
+    const previousSummary = {
+      netRevenue: 0,
+      cogs: 0,
+      shippingCost: 0,
+      netProfit: 0,
+    };
 
     for (const item of rawItems) {
       const isCurrent = new Date(item.firstDate) >= currentStart;
@@ -2066,14 +2079,15 @@ export class OrdersService {
         currentItems.push(item);
         currentSummary.netRevenue += item.netRevenue || 0;
         currentSummary.cogs += item.cogs || 0;
+        currentSummary.shippingCost += item.shippingCost || 0; // 🔥 Tracking thêm
         currentSummary.netProfit += item.netProfit || 0;
       } else {
         previousSummary.netRevenue += item.netRevenue || 0;
         previousSummary.cogs += item.cogs || 0;
+        previousSummary.shippingCost += item.shippingCost || 0; // 🔥 Tracking thêm
         previousSummary.netProfit += item.netProfit || 0;
       }
     }
-
     return {
       groupBy: normalizedGroupBy,
       range: value,
