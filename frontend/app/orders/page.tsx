@@ -829,7 +829,7 @@ export default function MyOrdersPage() {
                           </div>
                           <div className="space-y-3">
                               <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-primary/60"><CreditCard className="w-3 h-3" />Phương thức thanh toán</div>
-                              <Card className="rounded-2xl border-border/40 bg-card/50 p-4 flex flex-col justify-between shadow-sm border h-[130px]">
+                              <Card className="rounded-2xl border-border/40 bg-card/50 p-4 flex flex-col justify-between shadow-sm border min-h-[160px]">
                                    <div className="flex items-center justify-between">
                                       <div className="flex items-center gap-3 text-base font-black text-primary">{(selectedOrderDetail?.paymentMethod || 'cod').toUpperCase()}</div>
                                       <div className="flex items-center gap-2">
@@ -849,6 +849,12 @@ export default function MyOrdersPage() {
                                            <span>Phí vận chuyển</span>
                                            <span>{selectedOrderDetail?.shipping?.fee ? formatPrice(selectedOrderDetail.shipping.fee) : "0đ"}</span>
                                        </div>
+                                       {selectedOrderDetail?.discountAmount > 0 && (
+                                           <div className="flex justify-between items-center text-[10px] font-black text-success uppercase tracking-wider mt-1">
+                                               <span>Giảm giá</span>
+                                               <span className="font-bold">-{formatPrice(selectedOrderDetail.discountAmount)}</span>
+                                           </div>
+                                       )}
                                        <div className="flex justify-between items-end">
                                            <div className="space-y-0.5">
                                                <p className="text-[9px] font-black text-muted-foreground uppercase">Tổng tiền</p>

@@ -1038,11 +1038,6 @@ function CheckoutContent() {
                           <span className="font-bold">{formatPrice(shippingFee)}</span>
                         )}
                       </div>
-                      {subTotal < 500000 && (
-                        <div className="bg-primary/10 p-2 rounded-lg border border-primary/20 text-[10px] text-primary font-medium text-center">
-                          Mua thêm <span className="font-bold">{formatPrice(500000 - subTotal)}</span> để được miễn phí vận chuyển
-                        </div>
-                      )}
                       <Separator className="my-2" />
                       
                       {/* Coupon Section */}

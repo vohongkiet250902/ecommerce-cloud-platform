@@ -140,9 +140,9 @@ export function DataTable<T extends object>({
                   </TableCell>
                 </TableRow>
               ) : (
-                paginatedData.map((item, rowIndex) => (
+                paginatedData.map((item: any, rowIndex) => (
                   <TableRow
-                    key={rowIndex}
+                    key={item._id || item.id || rowIndex}
                     className="group border-b border-border/30 transition-colors hover:bg-muted/30 data-[state=selected]:bg-muted"
                   >
                     {columns.map((col, colIndex) => {

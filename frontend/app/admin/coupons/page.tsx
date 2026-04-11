@@ -186,11 +186,18 @@ export default function CouponsPage() {
       setFormErrors({});
       fetchCoupons();
     } catch (error: any) {
-      toast({
-        variant: "destructive",
-        title: "Lỗi",
-        description: error.response?.data?.message || "Không thể tạo mã giảm giá",
-      });
+      const msg = error.response?.data?.message || "";
+      const description = typeof msg === "string" ? msg : (Array.isArray(msg) ? msg[0] : "Không thể tạo mã giảm giá");
+
+      if (description.toLowerCase().includes("mã") || description.toLowerCase().includes("code")) {
+        setFormErrors({ code: description });
+      } else {
+        toast({
+          variant: "destructive",
+          title: "Lỗi",
+          description: description,
+        });
+      }
     } finally {
       setCreating(false);
     }
@@ -443,9 +450,10 @@ export default function CouponsPage() {
                   min={1} 
                   max={100} 
                   className="h-11 rounded-xl"
-                  value={formData.discountPercentage}
+                  value={formData.discountPercentage === 0 ? "" : formData.discountPercentage}
                   onChange={e => {
-                    setFormData({...formData, discountPercentage: Number(e.target.value)});
+                    const val = e.target.value === "" ? 0 : Number(e.target.value);
+                    setFormData({...formData, discountPercentage: val});
                     if (formErrors.discountPercentage) setFormErrors({...formErrors, discountPercentage: ""});
                   }}
                 />
@@ -458,10 +466,13 @@ export default function CouponsPage() {
                 <Input 
                   id="maxDiscount"
                   type="number" 
-                  placeholder="0 = Không giới hạn"
+                  placeholder="0"
                   className="h-11 rounded-xl"
-                  value={formData.maxDiscountAmount}
-                  onChange={e => setFormData({...formData, maxDiscountAmount: Number(e.target.value)})}
+                  value={formData.maxDiscountAmount === 0 ? "" : formData.maxDiscountAmount}
+                  onChange={e => {
+                    const val = e.target.value === "" ? 0 : Number(e.target.value);
+                    setFormData({...formData, maxDiscountAmount: val});
+                  }}
                 />
               </div>
             </div>

@@ -17,8 +17,18 @@ export class InventoryController {
   }
 
   @Get('lots')
-  listLots(@Query('productId') productId?: string, @Query('sku') sku?: string) {
-    return this.inventoryService.listLots(productId, sku);
+  listLots(
+    @Query('productId') productId?: string, 
+    @Query('sku') sku?: string,
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
+    @Query('excludeOpening') excludeOpening?: string,
+  ) {
+    return this.inventoryService.listLots(productId, sku, {
+      startDate,
+      endDate,
+      excludeOpening: excludeOpening === 'true',
+    });
   }
 
   @Get('stats/stock-in')
@@ -27,11 +37,15 @@ export class InventoryController {
     @Query('days') days?: string,
     @Query('weeks') weeks?: string,
     @Query('months') months?: string,
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
   ) {
     return this.inventoryService.getStockInStats((groupBy as any) || 'day', {
       days: days ? Number(days) : undefined,
       weeks: weeks ? Number(weeks) : undefined,
       months: months ? Number(months) : undefined,
+      startDate,
+      endDate,
     });
   }
 }

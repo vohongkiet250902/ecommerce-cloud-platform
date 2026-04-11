@@ -417,6 +417,7 @@ export default function ProductsPage() {
              <div className="h-10 w-10 relative rounded-md overflow-hidden bg-muted border border-border shrink-0">
                {product.images?.[0]?.url ? (
                    <Image 
+                      key={product.images[0].url}
                       src={product.images[0].url} 
                       alt={product.name} 
                       fill 

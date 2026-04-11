@@ -312,16 +312,8 @@ export function CartSidebar({
                   </div>
                 </ScrollArea>
 
-                <div className="p-6 bg-background border-t space-y-4">
+                <div className="p-6 bg-background space-y-4">
                   <div className="space-y-2">
-                    {pricing.discountAmount > 0 && (
-                      <div className="flex justify-between text-sm">
-                        <span className="text-muted-foreground text-base font-bold">Giảm giá</span>
-                        <span className="font-bold text-base text-success">-{formatPrice(pricing.discountAmount)}</span>
-                      </div>
-                    )}
-
-                    <Separator className="my-2" />
                     <div className="flex justify-between font-bold text-xl py-2">
                       <span>Tổng tiền</span>
                       <div className="text-right flex flex-col items-end">

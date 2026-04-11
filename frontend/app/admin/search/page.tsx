@@ -788,7 +788,7 @@ export default function SearchManagement() {
                                     placeholder="Giá tối thiểu..." 
                                     className="h-11 rounded-xl bg-background border-border text-sm font-semibold pl-4 pr-12 focus-visible:ring-indigo-500/20 transition-all shadow-sm"
                                     type="number" 
-                                    value={filters.minPrice}
+                                    value={filters.minPrice === "0" ? "" : filters.minPrice}
                                     onChange={(e) => setFilters(f => ({...f, minPrice: e.target.value}))}
                                  />
                               </div>
@@ -798,7 +798,7 @@ export default function SearchManagement() {
                                     placeholder="Giá tối đa..." 
                                     className="h-11 rounded-xl bg-background border-border text-sm font-semibold pl-4 pr-12 focus-visible:ring-indigo-500/20 transition-all shadow-sm"
                                     type="number" 
-                                    value={filters.maxPrice}
+                                    value={filters.maxPrice === "0" ? "" : filters.maxPrice}
                                     onChange={(e) => setFilters(f => ({...f, maxPrice: e.target.value}))}
                                  />
                               </div>

@@ -820,6 +820,7 @@ export default function AddProductModal({ open, onOpenChange, initialData, onSuc
                         className="relative group rounded-xl overflow-hidden border border-border aspect-square"
                       >
                         <Image
+                          key={img.url}
                           src={img.url}
                           alt={`Product ${i + 1}`}
                           fill
@@ -897,6 +898,7 @@ export default function AddProductModal({ open, onOpenChange, initialData, onSuc
                               {variant.image ? (
                                 <div className="relative w-full aspect-square rounded-md overflow-hidden border">
                                   <Image
+                                    key={variant.image.url}
                                     src={variant.image.url}
                                     alt={`Variant ${i + 1}`}
                                     fill

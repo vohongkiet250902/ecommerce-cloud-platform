@@ -409,26 +409,30 @@ export class InventoryService {
 
   private buildStatsStartDate(
     groupBy: 'day' | 'week' | 'month',
-    range?: { days?: number; weeks?: number; months?: number },
+    range?: { days?: number; weeks?: number; months?: number; startDate?: string; endDate?: string },
   ) {
+    if (range?.startDate) {
+      const start = new Date(range.startDate);
+      const end = range.endDate ? new Date(range.endDate) : new Date();
+      return { start, end, value: 0 };
+    }
+
     const value = this.resolveStatsRangeValue(groupBy, range);
     const start = new Date();
+    const end = new Date();
     start.setHours(0, 0, 0, 0);
 
     if (groupBy === 'day') {
       start.setDate(start.getDate() - (value - 1));
-      return { start, value };
-    }
-
-    if (groupBy === 'week') {
+    } else if (groupBy === 'week') {
       const dayOffset = (start.getDay() + 6) % 7;
       start.setDate(start.getDate() - dayOffset - (value - 1) * 7);
-      return { start, value };
+    } else {
+      start.setDate(1);
+      start.setMonth(start.getMonth() - (value - 1));
     }
-
-    start.setDate(1);
-    start.setMonth(start.getMonth() - (value - 1));
-    return { start, value };
+    
+    return { start, end, value };
   }
 
   private buildPeriodGroupExpr(
@@ -490,15 +494,16 @@ export class InventoryService {
 
   async getStockInStats(
     groupBy: 'day' | 'week' | 'month' = 'day',
-    range?: { days?: number; weeks?: number; months?: number },
+    range?: { days?: number; weeks?: number; months?: number; startDate?: string; endDate?: string },
   ) {
     const normalizedGroupBy = this.normalizeStatsGroupBy(groupBy);
-    const { start, value } = this.buildStatsStartDate(normalizedGroupBy, range);
+    const { start, end, value } = this.buildStatsStartDate(normalizedGroupBy, range);
 
     const items = await this.inventoryLotModel.aggregate([
       {
         $match: {
-          receivedAt: { $gte: start },
+          receivedAt: { $gte: start, $lte: end },
+          sourceType: { $ne: 'opening_balance' },
         },
       },
       {
@@ -568,10 +573,24 @@ export class InventoryService {
     };
   }
 
-  async listLots(productId?: string, sku?: string) {
+  async listLots(
+    productId?: string, 
+    sku?: string, 
+    filters?: { startDate?: string; endDate?: string; excludeOpening?: boolean }
+  ) {
     const match: any = {};
     if (productId) match.productId = new Types.ObjectId(productId);
     if (sku) match.sku = sku;
+
+    if (filters?.startDate || filters?.endDate) {
+      match.receivedAt = {};
+      if (filters.startDate) match.receivedAt.$gte = new Date(filters.startDate);
+      if (filters.endDate) match.receivedAt.$lte = new Date(filters.endDate);
+    }
+
+    if (filters?.excludeOpening) {
+      match.sourceType = { $ne: 'opening_balance' };
+    }
 
     return this.inventoryLotModel.aggregate([
       { $match: match },

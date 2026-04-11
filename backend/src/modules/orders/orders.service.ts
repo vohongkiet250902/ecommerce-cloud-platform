@@ -79,6 +79,8 @@ type StatsRangeInput = {
   weeks?: number;
   months?: number;
   quarters?: number;
+  startDate?: string;
+  endDate?: string;
 };
 
 type TopSortBy = 'quantity' | 'revenue' | 'profit';
@@ -1683,37 +1685,45 @@ export class OrdersService {
 
   // Lấy ra 2 mốc thời gian: Bắt đầu của kỳ trước và Bắt đầu của kỳ hiện tại
   private buildComparisonDates(groupBy: StatsGroupBy, range?: StatsRangeInput) {
-    const value = this.resolveStatsRangeValue(groupBy, range);
-    const currentStart = new Date();
-    const previousStart = new Date();
+    const currentStart = range?.startDate ? new Date(range.startDate) : new Date();
+    const currentEnd = range?.endDate ? new Date(range.endDate) : new Date();
+    const previousStart = new Date(currentStart);
+    const previousEnd = new Date(currentEnd);
 
-    currentStart.setHours(0, 0, 0, 0);
-    previousStart.setHours(0, 0, 0, 0);
-
-    if (groupBy === 'day') {
-      currentStart.setDate(currentStart.getDate() - (value - 1));
-      previousStart.setDate(currentStart.getDate() - value);
-    } else if (groupBy === 'week') {
-      const dayOffset = (currentStart.getDay() + 6) % 7;
-      currentStart.setDate(
-        currentStart.getDate() - dayOffset - (value - 1) * 7,
-      );
-      previousStart.setDate(currentStart.getDate() - value * 7);
-    } else if (groupBy === 'month') {
-      currentStart.setDate(1);
-      currentStart.setMonth(currentStart.getMonth() - (value - 1));
-      previousStart.setDate(1);
-      previousStart.setMonth(currentStart.getMonth() - value);
-    } else if (groupBy === 'quarter') {
-      const currentMonth = currentStart.getMonth();
-      const quarterStartMonth = Math.floor(currentMonth / 3) * 3;
-      currentStart.setDate(1);
-      currentStart.setMonth(quarterStartMonth - (value - 1) * 3);
-      previousStart.setDate(1);
-      previousStart.setMonth(currentStart.getMonth() - value * 3);
+    if (!range?.startDate) {
+      currentStart.setHours(0, 0, 0, 0);
+      previousStart.setHours(0, 0, 0, 0);
+      const value = this.resolveStatsRangeValue(groupBy, range);
+      
+      if (groupBy === 'day') {
+        currentStart.setDate(currentStart.getDate() - (value - 1));
+        previousStart.setDate(currentStart.getDate() - value);
+      } else if (groupBy === 'week') {
+        const dayOffset = (currentStart.getDay() + 6) % 7;
+        currentStart.setDate(currentStart.getDate() - dayOffset - (value - 1) * 7);
+        previousStart.setDate(currentStart.getDate() - value * 7);
+      } else if (groupBy === 'month') {
+        currentStart.setDate(1);
+        currentStart.setMonth(currentStart.getMonth() - (value - 1));
+        previousStart.setDate(1);
+        previousStart.setMonth(currentStart.getMonth() - value);
+      } else if (groupBy === 'quarter') {
+        const currentMonth = currentStart.getMonth();
+        const quarterStartMonth = Math.floor(currentMonth / 3) * 3;
+        currentStart.setDate(1);
+        currentStart.setMonth(quarterStartMonth - (value - 1) * 3);
+        previousStart.setDate(1);
+        previousStart.setMonth(currentStart.getMonth() - value * 3);
+      }
+      return { previousStart, currentStart, currentEnd, value };
+    } else {
+      // Nếu có startDate/endDate từ FE
+      const diffTime = Math.abs(currentEnd.getTime() - currentStart.getTime());
+      previousStart.setTime(currentStart.getTime() - diffTime);
+      previousEnd.setTime(currentStart.getTime() - 1);
+      
+      return { previousStart, previousEnd, currentStart, currentEnd, value: 0 };
     }
-
-    return { previousStart, currentStart, value };
   }
 
   private buildPeriodGroupExpr(field: string, groupBy: StatsGroupBy) {
@@ -1859,7 +1869,7 @@ export class OrdersService {
     range?: StatsRangeInput,
   ) {
     const normalizedGroupBy = this.normalizeStatsGroupBy(groupBy);
-    const { previousStart, currentStart, value } = this.buildComparisonDates(
+    const { previousStart, currentStart, currentEnd, value } = this.buildComparisonDates(
       normalizedGroupBy,
       range,
     );
@@ -1868,7 +1878,7 @@ export class OrdersService {
       {
         $match: {
           status: 'completed',
-          completedAt: { $gte: previousStart }, // Query từ thời điểm của kỳ trước
+          completedAt: { $gte: previousStart, $lte: currentEnd }, // Query đến currentEnd
         },
       },
       {
@@ -1964,7 +1974,7 @@ export class OrdersService {
 
   async getProfitStats(groupBy: StatsGroupBy = 'day', range?: StatsRangeInput) {
     const normalizedGroupBy = this.normalizeStatsGroupBy(groupBy);
-    const { previousStart, currentStart, value } = this.buildComparisonDates(
+    const { previousStart, currentStart, currentEnd, value } = this.buildComparisonDates(
       normalizedGroupBy,
       range,
     );
@@ -1973,7 +1983,7 @@ export class OrdersService {
       {
         $match: {
           status: 'completed',
-          completedAt: { $gte: previousStart },
+          completedAt: { $gte: previousStart, $lte: currentEnd },
         },
       },
       {
@@ -2109,14 +2119,27 @@ export class OrdersService {
     };
   }
 
-  async getTopSkus(days = 30, limit = 10, sortBy: TopSortBy = 'quantity') {
+  async getTopSkus(
+    days = 30,
+    limit = 10,
+    sortBy: TopSortBy = 'quantity',
+    range?: StatsRangeInput,
+  ) {
     const safeDays = this.clampPositiveInt(days, 30, 366);
     const safeLimit = this.clampPositiveInt(limit, 10, 100);
     const safeSortBy = this.normalizeTopSortBy(sortBy);
 
-    const start = new Date();
-    start.setHours(0, 0, 0, 0);
-    start.setDate(start.getDate() - (safeDays - 1));
+    let start: Date;
+    let end = new Date();
+
+    if (range?.startDate) {
+      start = new Date(range.startDate);
+      if (range.endDate) end = new Date(range.endDate);
+    } else {
+      start = new Date();
+      start.setHours(0, 0, 0, 0);
+      start.setDate(start.getDate() - (safeDays - 1));
+    }
 
     const sortStage: Record<string, 1 | -1> =
       safeSortBy === 'revenue'
@@ -2129,7 +2152,7 @@ export class OrdersService {
       {
         $match: {
           status: 'completed',
-          completedAt: { $gte: start },
+          completedAt: { $gte: start, $lte: end },
         },
       },
       { $unwind: '$items' },
@@ -2205,14 +2228,27 @@ export class OrdersService {
     };
   }
 
-  async getTopProducts(days = 30, limit = 10, sortBy: TopSortBy = 'quantity') {
+  async getTopProducts(
+    days = 30,
+    limit = 10,
+    sortBy: TopSortBy = 'quantity',
+    range?: StatsRangeInput,
+  ) {
     const safeDays = this.clampPositiveInt(days, 30, 366);
     const safeLimit = this.clampPositiveInt(limit, 10, 100);
     const safeSortBy = this.normalizeTopSortBy(sortBy);
 
-    const start = new Date();
-    start.setHours(0, 0, 0, 0);
-    start.setDate(start.getDate() - (safeDays - 1));
+    let start: Date;
+    let end = new Date();
+
+    if (range?.startDate) {
+      start = new Date(range.startDate);
+      if (range.endDate) end = new Date(range.endDate);
+    } else {
+      start = new Date();
+      start.setHours(0, 0, 0, 0);
+      start.setDate(start.getDate() - (safeDays - 1));
+    }
 
     const sortStage: Record<string, 1 | -1> =
       safeSortBy === 'revenue'
@@ -2225,7 +2261,7 @@ export class OrdersService {
       {
         $match: {
           status: 'completed',
-          completedAt: { $gte: start },
+          completedAt: { $gte: start, $lte: end },
         },
       },
       { $unwind: '$items' },

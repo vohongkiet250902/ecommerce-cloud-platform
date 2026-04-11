@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Image from "next/image";
 import Link from "next/link";
@@ -131,8 +131,7 @@ export default function ProductDetailPage() {
   };
 
   /* ================= FETCH DATA ================= */
-  /* ================= FETCH DATA ================= */
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     try {
       setLoading(true);
       const productRes = await productApi.getProduct(productId);
@@ -230,7 +229,7 @@ export default function ProductDetailPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [productId, toast]);
 
   const nextImage = () => {
     if (product?.images?.length) {
@@ -248,7 +247,13 @@ export default function ProductDetailPage() {
     if (productId) {
       fetchData();
     }
-  }, [productId, toast]);
+  }, [productId, fetchData]);
+
+  useEffect(() => {
+    if (product?.images && activeImage >= product.images.length) {
+      setActiveImage(Math.max(0, product.images.length - 1));
+    }
+  }, [product, activeImage]);
 
   /* ================= HELPERS ================= */
   const formatPrice = (price: number) =>
@@ -419,6 +424,7 @@ export default function ProductDetailPage() {
             <div className="relative aspect-video w-full overflow-hidden rounded-[2.5rem] border border-border/60 bg-white shadow-xl shadow-muted/10 group">
                 {product.images?.[activeImage] ? (
                     <Image
+                        key={product.images[activeImage].url}
                         src={product.images[activeImage].url}
                         alt={product.name}
                         fill
@@ -771,6 +777,7 @@ export default function ProductDetailPage() {
         initialData={product}
         onSuccess={() => {
             fetchData();
+            setActiveImage(0);
             setIsModalOpen(false);
         }}
       />

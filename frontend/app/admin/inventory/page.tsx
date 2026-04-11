@@ -39,6 +39,16 @@ import {
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import { productApi, inventoryApi } from "@/services/api";
+import {
+    AlertDialog,
+    AlertDialogAction,
+    AlertDialogCancel,
+    AlertDialogContent,
+    AlertDialogDescription,
+    AlertDialogFooter,
+    AlertDialogHeader,
+    AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
 
 interface InventoryItem {
@@ -57,6 +67,7 @@ interface InventoryItem {
 }
 
 const LOW_STOCK_THRESHOLD = 10;
+const GLOBAL_MAX_LOSS_PERCENT = 30; // Giới hạn lỗ tối đa 30% cho tất cả sản phẩm trong cửa hàng
 
 export default function InventoryPage() {
   const { toast } = useToast();
@@ -72,6 +83,7 @@ export default function InventoryPage() {
   const [note, setNote] = useState<string>("");
   const [updating, setUpdating] = useState(false);
   const [statusFilter, setStatusFilter] = useState<"all" | "out_of_stock" | "low_stock" | "in_stock">("all");
+  const [showLossConfirm, setShowLossConfirm] = useState(false);
 
   // Detail View State
   const [isDetailOpen, setIsDetailOpen] = useState(false);
@@ -159,12 +171,31 @@ export default function InventoryPage() {
       }
   }
 
-  const handleStockIn = async () => {
+  const handleStockIn = async (bypassConfirm = false) => {
       if (!selectedItem) return;
       if (importQuantity <= 0) {
         toast({ title: "Lỗi", description: "Số lượng nhập phải lớn hơn 0", variant: "destructive" });
         return;
       }
+
+      const margin = sellingPrice > 0 ? ((sellingPrice - unitCost) / sellingPrice) * 100 : -100;
+      
+      // Kiểm tra giới hạn lỗ cho TẤT CẢ sản phẩm
+      if (margin <= -GLOBAL_MAX_LOSS_PERCENT) {
+          toast({ 
+            title: "Cảnh báo nghiêm trọng", 
+            description: `Không được phép nhập kho với mức lỗ quá ${GLOBAL_MAX_LOSS_PERCENT}%. Bạn vui lòng điều chỉnh lại giá bán sản phẩm trước khi thực hiện nhập kho lô hàng này.`, 
+            variant: "destructive" 
+          });
+          return;
+      }
+
+      // Nếu bán lỗ hoặc hòa vốn mà chưa bypass confirm
+      if (margin <= 0 && !bypassConfirm) {
+          setShowLossConfirm(true);
+          return;
+      }
+
       try {
           setUpdating(true);
           await inventoryApi.stockIn({
@@ -178,6 +209,7 @@ export default function InventoryPage() {
 
           toast({ title: "Nhập kho thành công", variant: "success" });
           setIsUpdateOpen(false);
+          setShowLossConfirm(false);
           setImportQuantity(0);
           setUnitCost(0);
           setSellingPrice(0);
@@ -324,13 +356,13 @@ export default function InventoryPage() {
             <p className="text-sm text-muted-foreground">
               {stats.outOfStock > 0 && (
                 <>
-                  Có <span className="font-bold text-destructive">{stats.outOfStock}</span> sản phẩm hết hàng
+                  Có <span className="font-bold text-destructive">{stats.outOfStock}</span> mã sản phẩm hết hàng
                 </>
               )}
               {stats.outOfStock > 0 && stats.lowStock > 0 && " và "}
               {stats.lowStock > 0 && (
                 <>
-                  Có <span className="font-bold text-warning">{stats.lowStock}</span> sản phẩm sắp hết hàng
+                  Có <span className="font-bold text-warning">{stats.lowStock}</span> mã sản phẩm sắp hết hàng
                 </>
               )}
               {" cần bổ sung ngay."}
@@ -347,7 +379,7 @@ export default function InventoryPage() {
               <Package className="h-5 w-5 text-primary" />
             </div>
             <div>
-              <p className="text-sm text-muted-foreground font-medium">Tổng Sản phẩm</p>
+              <p className="text-sm text-muted-foreground font-medium">Tổng Mã Sản phẩm</p>
               <div className="flex items-baseline gap-2 mt-1">
                  <p className="text-2xl font-bold text-foreground">{stats.totalSKUs}</p>
               </div>
@@ -528,7 +560,7 @@ export default function InventoryPage() {
                                         <TrendingDown className="h-4 w-4 rotate-180" />
                                         Biên độ an toàn
                                       </div>
-                                      <p className="text-[10px] opacity-80">Lợi nhuận: {(sellingPrice - unitCost).toLocaleString("vi-VN")} đ/sp</p>
+                                      <p className="text-[10px] opacity-80">Lợi nhuận: {(sellingPrice - unitCost).toLocaleString("vi-VN")} đ/sản phẩm</p>
                                    </div>
                                  )}
                                </div>
@@ -553,7 +585,7 @@ export default function InventoryPage() {
                               className="border-border/60"
                               onClick={() => setIsUpdateOpen(false)}
                           >Hủy</Button>
-                          <Button className="font-bold" onClick={handleStockIn} disabled={updating}>
+                          <Button className="font-bold" onClick={() => handleStockIn()} disabled={updating}>
                               {updating ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
                               Xác nhận nhập kho
                           </Button>
@@ -653,6 +685,51 @@ export default function InventoryPage() {
               </DialogFooter>
           </DialogContent>
       </Dialog>
+
+      {/* Loss Confirmation Dialog */}
+      <AlertDialog open={showLossConfirm} onOpenChange={setShowLossConfirm}>
+          <AlertDialogContent className="rounded-2xl border-none shadow-2xl">
+              <AlertDialogHeader>
+                  <div className="flex items-center gap-3 text-destructive mb-2">
+                    <div className="p-2 rounded-full bg-destructive/10">
+                      <AlertTriangle className="h-6 w-6" />
+                    </div>
+                    <AlertDialogTitle className="text-xl font-bold text-destructive">Cảnh báo: Bán lỗ / Hòa vốn</AlertDialogTitle>
+                  </div>
+                  <AlertDialogDescription className="text-muted-foreground bg-muted/30 p-4 rounded-xl border border-border/40">
+                      Bạn đang thực hiện nhập kho với giá nhập (<span className="font-bold text-foreground">{unitCost.toLocaleString("vi-VN")}đ</span>) 
+                      {unitCost > sellingPrice ? " cao hơn " : " bằng "} 
+                      giá bán hiện tại (<span className="font-bold text-foreground">{sellingPrice.toLocaleString("vi-VN")}đ</span>).
+                      <br /><br />
+                      Biên lợi nhuận dự tính: <span className="font-bold text-destructive">
+                        {sellingPrice > 0 ? (((sellingPrice - unitCost) / sellingPrice) * 100).toFixed(1) : "-100"}%
+                      </span>
+                      <br />
+                      <span className="text-xs mt-3 block font-medium text-destructive/80 italic">
+                        * Bạn có chắc chắn muốn tiếp tục nhập kho với mức giá này không?
+                      </span>
+                  </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter className="mt-6 gap-3">
+                  <AlertDialogCancel asChild>
+                    <Button variant="outline" className="rounded-xl font-semibold border-border/60">
+                      Kiểm tra lại
+                    </Button>
+                  </AlertDialogCancel>
+                  <AlertDialogAction asChild>
+                    <Button 
+                      variant="destructive" 
+                      className="rounded-xl font-bold gap-2 px-6"
+                      onClick={() => handleStockIn(true)}
+                      disabled={updating}
+                    >
+                      {updating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                      Tôi hiểu, vẫn xác nhận
+                    </Button>
+                  </AlertDialogAction>
+              </AlertDialogFooter>
+          </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
