@@ -1481,7 +1481,7 @@ export class OrdersService {
     const [data, total] = await Promise.all([
       this.orderModel
         .find(filter)
-        .populate('userId', 'name email')
+        .populate('userId', 'fullName email')
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(query.limit),
@@ -1553,7 +1553,7 @@ export class OrdersService {
     const [data, total] = await Promise.all([
       this.orderModel
         .find(filter)
-        .populate('userId', 'name email')
+        .populate('userId', 'fullName email')
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(limit),

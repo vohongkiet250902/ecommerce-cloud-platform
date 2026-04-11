@@ -148,17 +148,17 @@ export class AuthService {
     });
 
     await this.usersService.setRefreshToken(user._id.toString(), refreshToken);
-    const isProd = this.configService.get<string>('NODE_ENV') === 'production';
+    //const isProd = this.configService.get<string>('NODE_ENV') === 'production';
 
     res.cookie('accessToken', accessToken, {
       httpOnly: true,
-      secure: isProd,
-      sameSite: 'strict',
+      secure: true,
+      sameSite: 'none',
     });
     res.cookie('refreshToken', refreshToken, {
       httpOnly: true,
-      secure: isProd,
-      sameSite: 'strict',
+      secure: true,
+      sameSite: 'none',
     });
 
     return {
@@ -264,18 +264,18 @@ export class AuthService {
     // Cập nhật Token mới vào DB
     await this.usersService.setRefreshToken(userId, newRefreshToken);
 
-    const isProd = this.configService.get<string>('NODE_ENV') === 'production';
+    //const isProd = this.configService.get<string>('NODE_ENV') === 'production';
 
     res.cookie('accessToken', newAccessToken, {
       httpOnly: true,
-      sameSite: 'strict',
-      secure: isProd,
+      sameSite: 'none',
+      secure: true,
     });
 
     res.cookie('refreshToken', newRefreshToken, {
       httpOnly: true,
-      sameSite: 'strict',
-      secure: isProd,
+      sameSite: 'none',
+      secure: true,
     });
 
     return { message: 'Refresh thành công' };
