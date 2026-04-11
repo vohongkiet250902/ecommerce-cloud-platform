@@ -1,9 +1,18 @@
-import { Controller, Get, Param, Patch, UseGuards, Body } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Param,
+  Patch,
+  UseGuards,
+  Body,
+  Query,
+} from '@nestjs/common';
 import { UsersService } from './users.service';
 import { JwtGuard } from '../../common/guards/jwt.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { UpdateUserStatusDto } from './dto/update-user.dto';
+import { GetUsersQueryDto } from './dto/get-users-query.dto';
 
 @Controller('admin/users')
 @UseGuards(JwtGuard, RolesGuard)
@@ -12,8 +21,8 @@ export class AdminUsersController {
   constructor(private readonly usersService: UsersService) {}
 
   @Get()
-  findAll() {
-    return this.usersService.findAllForAdmin();
+  findAll(@Query() query: GetUsersQueryDto) {
+    return this.usersService.findAllForAdmin(query);
   }
 
   @Get(':id')
