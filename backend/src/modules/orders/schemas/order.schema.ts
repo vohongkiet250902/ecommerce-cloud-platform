@@ -313,3 +313,8 @@ OrderSchema.index(
     sparse: true,
   },
 );
+
+OrderSchema.index(
+  { status: 1, completedAt: -1 },
+  { background: true, name: 'analytics_status_completedAt_idx' },
+);

@@ -1,11 +1,13 @@
 import { Body, Controller, Post, HttpCode, Headers } from '@nestjs/common';
 import { SkipThrottle } from '@nestjs/throttler';
-import { OrdersService } from './orders.service';
+import * as crypto from 'crypto'; // 🔥 Import crypto
+import { OrdersShippingService } from './orders-shipping.service'; // 🔥 Đổi Import
 
 @SkipThrottle()
 @Controller('webhooks/ghn')
 export class GhnWebhookController {
-  constructor(private readonly ordersService: OrdersService) {}
+  // 🔥 Inject OrdersShippingService thay vì OrdersService
+  constructor(private readonly shippingService: OrdersShippingService) {}
 
   @Post('order-status')
   @HttpCode(200)
@@ -13,23 +15,34 @@ export class GhnWebhookController {
     @Body() body: any,
     @Headers('Token') ghnToken?: string,
   ) {
-    if (
-      process.env.GHN_WEBHOOK_SECRET &&
-      ghnToken !== process.env.GHN_WEBHOOK_SECRET
-    ) {
-      return { ok: false, message: 'Invalid token' };
+    const secret = process.env.GHN_WEBHOOK_SECRET || '';
+
+    if (secret) {
+      const tokenBuffer = Buffer.from(ghnToken || '');
+      const secretBuffer = Buffer.from(secret);
+
+      // 🔥 Ngăn chặn Timing Attack bằng timingSafeEqual
+      const isValidToken =
+        tokenBuffer.length === secretBuffer.length &&
+        crypto.timingSafeEqual(tokenBuffer, secretBuffer);
+
+      if (!isValidToken) {
+        return { ok: false, message: 'Unauthorized' };
+      }
     }
 
     try {
-      const order = await this.ordersService.handleGhnWebhook(body);
+      // 🔥 Gọi shippingService
+      const order = await this.shippingService.handleGhnWebhook(body);
       return {
         ok: true,
         orderId: order?._id || null,
       };
     } catch (error: any) {
+      // 🔥 Ẩn lỗi nội bộ khỏi Webhook response
       return {
         ok: false,
-        message: error?.message || 'Ignored',
+        message: 'Webhook processing failed',
       };
     }
   }

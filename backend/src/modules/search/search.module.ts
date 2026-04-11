@@ -4,10 +4,9 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { SearchService } from './search.service';
 import { SearchController } from './search.controller';
 import { SearchAdminController } from './search-admin.controller';
-import { SearchReindexController } from './search-reindex.controller';
 import { SearchLog, SearchLogSchema } from './schemas/search-log.schema';
 import { ClickLog, ClickLogSchema } from './schemas/click-log.schema';
-
+import { SearchReindexController } from './search-reindex.controller';
 import { Product, ProductSchema } from '../products/schemas/product.schema';
 import { Brand, BrandSchema } from '../brands/schemas/brand.schema';
 import {

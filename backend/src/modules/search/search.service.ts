@@ -1798,7 +1798,7 @@ export class SearchService implements OnModuleInit {
         // Swap chớp nhoáng: targetIndexUid (dữ liệu mới) sẽ đổi tên thành indexUid (chính)
         // và indexUid hiện tại (chứa data cũ) sẽ bị đẩy sang tên của targetIndexUid.
         await this.client.swapIndexes([
-          { indexes: [this.indexUid, targetIndexUid] },
+          { indexes: [this.indexUid, targetIndexUid] } as any,
         ]);
         // Sau khi swap xong, targetIndexUid giờ đang chứa rác cũ => Xóa nó đi.
         await this.client.deleteIndex(targetIndexUid).catch(() => {});

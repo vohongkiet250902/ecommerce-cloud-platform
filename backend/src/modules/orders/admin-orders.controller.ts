@@ -12,25 +12,18 @@ import { JwtGuard } from 'src/common/guards/jwt.guard';
 import { RolesGuard } from 'src/common/guards/roles.guard';
 import { OrdersService } from './orders.service';
 import { SimulateGhnStatusDto } from './dto/simulate-ghn-status.dto';
+import { OrdersAnalyticsService } from './orders-analytics.service';
+import { OrdersShippingService } from './orders-shipping.service';
 
-/**
- * Admin Orders Controller
- *
- * Thiết kế: trạng thái đơn hàng được drive bởi GHN webhook.
- * Admin KHÔNG set status thủ công qua PATCH — thay vào đó dùng:
- *   POST :id/shipping/ghn/simulate-status  → simulate bất kỳ GHN status nào
- *   POST :id/shipping/ghn/sync             → sync status thật từ GHN API
- *
- * Các action admin được phép thực hiện trực tiếp:
- *   POST :id/cancel   → hủy đơn (mọi trạng thái chưa kết thúc)
- *   POST :id/confirm  → xác nhận đơn thủ công (pending → confirmed)
- *   POST :id/complete → hoàn thành đơn thủ công (delivered → completed)
- */
 @Roles('admin')
 @UseGuards(JwtGuard, RolesGuard)
 @Controller('admin/orders')
 export class AdminOrdersController {
-  constructor(private readonly ordersService: OrdersService) {}
+  constructor(
+    private readonly ordersService: OrdersService,
+    private readonly analyticsService: OrdersAnalyticsService, // 🔥 Sửa lại private readonly
+    private readonly shippingService: OrdersShippingService, // 🔥 Sửa lại private readonly
+  ) {}
 
   @Get()
   findAll(
@@ -47,7 +40,7 @@ export class AdminOrdersController {
     });
   }
 
-  // ── Direct admin actions ────────────────────────────────────
+  // ── Direct admin actions (Vẫn dùng OrdersService) ─────────────────────────
 
   @Post(':id/cancel')
   cancel(@Param('id') id: string) {
@@ -64,26 +57,26 @@ export class AdminOrdersController {
     return this.ordersService.adminCompleteOrder(id);
   }
 
-  // ── GHN shipment management ────────────────────────────────
+  // ── GHN shipment management (ĐỔI SANG shippingService) ───────────────────
 
   @Post(':id/shipping/ghn/create')
   createGhnShipment(@Param('id') id: string) {
-    return this.ordersService.createGhnShipment(id);
+    return this.shippingService.createGhnShipment(id); // 🔥 Đã đổi
   }
 
   @Post('shipping/ghn/sync-all')
   syncAllGhnShipments() {
-    return this.ordersService.syncAllActiveGhnShipments();
+    return this.shippingService.syncAllActiveGhnShipments(); // 🔥 Đã đổi
   }
 
   @Post(':id/shipping/ghn/sync')
   syncGhnShipment(@Param('id') id: string) {
-    return this.ordersService.syncGhnShipment(id);
+    return this.shippingService.syncGhnShipment(id);
   }
 
   @Get(':id/shipping/ghn/detail')
   getGhnDetail(@Param('id') id: string) {
-    return this.ordersService.getGhnShipmentDetail(id);
+    return this.shippingService.getGhnShipmentDetail(id); // 🔥 Đã đổi
   }
 
   @Post(':id/shipping/ghn/simulate-status')
@@ -91,13 +84,14 @@ export class AdminOrdersController {
     @Param('id') id: string,
     @Body() body: SimulateGhnStatusDto,
   ) {
-    return this.ordersService.simulateGhnStatus(id, body.status, body.type);
+    return this.shippingService.simulateGhnStatus(id, body.status, body.type); // 🔥 Đã đổi
   }
 
-  // ── Analytics ──────────────────────────────────────────────
+  // ── Analytics (ĐỔI SANG analyticsService) ────────────────────────────────
+
   @Get('stats/products-sold-by-day')
   getProductsSoldByDay(@Query('days') days?: string) {
-    return this.ordersService.getProductsSoldByDay(days ? Number(days) : 7);
+    return this.analyticsService.getProductsSoldByDay(days ? Number(days) : 7); // 🔥 Đã đổi
   }
 
   @Get('stats/revenue')
@@ -106,13 +100,13 @@ export class AdminOrdersController {
     @Query('days') days?: string,
     @Query('weeks') weeks?: string,
     @Query('months') months?: string,
-    @Query('quarters') quarters?: string, // Thêm query quarters
+    @Query('quarters') quarters?: string,
   ) {
-    return this.ordersService.getRevenueStats((groupBy as any) || 'day', {
+    return this.analyticsService.getRevenueStats((groupBy as any) || 'day', {
       days: days ? Number(days) : undefined,
       weeks: weeks ? Number(weeks) : undefined,
       months: months ? Number(months) : undefined,
-      quarters: quarters ? Number(quarters) : undefined, // Truyền vào service
+      quarters: quarters ? Number(quarters) : undefined,
     });
   }
 
@@ -122,13 +116,14 @@ export class AdminOrdersController {
     @Query('days') days?: string,
     @Query('weeks') weeks?: string,
     @Query('months') months?: string,
-    @Query('quarters') quarters?: string, // Thêm query quarters
+    @Query('quarters') quarters?: string,
   ) {
-    return this.ordersService.getProfitStats((groupBy as any) || 'day', {
+    return this.analyticsService.getProfitStats((groupBy as any) || 'day', {
+      // 🔥 Đã đổi
       days: days ? Number(days) : undefined,
       weeks: weeks ? Number(weeks) : undefined,
       months: months ? Number(months) : undefined,
-      quarters: quarters ? Number(quarters) : undefined, // Truyền vào service
+      quarters: quarters ? Number(quarters) : undefined,
     });
   }
 
@@ -138,7 +133,8 @@ export class AdminOrdersController {
     @Query('limit') limit?: string,
     @Query('sortBy') sortBy?: string,
   ) {
-    return this.ordersService.getTopSkus(
+    return this.analyticsService.getTopSkus(
+      // 🔥 Đã đổi
       days ? Number(days) : 30,
       limit ? Number(limit) : 10,
       (sortBy as any) || 'quantity',
@@ -151,7 +147,8 @@ export class AdminOrdersController {
     @Query('limit') limit?: string,
     @Query('sortBy') sortBy?: string,
   ) {
-    return this.ordersService.getTopProducts(
+    return this.analyticsService.getTopProducts(
+      // 🔥 Đã đổi
       days ? Number(days) : 30,
       limit ? Number(limit) : 10,
       (sortBy as any) || 'quantity',

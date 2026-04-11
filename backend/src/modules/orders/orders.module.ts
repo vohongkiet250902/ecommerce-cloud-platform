@@ -1,35 +1,39 @@
-// src/modules/orders/orders.module.ts
 import { Module, forwardRef } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
-import { OrdersService } from './orders.service';
+
 import { OrdersController } from './orders.controller';
 import { AdminOrdersController } from './admin-orders.controller';
 import { GhnWebhookController } from './ghn-webhook.controller';
 
-// Schemas
-import { Order, OrderSchema } from './schemas/order.schema';
-import { Product, ProductSchema } from '../products/schemas/product.schema'; // 🔥 1. Import Product Schema
+import { OrdersService } from './orders.service';
+import { OrdersShippingService } from './orders-shipping.service';
+import { OrdersAnalyticsService } from './orders-analytics.service';
+import { OrdersCron } from './orders.cron';
 
-// Other Modules
+import { Order, OrderSchema } from './schemas/order.schema';
+
 import { PaymentsModule } from '../payments/payments.module';
 import { InventoryModule } from '../inventory/inventory.module';
 import { CouponsModule } from '../coupons/coupons.module';
 import { GhnModule } from '../ghn/ghn.module';
+import { ProductsModule } from '../products/products.module';
 
 @Module({
   imports: [
-    // 🔥 2. Đăng ký thêm ProductModel vào đây
-    MongooseModule.forFeature([
-      { name: Order.name, schema: OrderSchema },
-      { name: Product.name, schema: ProductSchema },
-    ]),
+    MongooseModule.forFeature([{ name: Order.name, schema: OrderSchema }]),
     forwardRef(() => PaymentsModule),
     InventoryModule,
     CouponsModule,
     GhnModule,
+    ProductsModule,
   ],
   controllers: [OrdersController, AdminOrdersController, GhnWebhookController],
-  providers: [OrdersService],
-  exports: [OrdersService],
+  providers: [
+    OrdersService,
+    OrdersShippingService,
+    OrdersAnalyticsService,
+    OrdersCron,
+  ],
+  exports: [OrdersService, OrdersShippingService, OrdersAnalyticsService],
 })
 export class OrdersModule {}

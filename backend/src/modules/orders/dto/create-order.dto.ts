@@ -80,6 +80,11 @@ export class CreateOrderDto {
   @ValidateNested()
   @Type(() => ShippingInfoDto)
   shippingInfo: ShippingInfoDto;
+
+  // 🔥 THÊM ĐOẠN NÀY ĐỂ FIX LỖI IDEMPOTENCY KEY
+  @IsOptional()
+  @IsString()
+  idempotencyKey?: string;
 }
 
 // 🔥 THÊM MỚI: DTO cho API xem trước giỏ hàng

@@ -24,5 +24,6 @@ import { SearchModule } from '../search/search.module';
   ],
   controllers: [ProductsController, AdminProductsController],
   providers: [ProductsService],
+  exports: [ProductsService],
 })
 export class ProductsModule {}

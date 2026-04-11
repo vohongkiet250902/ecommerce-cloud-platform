@@ -5,14 +5,14 @@ import {
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
-import { Product, ProductVariant } from './schemas/product.schema';
+import { Product } from './schemas/product.schema';
 import { Category } from '../categories/schemas/category.schema';
 import { Brand } from '../brands/schemas/brand.schema';
 import { UploadService } from '../upload/upload.service';
 import { SearchService } from '../search/search.service';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { CreateProductDto } from './dto/create-product.dto';
-
+import { Types } from 'mongoose';
 @Injectable()
 export class ProductsService {
   constructor(
@@ -366,6 +366,26 @@ export class ProductsService {
       .populate('brandId');
     if (!product) throw new NotFoundException('Product not found');
     return product;
+  }
+
+  async findVariantForOrder(
+    productId: string | Types.ObjectId,
+    sku: string,
+    session?: any,
+  ) {
+    const query = this.productModel.findOne({
+      _id: new Types.ObjectId(productId),
+      'variants.sku': sku,
+    });
+    if (session) query.session(session);
+    const product = await query.lean().exec();
+
+    if (!product) return null;
+
+    const variant = (product as any).variants.find((v: any) => v.sku === sku);
+    if (!variant) return null;
+
+    return { product, variant };
   }
 
   /**

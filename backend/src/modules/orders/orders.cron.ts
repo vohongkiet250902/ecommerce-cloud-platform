@@ -14,38 +14,35 @@ export class OrdersCron {
     private readonly ordersService: OrdersService,
   ) {}
 
-  // Chạy mỗi phút 1 lần để check đơn hết hạn
   @Cron(CronExpression.EVERY_MINUTE)
   async handleExpiredOrders() {
-    const expiredOrders = await this.orderModel.find({
-      paymentMethod: 'vnpay',
-      paymentStatus: { $in: ['pending', 'unpaid'] },
-      status: 'pending',
-      expiresAt: { $lt: new Date() },
-    });
+    const expiredOrders = await this.orderModel
+      .find({
+        paymentMethod: 'vnpay',
+        paymentStatus: { $in: ['pending', 'unpaid'] },
+        status: 'pending',
+        expiresAt: { $lt: new Date() },
+      })
+      .lean(); // 🔥 Thêm .lean() để tăng tốc vì ta chỉ cần đọc _id
 
-    if (expiredOrders.length > 0) {
-      this.logger.log(
-        `Found ${expiredOrders.length} expired VNPay orders. Cancelling...`,
-      );
-    }
+    if (!expiredOrders.length) return;
 
-    for (const order of expiredOrders) {
-      try {
-        // Dùng updateStatus với source = 'system' để bypass validation của user/admin
-        await this.ordersService.updateStatus(
-          String(order._id),
-          { status: 'cancelled' },
-          'system',
-        );
-        this.logger.log(
-          `[Auto-Cancel] Successfully cancelled & released stock for order ${order._id}`,
-        );
-      } catch (error: any) {
-        this.logger.error(
-          `[Auto-Cancel] Failed to cancel order ${order._id}: ${error.message}`,
-        );
-      }
-    }
+    this.logger.log(
+      `Found ${expiredOrders.length} expired VNPay orders. Cancelling...`,
+    );
+
+    // 🔥 Chạy song song không gây block Event Loop của Node.js
+    const promises = expiredOrders.map((order) =>
+      this.ordersService
+        .updateStatus(String(order._id), { status: 'cancelled' }, 'system')
+        .then(() => this.logger.log(`[Auto-Cancel] Success: ${order._id}`))
+        .catch((err) =>
+          this.logger.error(
+            `[Auto-Cancel] Failed: ${order._id} - ${err.message}`,
+          ),
+        ),
+    );
+
+    await Promise.allSettled(promises);
   }
 }
