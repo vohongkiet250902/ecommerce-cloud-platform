@@ -1,6 +1,7 @@
 import { Controller, Get, Param, Query, UseInterceptors } from '@nestjs/common';
 import { CacheInterceptor, CacheTTL } from '@nestjs/cache-manager';
 import { ProductsService } from './products.service';
+import { ProductQueryDto } from './dto/product-query.dto';
 
 @Controller('products')
 export class ProductsController {
@@ -9,7 +10,7 @@ export class ProductsController {
   @UseInterceptors(CacheInterceptor)
   @CacheTTL(30 * 1000)
   @Get()
-  findAll(@Query() query: any) {
+  findAll(@Query() query: ProductQueryDto) {
     return this.productsService.findAll(query, false);
   }
 

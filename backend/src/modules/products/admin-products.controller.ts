@@ -14,6 +14,9 @@ import { ProductsService } from './products.service';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { JwtGuard } from '../../common/guards/jwt.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
+import { ProductQueryDto } from './dto/product-query.dto';
+import { CreateProductDto } from './dto/create-product.dto';
+import { UpdateProductDto } from './dto/update-product.dto';
 
 @Roles('admin')
 @UseGuards(JwtGuard, RolesGuard)
@@ -22,7 +25,7 @@ export class AdminProductsController {
   constructor(private readonly productsService: ProductsService) {}
 
   @Get()
-  findAll(@Query() query: any) {
+  findAll(@Query() query: ProductQueryDto) {
     return this.productsService.findAll(query, true);
   }
 
@@ -32,12 +35,12 @@ export class AdminProductsController {
   }
 
   @Post()
-  create(@Body() dto: any) {
+  create(@Body() dto: CreateProductDto) {
     return this.productsService.create(dto);
   }
 
   @Put(':id')
-  update(@Param('id') id: string, @Body() dto: any) {
+  update(@Param('id') id: string, @Body() dto: UpdateProductDto) {
     return this.productsService.update(id, dto);
   }
 

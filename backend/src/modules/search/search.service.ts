@@ -1705,8 +1705,22 @@ export class SearchService implements OnModuleInit {
     const purge = input?.purge !== false;
     const onlyActive = input?.onlyActive === true;
 
+    // ✅ FIX 1: ZERO-DOWNTIME REINDEX (SWAP INDEX)
+    // Nếu purge = true, tạo một index tạm thời. Nếu không, đẩy trực tiếp vào index chính (cập nhật đè).
+    const targetIndexUid = purge
+      ? `${this.indexUid}_temp_${Date.now()}`
+      : this.indexUid;
+    const targetIndex = this.client.index<ProductSearchDoc>(targetIndexUid);
+
+    // Nếu tạo mới hoàn toàn (purge), ta cần copy cấu hình (settings) từ index gốc sang index tạm
     if (purge) {
-      await this.productsIndex().deleteAllDocuments();
+      await this.client.createIndex(targetIndexUid, { primaryKey: 'id' });
+      try {
+        const currentSettings = await this.productsIndex().getSettings();
+        await targetIndex.updateSettings(currentSettings);
+      } catch (e) {
+        console.warn('[SearchSync] Could not copy settings to temp index', e);
+      }
     }
 
     const mongoFilter: any = onlyActive ? { status: 'active' } : {};
@@ -1744,7 +1758,7 @@ export class SearchService implements OnModuleInit {
       if (!buffer.length) return;
 
       try {
-        await this.productsIndex().addDocuments(buffer, { primaryKey: 'id' });
+        await targetIndex.addDocuments(buffer, { primaryKey: 'id' });
         indexed += buffer.length;
         batches += 1;
       } catch (e: any) {
@@ -1778,9 +1792,26 @@ export class SearchService implements OnModuleInit {
 
     await flush();
 
+    // ✅ FIX 1 (Phần 2): HOÁN ĐỔI INDEX
+    if (purge) {
+      if (errors.length === 0) {
+        // Swap chớp nhoáng: targetIndexUid (dữ liệu mới) sẽ đổi tên thành indexUid (chính)
+        // và indexUid hiện tại (chứa data cũ) sẽ bị đẩy sang tên của targetIndexUid.
+        await this.client.swapIndexes([
+          { indexes: [this.indexUid, targetIndexUid] },
+        ]);
+        // Sau khi swap xong, targetIndexUid giờ đang chứa rác cũ => Xóa nó đi.
+        await this.client.deleteIndex(targetIndexUid).catch(() => {});
+      } else {
+        // Nếu có lỗi giữa chừng, ta hủy index tạm để tránh rác server Meilisearch
+        await this.client.deleteIndex(targetIndexUid).catch(() => {});
+      }
+    }
+
     return {
       ok: true,
       indexUid: this.indexUid,
+      targetIndexUid: purge ? targetIndexUid : undefined,
       purge,
       onlyActive,
       batchSize,

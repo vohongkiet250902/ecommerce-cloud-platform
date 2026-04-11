@@ -42,6 +42,9 @@ export class ProductVariant {
 
   @Prop({ type: Number })
   finalPrice: number;
+
+  @Prop({ type: Number, default: null })
+  grossMarginPercent: number;
 }
 const ProductVariantSchema = SchemaFactory.createForClass(ProductVariant);
 
@@ -92,5 +95,12 @@ export class Product extends Document {
 
 const schema = SchemaFactory.createForClass(Product);
 schema.index({ 'variants.attributes.key': 1, 'variants.attributes.value': 1 });
+schema.index(
+  { name: 'text', description: 'text' },
+  {
+    weights: { name: 10, description: 5 },
+    name: 'ProductTextIndex',
+  },
+);
 
 export const ProductSchema = schema;

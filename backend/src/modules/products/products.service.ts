@@ -10,6 +10,8 @@ import { Category } from '../categories/schemas/category.schema';
 import { Brand } from '../brands/schemas/brand.schema';
 import { UploadService } from '../upload/upload.service';
 import { SearchService } from '../search/search.service';
+import { UpdateProductDto } from './dto/update-product.dto';
+import { CreateProductDto } from './dto/create-product.dto';
 
 @Injectable()
 export class ProductsService {
@@ -21,13 +23,13 @@ export class ProductsService {
     private readonly searchService: SearchService,
   ) {}
 
-  private validateUniqueSku(variants: ProductVariant[]) {
+  private validateUniqueSku(variants: { sku: string }[]) {
     const skus = variants.map((v) => v.sku);
     if (skus.length !== new Set(skus).size)
       throw new BadRequestException('Duplicate SKU in variants');
   }
 
-  private calculateTotalStock(variants: ProductVariant[] = []) {
+  private calculateTotalStock(variants: { stock?: number }[] = []) {
     return variants.reduce((sum, v) => sum + (v.stock || 0), 0);
   }
 
@@ -137,13 +139,17 @@ export class ProductsService {
   // -----------------------------
   // ✅ CRUD
   // -----------------------------
-  async create(dto: any) {
+  async create(dto: CreateProductDto) {
     await this.validateCategoryAndBrand(dto.categoryId, dto.brandId);
+
+    // ✅ FIX 2: Khai báo biến riêng để hứng dữ liệu tính toán, không mutate trực tiếp `dto`
+    let processedVariants = dto.variants;
+    let computedTotalStock = 0;
 
     if (dto.variants?.length) {
       this.validateUniqueSku(dto.variants);
-      dto.variants = this.calculateVariantPrices(dto.variants); // ✅ FIX: phải gán lại
-      dto.totalStock = this.calculateTotalStock(dto.variants);
+      processedVariants = this.calculateVariantPrices(dto.variants);
+      computedTotalStock = this.calculateTotalStock(processedVariants);
     }
 
     // slug unique
@@ -152,9 +158,16 @@ export class ProductsService {
       if (exists) throw new BadRequestException('Slug already exists');
     }
 
-    const product = await this.productModel.create(dto);
+    // ✅ FIX 2: Gom DTO và các trường Server tính toán thành 1 Payload để lưu DB
+    const payload = {
+      ...dto,
+      variants: processedVariants,
+      totalStock: computedTotalStock,
+    };
 
-    // ✅ incremental indexing đúng chuẩn (populate category/brand name)
+    const product = await this.productModel.create(payload);
+
+    // incremental indexing
     this.syncProductToSearchAsync(String(product._id));
 
     return product;
@@ -169,28 +182,36 @@ export class ProductsService {
       keyword,
       minPrice,
       maxPrice,
-      sort, // hiện chưa dùng => bạn có thể implement sau
+      sort,
       isFeatured,
       ...filterParams
     } = query;
 
     const filter: any = {};
+
+    // 1. Lọc theo trạng thái
     if (!forAdmin) filter.status = 'active';
+
+    // 2. Lọc theo danh mục và thương hiệu
     if (categoryId) filter.categoryId = categoryId;
     if (brandId) filter.brandId = brandId;
+
+    // 3. Tìm kiếm theo từ khóa (yêu cầu Text Index trong Schema)
     if (keyword) filter.$text = { $search: keyword };
 
-    // Lưu ý: filter này theo variants.price (DB), khác với search engine (min/max overlap)
+    // 4. Lọc theo khoảng giá
     if (minPrice || maxPrice) {
       filter['variants.price'] = {};
       if (minPrice) filter['variants.price'].$gte = +minPrice;
       if (maxPrice) filter['variants.price'].$lte = +maxPrice;
     }
 
+    // 5. Lọc theo cờ nổi bật
     if (isFeatured !== undefined) {
       filter.isFeatured = isFeatured === 'true' || isFeatured === true;
     }
 
+    // 6. Lọc theo các thuộc tính động (specs/attributes)
     const attributeQueries: any[] = [];
     Object.keys(filterParams).forEach((key) => {
       if (['sort', 'page', 'limit'].includes(key)) return;
@@ -204,20 +225,52 @@ export class ProductsService {
     });
     if (attributeQueries.length > 0) filter.$and = attributeQueries;
 
-    return this.productModel
-      .find(filter)
-      .skip((+page - 1) * +limit)
-      .limit(+limit)
-      .sort({ createdAt: -1 });
+    // 7. Xử lý logic sắp xếp (Sort)
+    // Quy ước từ Client gửi lên ví dụ: sort=price_asc hoặc sort=createdAt_desc
+    let sortOption: Record<string, 1 | -1> = { createdAt: -1 }; // Mặc định mới nhất
+    if (sort && typeof sort === 'string') {
+      const [sortKey, sortOrder] = sort.split('_');
+      if (sortKey && sortOrder) {
+        sortOption = { [sortKey]: sortOrder === 'asc' ? 1 : -1 };
+      }
+    }
+
+    // 8. Phân trang và tính toán an toàn
+    const skip = (+page - 1) * +limit;
+    const limitNumber = +limit;
+
+    // ✅ FIX: Chạy song song 2 query (Lấy Data và Đếm Tổng Số)
+    const [data, totalItems] = await Promise.all([
+      this.productModel
+        .find(filter)
+        .skip(skip)
+        .limit(limitNumber)
+        .sort(sortOption)
+        .populate('categoryId', 'name slug') // Populate thêm để frontend dễ hiển thị
+        .populate('brandId', 'name slug')
+        .exec(),
+      this.productModel.countDocuments(filter).exec(),
+    ]);
+
+    // ✅ FIX: Trả về chuẩn cấu trúc có Metadata
+    return {
+      data,
+      meta: {
+        totalItems,
+        itemCount: data.length,
+        itemsPerPage: limitNumber,
+        totalPages: Math.ceil(totalItems / limitNumber),
+        currentPage: +page,
+      },
+    };
   }
 
-  async update(id: string, dto: any) {
+  async update(id: string, dto: UpdateProductDto) {
     const product = await this.productModel.findById(id);
     if (!product) throw new NotFoundException('Product not found');
 
     await this.validateCategoryAndBrand(dto.categoryId, dto.brandId);
 
-    // ✅ slug unique when updating
     if (dto.slug && dto.slug !== product.slug) {
       const existed = await this.productModel.findOne({
         slug: dto.slug,
@@ -226,7 +279,6 @@ export class ProductsService {
       if (existed) throw new BadRequestException('Slug already exists');
     }
 
-    // remove old images if replaced
     if (dto.images) {
       const newPublicIds = (dto.images || []).map((img) => img.publicId);
       const removedImages = (product.images || []).filter(
@@ -239,20 +291,24 @@ export class ProductsService {
       );
     }
 
+    // ✅ FIX 3: Tạo updatePayload riêng để tránh lỗi TS khi mutate `dto`
+    const updatePayload: any = { ...dto };
+
     if (dto.variants?.length) {
       this.validateUniqueSku(dto.variants);
-      dto.variants = this.calculateVariantPrices(dto.variants); // ✅ FIX: phải gán lại
-      dto.totalStock = this.calculateTotalStock(dto.variants);
+      const processedVariants = this.calculateVariantPrices(dto.variants);
+      updatePayload.variants = processedVariants;
+      updatePayload.totalStock = this.calculateTotalStock(processedVariants);
     }
 
-    const updatedProduct = await this.productModel.findByIdAndUpdate(id, dto, {
-      new: true,
-      runValidators: true,
-    });
+    const updatedProduct = await this.productModel.findByIdAndUpdate(
+      id,
+      updatePayload, // Truyền payload đã xử lý vào đây
+      { new: true, runValidators: true },
+    );
+
     if (!updatedProduct) throw new NotFoundException('Product not found');
 
-    // ✅ incremental indexing đúng chuẩn
-    // nếu status không active thì remove khỏi index (tránh “rác” trong search)
     if (
       (updatedProduct as any).status &&
       (updatedProduct as any).status !== 'active'
