@@ -8,8 +8,6 @@ import {
   Post,
   Put,
   UseGuards,
-  UsePipes,
-  ValidationPipe,
 } from '@nestjs/common';
 import { CategoriesService } from './categories.service';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -17,6 +15,7 @@ import { JwtGuard } from '../../common/guards/jwt.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { CreateCategoryDto } from './dto/create-category.dto';
 import { UpdateCategoryDto } from './dto/update-category.dto';
+import { ParseMongoIdPipe } from '../../common/pipes/parse-mongo-id.pipe'; // 🔥 Import Pipe
 
 @Roles('admin')
 @UseGuards(JwtGuard, RolesGuard)
@@ -24,32 +23,37 @@ import { UpdateCategoryDto } from './dto/update-category.dto';
 export class AdminCategoriesController {
   constructor(private readonly categoriesService: CategoriesService) {}
 
-  // Lấy toàn bộ cây danh mục cho Admin (Bao gồm cả active và inactive)
   @Get()
   findAllForAdmin() {
     return this.categoriesService.findAllForAdmin();
   }
 
-  // Tạo mới danh mục
+  // Chú ý: NestJS đã tự động bắt ValidationPipe global nếu bạn setup trong main.ts.
+  // Nên không cần @UsePipes(new ValidationPipe({ whitelist: true })) lặp lại ở từng route.
   @Post()
-  @UsePipes(new ValidationPipe({ whitelist: true }))
   create(@Body() dto: CreateCategoryDto) {
     return this.categoriesService.create(dto);
   }
 
   @Put(':id')
-  @UsePipes(new ValidationPipe({ whitelist: true }))
-  update(@Param('id') id: string, @Body() dto: UpdateCategoryDto) {
+  update(
+    @Param('id', ParseMongoIdPipe) id: string, // 🔥 Validate params.id
+    @Body() dto: UpdateCategoryDto,
+  ) {
     return this.categoriesService.update(id, dto);
   }
 
   @Patch(':id/status')
-  updateStatus(@Param('id') id: string, @Body('isActive') isActive: boolean) {
+  updateStatus(
+    @Param('id', ParseMongoIdPipe) id: string, // 🔥 Validate params.id
+    @Body('isActive') isActive: boolean,
+  ) {
     return this.categoriesService.updateStatus(id, isActive);
   }
 
   @Delete(':id')
-  remove(@Param('id') id: string) {
+  remove(@Param('id', ParseMongoIdPipe) id: string) {
+    // 🔥 Validate params.id
     return this.categoriesService.remove(id);
   }
 }

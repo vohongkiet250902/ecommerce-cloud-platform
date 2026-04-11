@@ -29,15 +29,13 @@ export class CategoriesService {
 
     let parentId: Types.ObjectId | null = null;
     if (dto.parentId) {
-      if (!Types.ObjectId.isValid(dto.parentId))
-        throw new BadRequestException('parentId không hợp lệ');
       const parent = await this.categoryModel.findById(dto.parentId);
       if (!parent) throw new BadRequestException('parentId không tồn tại');
       parentId = new Types.ObjectId(dto.parentId);
     }
 
     const newCategory = await this.categoryModel.create({ ...dto, parentId });
-    await this.clearCache(); // 🔥 Xóa cache
+    await this.clearCache();
     return newCategory;
   }
 
@@ -56,8 +54,6 @@ export class CategoriesService {
   }
 
   async update(id: string, dto: any) {
-    if (!Types.ObjectId.isValid(id))
-      throw new BadRequestException('id không hợp lệ');
     const current = await this.categoryModel.findById(id);
     if (!current) throw new NotFoundException('Không tìm thấy danh mục');
 
@@ -73,13 +69,13 @@ export class CategoriesService {
     if (dto.parentId !== undefined) {
       if (dto.parentId === null || dto.parentId === '') parentIdToSet = null;
       else {
-        if (!Types.ObjectId.isValid(dto.parentId))
-          throw new BadRequestException('parentId không hợp lệ');
         const newParentId = String(dto.parentId);
         if (newParentId === String(id))
           throw new BadRequestException('Không thể là chính nó');
+
         const parent = await this.categoryModel.findById(newParentId);
         if (!parent) throw new BadRequestException('parentId không tồn tại');
+
         await this.assertNoCycle(String(id), newParentId);
         parentIdToSet = new Types.ObjectId(newParentId);
       }
@@ -89,20 +85,18 @@ export class CategoriesService {
       ...dto,
       ...(parentIdToSet !== undefined ? { parentId: parentIdToSet } : {}),
     };
+
     const category = await this.categoryModel.findByIdAndUpdate(
       id,
       updateData,
       { new: true },
     );
-    if (!category) throw new NotFoundException('Không tìm thấy danh mục');
 
-    await this.clearCache(); // 🔥 Xóa cache
+    await this.clearCache();
     return category;
   }
 
   async updateStatus(id: string, isActive: boolean) {
-    if (!Types.ObjectId.isValid(id))
-      throw new BadRequestException('id không hợp lệ');
     const category = await this.categoryModel.findByIdAndUpdate(
       id,
       { isActive },
@@ -110,22 +104,17 @@ export class CategoriesService {
     );
     if (!category) throw new NotFoundException('Không tìm thấy danh mục');
 
-    await this.clearCache(); // 🔥 Xóa cache
+    await this.clearCache();
     return category;
   }
 
   async remove(id: string) {
-    if (!Types.ObjectId.isValid(id))
-      throw new BadRequestException('id không hợp lệ');
-
-    // 1. Kiểm tra danh mục con (Dùng thẳng id để Mongoose tự cast)
     const hasChildren = await this.categoryModel.exists({ parentId: id });
     if (hasChildren)
       throw new BadRequestException(
         'Không thể xóa danh mục đang chứa danh mục con',
       );
 
-    // 2. Kiểm tra hàng tồn kho (Dùng thẳng id)
     const hasInStockProducts = await this.productModel.exists({
       categoryId: id,
       totalStock: { $gt: 0 },
@@ -136,11 +125,10 @@ export class CategoriesService {
         'Danh mục vẫn còn sản phẩm tồn kho, vui lòng chuyển sang inactive.',
       );
 
-    // 3. Xóa danh mục (Lệnh xóa của Mongoose vẫn cần ObjectId hoặc id đều được)
     const deleted = await this.categoryModel.findByIdAndDelete(id);
     if (!deleted) throw new NotFoundException('Không tìm thấy danh mục');
 
-    await this.clearCache(); // 🔥 Xóa cache
+    await this.clearCache();
     return deleted;
   }
 
