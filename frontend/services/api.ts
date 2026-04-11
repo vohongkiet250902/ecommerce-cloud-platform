@@ -163,7 +163,7 @@ export const productApi = {
   // Admin-specific listing (keeps previous behavior)
   getAdminProducts: (params?: Record<string, unknown>) =>
     apiClient.get('/admin/products', { params }),
-  getProduct: (id: string) => apiClient.get(`/admin/products/${id}`),
+  getProduct: (id: string) => apiClient.get(`admin/products/${id}`),
   getProductDetail: (slug: string) => apiClient.get(`/products/${slug}`),
   searchV2: (params: Record<string, unknown>) => apiClient.get('/search/products', { params }),
   createProduct: (data: Record<string, unknown>) =>
@@ -202,7 +202,7 @@ export const brandApi = {
 export const usersApi = {
   getUsers: (params?: Record<string, unknown>) =>
     apiClient.get('admin/users', { params }),
-  getUser: (id: string) => apiClient.get(`/admin/users/${id}`),
+  getUser: (id: string) => apiClient.get(`admin/users/${id}`),
   updateUser: (id: string, data: Record<string, unknown>) =>
     apiClient.put(`/users/${id}`, data),
   toggleUserStatus: (id: string, isActive: boolean) =>
@@ -227,7 +227,7 @@ export const couponApi = {
 
 export const orderApi = {
   getOrders: (params?: { page?: number; limit?: number; status?: string; userId?: string }) =>
-    apiClient.get('/admin/orders', { params }),
+    apiClient.get('admin/orders', { params }),
   getUserOrders: (params?: { page?: number; limit?: number; status?: string }) =>
     apiClient.get('/orders/me', { params }),
   createOrder: (data: { 

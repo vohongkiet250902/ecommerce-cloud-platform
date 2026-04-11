@@ -218,8 +218,8 @@ export default function OrdersPage() {
             }
             // If it's an object but missing name (BE populated wrong fields), fetch it
             try {
-              const uid = order.userId._id || order.userId;
-              if (typeof uid === 'string') {
+              const uid = typeof order.userId === 'object' ? (order.userId._id || order.userId.id) : order.userId;
+              if (typeof uid === 'string' && uid) {
                 const userRes = await usersApi.getUser(uid);
                 return { ...order, userId: userRes.data };
               }
@@ -264,8 +264,8 @@ export default function OrdersPage() {
             }
             // If it's an object but missing name (BE populated wrong fields), fetch it
             try {
-              const uid = order.userId._id || order.userId;
-              if (typeof uid === 'string') {
+              const uid = typeof order.userId === 'object' ? (order.userId._id || order.userId.id) : order.userId;
+              if (typeof uid === 'string' && uid) {
                 const userRes = await usersApi.getUser(uid);
                 return { ...order, userId: userRes.data };
               }

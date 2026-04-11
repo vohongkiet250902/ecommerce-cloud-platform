@@ -75,8 +75,8 @@ export default function RecentOrders() {
               }
               // If missing name, try to fetch full user info
               try {
-                const uid = order.userId._id || order.userId;
-                if (typeof uid === 'string') {
+                const uid = typeof order.userId === 'object' ? (order.userId._id || order.userId.id) : order.userId;
+                if (typeof uid === 'string' && uid) {
                   const userRes = await usersApi.getUser(uid);
                   return { ...order, userId: userRes.data };
                 }

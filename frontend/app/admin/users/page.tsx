@@ -131,7 +131,7 @@ export default function UsersPage() {
   const fetchUsers = async () => {
     try {
       setLoading(true);
-      const res = await usersApi.getUsers();
+      const res = await usersApi.getUsers({ limit: 1000 });
       // Ensure we treat the response correctly (array or object)
       const data = Array.isArray(res.data) ? res.data : res.data.data || [];
       setUsers(data);
