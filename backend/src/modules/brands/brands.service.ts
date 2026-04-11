@@ -10,6 +10,9 @@ import { Brand } from './schemas/brand.schema';
 import { Product } from '../products/schemas/product.schema';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import type { Cache } from 'cache-manager';
+import { CreateBrandDto } from './dto/create-brand.dto';
+import { UpdateBrandDto } from './dto/update-brand.dto';
+
 @Injectable()
 export class BrandsService {
   constructor(
@@ -22,19 +25,30 @@ export class BrandsService {
     await this.cacheManager.del('brands_public_list');
   }
 
-  async create(dto: any) {
+  async create(dto: CreateBrandDto) {
     const exists = await this.brandModel.findOne({ slug: dto.slug });
     if (exists) throw new BadRequestException('Slug already exists');
+
     const brand = await this.brandModel.create(dto);
     await this.clearCache();
     return brand;
   }
 
-  async update(id: string, dto: any) {
+  async update(id: string, dto: UpdateBrandDto) {
+    // Fix: Kiểm tra trùng slug nếu user có update trường slug
+    if (dto.slug) {
+      const existing = await this.brandModel.findOne({
+        slug: dto.slug,
+        _id: { $ne: id }, // Loại trừ chính brand hiện tại đang update
+      });
+      if (existing) throw new BadRequestException('Slug already exists');
+    }
+
     const brand = await this.brandModel.findByIdAndUpdate(id, dto, {
       new: true,
     });
     if (!brand) throw new NotFoundException('Brand not found');
+
     await this.clearCache();
     return brand;
   }
@@ -68,7 +82,7 @@ export class BrandsService {
     return deleted;
   }
 
-  // User query (Chỉ active)
+  // Tối ưu User query (Chỉ lấy con số, không lấy nguyên mảng data)
   async findAllWithCounts() {
     return this.brandModel.aggregate([
       { $match: { isActive: true } },
@@ -76,9 +90,12 @@ export class BrandsService {
       {
         $lookup: {
           from: 'products',
-          localField: 'brandIdString',
-          foreignField: 'brandId',
-          as: 'productsData',
+          let: { bId: '$brandIdString' },
+          pipeline: [
+            { $match: { $expr: { $eq: ['$brandId', '$$bId'] } } },
+            { $count: 'totalProducts' },
+          ],
+          as: 'productsCountData',
         },
       },
       {
@@ -87,23 +104,31 @@ export class BrandsService {
           slug: 1,
           logo: 1,
           isActive: 1,
-          productCount: { $size: '$productsData' },
+          productCount: {
+            $ifNull: [
+              { $arrayElemAt: ['$productsCountData.totalProducts', 0] },
+              0,
+            ],
+          },
         },
       },
       { $sort: { name: 1 } },
     ]);
   }
 
-  // Admin query (Lấy hết)
+  // Tối ưu Admin query
   async findAllForAdmin() {
     return this.brandModel.aggregate([
       { $addFields: { brandIdString: { $toString: '$_id' } } },
       {
         $lookup: {
           from: 'products',
-          localField: 'brandIdString',
-          foreignField: 'brandId',
-          as: 'productsData',
+          let: { bId: '$brandIdString' },
+          pipeline: [
+            { $match: { $expr: { $eq: ['$brandId', '$$bId'] } } },
+            { $count: 'totalProducts' },
+          ],
+          as: 'productsCountData',
         },
       },
       {
@@ -112,7 +137,13 @@ export class BrandsService {
           slug: 1,
           logo: 1,
           isActive: 1,
-          productCount: { $size: '$productsData' },
+          createdAt: 1, // Admin thường cần xem ngày tạo
+          productCount: {
+            $ifNull: [
+              { $arrayElemAt: ['$productsCountData.totalProducts', 0] },
+              0,
+            ],
+          },
         },
       },
       { $sort: { name: 1 } },

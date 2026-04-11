@@ -13,6 +13,8 @@ import { BrandsService } from './brands.service';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { JwtGuard } from '../../common/guards/jwt.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
+import { CreateBrandDto } from './dto/create-brand.dto';
+import { UpdateBrandDto } from './dto/update-brand.dto';
 
 @Roles('admin')
 @UseGuards(JwtGuard, RolesGuard)
@@ -26,12 +28,12 @@ export class AdminBrandsController {
   }
 
   @Post()
-  create(@Body() dto: any) {
+  create(@Body() dto: CreateBrandDto) {
     return this.brandsService.create(dto);
   }
 
   @Put(':id')
-  update(@Param('id') id: string, @Body() dto: any) {
+  update(@Param('id') id: string, @Body() dto: UpdateBrandDto) {
     return this.brandsService.update(id, dto);
   }
 
