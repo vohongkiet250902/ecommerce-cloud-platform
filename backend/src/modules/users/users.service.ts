@@ -3,6 +3,12 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { User, UserDocument } from './schemas/user.schema';
 import * as crypto from 'crypto';
+import {
+  UpdateProfileDto,
+  CreateAddressDto,
+  UpdateAddressDto,
+} from './dto/user-profile.dto';
+import { GetUsersQueryDto } from './dto/get-users-query.dto';
 
 @Injectable()
 export class UsersService {
@@ -20,13 +26,15 @@ export class UsersService {
   }
 
   async findById(id: string): Promise<UserDocument> {
-    const user = await this.userModel.findById(id).exec(); // schema đã select:false
+    if (!Types.ObjectId.isValid(id))
+      throw new NotFoundException('User not found');
+    const user = await this.userModel.findById(id).exec();
     if (!user) throw new NotFoundException('User not found');
     return user;
   }
 
   async findByEmail(email: string): Promise<UserDocument | null> {
-    return this.userModel.findOne({ email }).exec(); // schema đã select:false
+    return this.userModel.findOne({ email }).exec();
   }
 
   async findByEmailInternal(email: string): Promise<UserDocument | null> {
@@ -41,6 +49,8 @@ export class UsersService {
     return this.userModel.findById(id).select('+refreshToken').exec();
   }
 
+  // --- QUẢN LÝ TOKEN & OTP ---
+
   async setRefreshToken(userId: string, refreshToken: string) {
     const refreshTokenHash = this.hashRefreshToken(refreshToken);
     await this.userModel.updateOne(
@@ -52,7 +62,6 @@ export class UsersService {
   async isRefreshTokenValid(userId: string, refreshToken: string) {
     const user = await this.findByIdInternal(userId);
     if (!user?.refreshToken) return false;
-
     const refreshTokenHash = this.hashRefreshToken(refreshToken);
     return user.refreshToken === refreshTokenHash;
   }
@@ -64,25 +73,55 @@ export class UsersService {
     );
   }
 
-  async updateInternal(
-    id: string,
-    updateData: Partial<User>,
-  ): Promise<UserDocument | null> {
-    return this.userModel
-      .findByIdAndUpdate(id, updateData, { new: true })
-      .exec();
+  async updateOtp(userId: string, otpHash: string, otpExpires: Date) {
+    return this.userModel.updateOne({ _id: userId }, { otpHash, otpExpires });
   }
 
-  async findAllForAdmin(): Promise<UserDocument[]> {
-    return this.userModel.find().exec();
+  async activateUser(userId: string) {
+    return this.userModel.updateOne(
+      { _id: userId },
+      { isActive: true, $unset: { otpHash: 1, otpExpires: 1 } },
+    );
+  }
+
+  // --- ADMIN THAO TÁC ---
+
+  async findAllForAdmin(query: GetUsersQueryDto) {
+    const { page = 1, limit = 10, search } = query;
+    const skip = (page - 1) * limit;
+
+    const filter = search
+      ? {
+          $or: [
+            { email: new RegExp(search, 'i') },
+            { fullName: new RegExp(search, 'i') },
+          ],
+        }
+      : {};
+
+    const [data, total] = await Promise.all([
+      this.userModel
+        .find(filter)
+        .skip(skip)
+        .limit(limit)
+        .sort({ createdAt: -1 })
+        .exec(),
+      this.userModel.countDocuments(filter),
+    ]);
+
+    return {
+      data,
+      meta: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit),
+      },
+    };
   }
 
   async findOneForAdmin(id: string): Promise<UserDocument> {
-    if (!Types.ObjectId.isValid(id))
-      throw new NotFoundException('User not found');
-    const user = await this.userModel.findById(id).exec();
-    if (!user) throw new NotFoundException('User not found');
-    return user;
+    return this.findById(id);
   }
 
   async updateStatus(
@@ -100,94 +139,104 @@ export class UsersService {
     return { message: 'Cập nhật trạng thái user thành công' };
   }
 
-  async updateOtp(userId: string, otpHash: string, otpExpires: Date) {
-    return this.userModel.updateOne({ _id: userId }, { otpHash, otpExpires });
-  }
+  // --- USER PROFILE & ADDRESS ---
 
-  async activateUser(userId: string) {
-    return this.userModel.updateOne(
-      { _id: userId },
-      {
-        isActive: true,
-        $unset: { otpHash: 1, otpExpires: 1 },
-      },
-    );
-  }
-
-  async clearOtp(userId: string) {
-    return this.userModel.updateOne(
-      { _id: userId },
-      { $unset: { otpHash: 1, otpExpires: 1 } },
-    );
-  }
-
-  async updateProfile(userId: string, dto: any): Promise<UserDocument> {
+  async updateProfile(
+    userId: string,
+    dto: UpdateProfileDto,
+  ): Promise<UserDocument> {
     const updatedUser = await this.userModel
-      .findByIdAndUpdate(userId, dto, {
-        new: true,
-      })
+      .findByIdAndUpdate(userId, dto, { new: true })
       .exec();
     if (!updatedUser) throw new NotFoundException('User not found');
     return updatedUser;
   }
 
-  async addAddress(userId: string, dto: any) {
-    const user = await this.userModel.findById(userId);
-    if (!user) throw new NotFoundException('User not found');
+  async addAddress(userId: string, dto: CreateAddressDto) {
+    const userMeta = await this.userModel
+      .findById(userId)
+      .select('addresses')
+      .exec();
+    if (!userMeta) throw new NotFoundException('User not found');
 
-    if (user.addresses.length === 0) {
-      dto.isDefault = true;
-    }
-    if (dto.isDefault) {
-      user.addresses.forEach((addr) => (addr.isDefault = false));
+    const isFirstAddress = userMeta.addresses.length === 0;
+    if (isFirstAddress) dto.isDefault = true;
+
+    if (dto.isDefault && !isFirstAddress) {
+      await this.userModel.updateOne(
+        { _id: userId },
+        { $set: { 'addresses.$[].isDefault': false } },
+      );
     }
 
-    user.addresses.push(dto);
-    return user.save();
+    return this.userModel.findByIdAndUpdate(
+      userId,
+      { $push: { addresses: dto } },
+      { new: true },
+    );
   }
 
-  async updateAddress(userId: string, addressId: string, dto: any) {
-    const user = await this.userModel.findById(userId);
-    if (!user) throw new NotFoundException('User not found');
-
-    const address = user.addresses.id(addressId);
-    if (!address) throw new NotFoundException('Address not found');
-
+  async updateAddress(
+    userId: string,
+    addressId: string,
+    dto: UpdateAddressDto,
+  ) {
     if (dto.isDefault) {
-      user.addresses.forEach((addr) => (addr.isDefault = false));
+      await this.userModel.updateOne(
+        { _id: userId },
+        { $set: { 'addresses.$[].isDefault': false } },
+      );
     }
 
-    Object.assign(address, dto);
-    return user.save();
+    const setUpdate: Record<string, any> = {};
+    for (const [key, value] of Object.entries(dto)) {
+      setUpdate[`addresses.$.${key}`] = value;
+    }
+
+    const updatedUser = await this.userModel.findOneAndUpdate(
+      { _id: userId, 'addresses._id': addressId },
+      { $set: setUpdate },
+      { new: true },
+    );
+
+    if (!updatedUser) throw new NotFoundException('Address not found');
+    return updatedUser;
   }
 
   async deleteAddress(userId: string, addressId: string) {
-    const user = await this.userModel.findById(userId);
-    if (!user) throw new NotFoundException('User not found');
+    const updatedUser = await this.userModel.findOneAndUpdate(
+      { _id: userId },
+      { $pull: { addresses: { _id: addressId } } },
+      { new: true },
+    );
 
-    const address = user.addresses.id(addressId);
-    if (!address) throw new NotFoundException('Address not found');
+    if (!updatedUser) throw new NotFoundException('User not found');
 
-    const wasDefault = address.isDefault;
-    user.addresses.pull({ _id: addressId });
-
-    if (wasDefault && user.addresses.length > 0) {
-      user.addresses[0].isDefault = true;
+    const hasDefault = updatedUser.addresses.some((addr) => addr.isDefault);
+    if (!hasDefault && updatedUser.addresses.length > 0) {
+      const firstAddressId = updatedUser.addresses[0]._id as Types.ObjectId;
+      await this.setDefaultAddress(userId, firstAddressId.toString());
     }
 
-    return user.save();
+    return { message: 'Xóa địa chỉ thành công' };
   }
 
   async setDefaultAddress(userId: string, addressId: string) {
-    const user = await this.userModel.findById(userId);
-    if (!user) throw new NotFoundException('User not found');
+    await this.userModel.bulkWrite([
+      {
+        updateOne: {
+          filter: { _id: userId },
+          update: { $set: { 'addresses.$[].isDefault': false } },
+        },
+      },
+      {
+        updateOne: {
+          filter: { _id: userId, 'addresses._id': addressId },
+          update: { $set: { 'addresses.$.isDefault': true } },
+        },
+      },
+    ]);
 
-    const address = user.addresses.id(addressId);
-    if (!address) throw new NotFoundException('Address not found');
-
-    user.addresses.forEach((addr) => (addr.isDefault = false));
-    address.isDefault = true;
-
-    return user.save();
+    return this.findById(userId);
   }
 }
