@@ -18,12 +18,14 @@ import { ResendOtpDto, VerifyAccountDto } from './dto/verify-account.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import type { Cache } from 'cache-manager';
+import { ConfigService } from '@nestjs/config';
 @Injectable()
 export class AuthService {
   constructor(
     private readonly usersService: UsersService,
     private readonly jwtService: JwtService,
     private readonly mailerService: MailerService,
+    private readonly configService: ConfigService,
     @Inject(CACHE_MANAGER) private cacheManager: Cache,
   ) {}
 
@@ -137,23 +139,26 @@ export class AuthService {
     // ... (Code tạo Token & Cookie giữ nguyên như cũ) ...
     const payload = { sub: user._id.toString(), role: user.role };
     const accessToken = this.jwtService.sign(payload, {
-      secret: process.env.JWT_ACCESS_SECRET,
+      secret: this.configService.get<string>('JWT_ACCESS_SECRET'),
       expiresIn: '15m',
     });
     const refreshToken = this.jwtService.sign(payload, {
-      secret: process.env.JWT_REFRESH_SECRET,
+      secret: this.configService.get<string>('JWT_REFRESH_SECRET'),
       expiresIn: '7d',
     });
 
     await this.usersService.setRefreshToken(user._id.toString(), refreshToken);
+    const isProd = this.configService.get<string>('NODE_ENV') === 'production';
 
     res.cookie('accessToken', accessToken, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
+      secure: isProd,
+      sameSite: 'strict',
     });
     res.cookie('refreshToken', refreshToken, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
+      secure: isProd,
+      sameSite: 'strict',
     });
 
     return {
@@ -225,7 +230,7 @@ export class AuthService {
     if (!refreshToken) throw new UnauthorizedException('Không tìm thấy token');
 
     const payload = this.jwtService.verify(refreshToken, {
-      secret: process.env.JWT_REFRESH_SECRET,
+      secret: this.configService.get<string>('JWT_REFRESH_SECRET'),
     });
 
     const userId = payload.sub as string;
@@ -259,7 +264,7 @@ export class AuthService {
     // Cập nhật Token mới vào DB
     await this.usersService.setRefreshToken(userId, newRefreshToken);
 
-    const isProd = process.env.NODE_ENV === 'production';
+    const isProd = this.configService.get<string>('NODE_ENV') === 'production';
 
     res.cookie('accessToken', newAccessToken, {
       httpOnly: true,
