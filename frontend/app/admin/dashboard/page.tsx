@@ -125,17 +125,17 @@ export default function Dashboard() {
         <div className="lg:col-span-2">
           <RevenueChart 
             data={revenueChartData} 
-            title={`Doanh thu hoàn thành năm ${new Date().getFullYear()}`}
+            title={`Doanh thu năm ${new Date().getFullYear()}`}
           />
         </div>
         <OrderStatusChart data={orderStatusData} />
       </div>
 
       {/* Products & Orders Row */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      {/* <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <TopProducts />
         <SystemStatus />
-      </div>
+      </div> */}
 
       {/* Recent Orders */}
       <RecentOrders />

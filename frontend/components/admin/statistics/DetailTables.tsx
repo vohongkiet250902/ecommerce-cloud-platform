@@ -104,7 +104,7 @@ const DetailTables = ({ data, periodLabel }: Props) => (
       <CardHeader className="bg-muted/20 pb-4 border-b border-border/10">
         <div className="flex items-center justify-between">
           <CardTitle className="text-base font-bold flex items-center gap-2">
-            Chi tiết bán ra
+            Top sản phẩm bán chạy
           </CardTitle>
           <Badge variant="outline" className="text-[10px] h-5 capitalize bg-background font-bold border-border/20">
             {periodLabel}
@@ -129,8 +129,13 @@ const DetailTables = ({ data, periodLabel }: Props) => (
                       <ProductInfo name={item.name} sku={item.sku} image={item.image} />
                     </TableCell>
                     <TableCell className="text-right font-bold text-sm">{item.quantity}</TableCell>
-                    <TableCell className="text-right font-bold text-sm text-success">
-                      {formatCurrency(item.revenue)}
+                    <TableCell className="text-right">
+                      <div className="font-bold text-sm text-success">
+                        {formatCurrency(item.revenue)}
+                      </div>
+                      <div className="text-[10px] text-muted-foreground/60 mt-0.5">
+                        Ship: {formatCurrency(item.shipping)}
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))

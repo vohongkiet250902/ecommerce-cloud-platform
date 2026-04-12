@@ -2058,6 +2058,7 @@ export class OrdersService {
           grossRevenue: 1,
           netRevenue: 1,
           cogs: 1,
+          shippingCost: 1,
           grossProfit: { $subtract: ['$grossRevenue', '$cogs'] },
           netProfit: {
             $subtract: ['$netRevenue', { $add: ['$cogs', '$shippingCost'] }],
@@ -2155,6 +2156,11 @@ export class OrdersService {
           completedAt: { $gte: start, $lte: end },
         },
       },
+      {
+        $addFields: {
+          itemCount: { $size: { $ifNull: ['$items', []] } }
+        }
+      },
       { $unwind: '$items' },
       {
         $group: {
@@ -2166,6 +2172,15 @@ export class OrdersService {
           attributes: { $first: '$items.attributes' },
           quantitySold: { $sum: '$items.quantity' },
           grossRevenue: { $sum: '$items.lineTotal' },
+          allocatedShipping: { 
+            $sum: { 
+              $cond: [
+                { $gt: ['$itemCount', 0] },
+                { $divide: [{ $ifNull: ['$shipping.fee', 0] }, '$itemCount'] },
+                0
+              ]
+            } 
+          },
           estimatedCost: {
             $sum: {
               $cond: [
@@ -2211,6 +2226,7 @@ export class OrdersService {
           attributes: 1,
           quantitySold: 1,
           grossRevenue: 1,
+          allocatedShipping: 1,
           estimatedCost: 1,
           grossProfit: { $subtract: ['$grossRevenue', '$estimatedCost'] },
           orderCount: { $size: '$orderIds' },

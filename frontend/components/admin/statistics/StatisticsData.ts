@@ -23,6 +23,7 @@ export interface PeriodData {
     name: string;
     quantity: number;
     revenue: number;
+    shipping: number;
     image?: string;
     sku?: string;
   }[];
@@ -37,14 +38,13 @@ export interface PeriodData {
     label: string;
     revenue: number;
     cost: number;
+    shipping: number;
     profit: number;
   }[];
 }
 
 export const formatCurrency = (value: number) => {
-  if (value >= 1000000000) return `${(value / 1000000000).toFixed(1)}B`;
-  if (value >= 1000000) return `${(value / 1000000).toFixed(1)}M`;
-  return value.toLocaleString("vi-VN") + "đ";
+  return value.toLocaleString("vi-VN") + " đ";
 };
 
 export const COLORS = [

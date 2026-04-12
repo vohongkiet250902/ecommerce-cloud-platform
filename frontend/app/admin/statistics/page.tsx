@@ -135,6 +135,7 @@ const StatisticsPage = () => {
         chartMap.set(item.period, {
           ...existing,
           cost: item.cogs || item.cost || 0,
+          shipping: item.shippingCost || 0,
           profit: item.netProfit || item.profit || 0
         });
       });
@@ -199,6 +200,7 @@ const StatisticsPage = () => {
         sku: sku.sku || "N/A",
         quantity: sku.quantitySold || 0,
         revenue: sku.grossRevenue || 0,
+        shipping: sku.allocatedShipping || 0,
         image: sku.imageUrl
       })),
       bestSellers: rawData.topProducts.map((p: any) => ({
@@ -215,6 +217,7 @@ const StatisticsPage = () => {
           label,
           revenue: item.revenue,
           cost: item.cost,
+          shipping: item.shipping || 0,
           profit: item.profit
         };
       })

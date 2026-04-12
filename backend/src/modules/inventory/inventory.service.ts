@@ -629,6 +629,7 @@ export class InventoryService {
           sellingPrice: 1,
           originalQuantity: 1,
           remainingQuantity: 1,
+          totalBatchCost: 1,
           receivedAt: 1,
           sourceType: 1,
           sourceRef: 1,

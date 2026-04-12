@@ -18,7 +18,7 @@ interface Props {
 const ProfitChart = ({ data }: Props) => (
   <Card className="border-border/20 shadow-sm">
     <CardHeader className="flex flex-row items-center justify-between pb-8">
-      <CardTitle className="text-base font-bold">Biểu đồ Doanh thu - Chi phí - Lợi nhuận</CardTitle>
+      <CardTitle className="text-base font-bold">Biểu đồ Doanh thu - Giá vốn - Lợi nhuận</CardTitle>
       <div className="flex gap-4 text-[11px] font-medium text-muted-foreground">
         <div className="flex items-center gap-1.5">
           <div className="w-2.5 h-2.5 rounded-sm bg-primary" />
@@ -26,7 +26,11 @@ const ProfitChart = ({ data }: Props) => (
         </div>
         <div className="flex items-center gap-1.5">
           <div className="w-2.5 h-2.5 rounded-sm bg-destructive" />
-          Chi phí
+          Giá vốn
+        </div>
+        <div className="flex items-center gap-1.5">
+          <div className="w-2.5 h-2.5 rounded-sm bg-warning" />
+          Phí ship
         </div>
         <div className="flex items-center gap-1.5">
           <div className="w-2.5 h-2.5 rounded-sm bg-success" />
@@ -37,7 +41,7 @@ const ProfitChart = ({ data }: Props) => (
     <CardContent>
       <div className="h-[350px] w-full">
         <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={data} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
+          <BarChart data={data} margin={{ top: 10, right: 30, left: 20, bottom: 0 }}>
             <defs>
               <linearGradient id="colorRev" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.8}/>
@@ -46,6 +50,10 @@ const ProfitChart = ({ data }: Props) => (
               <linearGradient id="colorCost" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="5%" stopColor="hsl(var(--destructive))" stopOpacity={0.8}/>
                 <stop offset="95%" stopColor="hsl(var(--destructive))" stopOpacity={0.5}/>
+              </linearGradient>
+              <linearGradient id="colorShipping" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="5%" stopColor="hsl(var(--warning))" stopOpacity={0.8}/>
+                <stop offset="95%" stopColor="hsl(var(--warning))" stopOpacity={0.5}/>
               </linearGradient>
               <linearGradient id="colorProfit" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="5%" stopColor="hsl(var(--success))" stopOpacity={0.8}/>
@@ -67,6 +75,7 @@ const ProfitChart = ({ data }: Props) => (
               tickLine={false}
               axisLine={false}
               tickFormatter={(v) => formatCurrency(v)}
+              width={120}
             />
             <Tooltip
               cursor={{ fill: 'hsl(var(--muted)/0.2)' }}
@@ -83,7 +92,9 @@ const ProfitChart = ({ data }: Props) => (
                 name === "revenue"
                   ? "Doanh thu"
                   : name === "cost"
-                  ? "Chi phí nhập"
+                  ? "Giá vốn"
+                  : name === "shipping"
+                  ? "Phí ship"
                   : "Lợi nhuận",
               ]}
             />
@@ -92,21 +103,28 @@ const ProfitChart = ({ data }: Props) => (
               fill="url(#colorRev)"
               radius={[4, 4, 0, 0]}
               name="revenue"
-              barSize={20}
+              barSize={15}
             />
             <Bar
               dataKey="cost"
               fill="url(#colorCost)"
               radius={[4, 4, 0, 0]}
               name="cost"
-              barSize={20}
+              barSize={15}
+            />
+            <Bar
+              dataKey="shipping"
+              fill="url(#colorShipping)"
+              radius={[4, 4, 0, 0]}
+              name="shipping"
+              barSize={15}
             />
             <Bar
               dataKey="profit"
               fill="url(#colorProfit)"
               radius={[4, 4, 0, 0]}
               name="profit"
-              barSize={20}
+              barSize={15}
             />
           </BarChart>
         </ResponsiveContainer>

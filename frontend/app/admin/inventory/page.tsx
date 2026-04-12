@@ -67,7 +67,6 @@ interface InventoryItem {
 }
 
 const LOW_STOCK_THRESHOLD = 10;
-const GLOBAL_MAX_LOSS_PERCENT = 30; // Giới hạn lỗ tối đa 30% cho tất cả sản phẩm trong cửa hàng
 
 export default function InventoryPage() {
   const { toast } = useToast();
@@ -180,15 +179,6 @@ export default function InventoryPage() {
 
       const margin = sellingPrice > 0 ? ((sellingPrice - unitCost) / sellingPrice) * 100 : -100;
       
-      // Kiểm tra giới hạn lỗ cho TẤT CẢ sản phẩm
-      if (margin <= -GLOBAL_MAX_LOSS_PERCENT) {
-          toast({ 
-            title: "Cảnh báo nghiêm trọng", 
-            description: `Không được phép nhập kho với mức lỗ quá ${GLOBAL_MAX_LOSS_PERCENT}%. Bạn vui lòng điều chỉnh lại giá bán sản phẩm trước khi thực hiện nhập kho lô hàng này.`, 
-            variant: "destructive" 
-          });
-          return;
-      }
 
       // Nếu bán lỗ hoặc hòa vốn mà chưa bypass confirm
       if (margin <= 0 && !bypassConfirm) {
