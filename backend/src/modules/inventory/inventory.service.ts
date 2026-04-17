@@ -66,14 +66,12 @@ export class InventoryService {
   }
 
   /**
-   * Hỗ trợ dữ liệu cũ:
-   * Nếu ProductVariant.stock đang có số lượng nhưng chưa có lot tương ứng,
-   * tự sinh 1 lot opening_balance để hệ thống mới vẫn chạy được.
+   * Đồng bộ lại số lượng tồn kho của 1 SKU dựa trên tổng các lô hàng thực tế.
+   * Giúp xử lý các sai lệch dữ liệu cũ.
    */
-  private async backfillOpeningLotIfNeeded(
+  private async reconcileStock(
     productId: Types.ObjectId,
     sku: string,
-    currentVariantStock: number,
     session?: ClientSession,
   ) {
     const agg = this.inventoryLotModel.aggregate([
@@ -81,44 +79,42 @@ export class InventoryService {
         $match: {
           productId,
           sku,
+          remainingQuantity: { $gt: 0 },
         },
       },
       {
         $group: {
           _id: null,
-          totalRemaining: { $sum: '$remainingQuantity' },
+          total: { $sum: '$remainingQuantity' },
         },
       },
     ]);
 
-    if (session) {
-      agg.session(session);
-    }
-
+    if (session) agg.session(session);
     const result = await agg;
-    const totalRemaining = result?.[0]?.totalRemaining ?? 0;
-    const gap = currentVariantStock - totalRemaining;
+    const totalInLots = result?.[0]?.total ?? 0;
 
-    if (gap > 0) {
-      await this.inventoryLotModel.create(
-        [
-          {
-            productId,
-            sku,
-            unitCost: 0,
-            originalQuantity: gap,
-            remainingQuantity: gap,
-            receivedAt: new Date(),
-            sourceType: 'opening_balance',
-            sourceRef: 'LEGACY_BACKFILL',
-            note: 'Tự sinh từ stock cũ trước khi áp dụng inventory lot',
-            isClosed: false,
-          },
-        ],
+    // 1. Cập nhật tồn kho cho Variant
+    await this.productModel.updateOne(
+      { _id: productId, 'variants.sku': sku },
+      { $set: { 'variants.$.stock': totalInLots } },
+      session ? { session } : undefined,
+    );
+
+    // 2. Tính toán lại totalStock cho toàn bộ Product (tổng các variant)
+    const product = await this.productModel.findById(productId).session(session || null);
+    if (product) {
+      const newTotalStock = product.variants.reduce((sum, v) => sum + (v.stock || 0), 0);
+      await this.productModel.updateOne(
+        { _id: productId },
+        { $set: { totalStock: newTotalStock } },
         session ? { session } : undefined,
       );
     }
+
+    return totalInLots;
   }
+
 
   private async createStockIn(
     dto: StockInDto,
@@ -159,24 +155,15 @@ export class InventoryService {
 
     const createdLot = lotDocs[0];
 
-    // CẬP NHẬT: Không tự đổi giá bán. Chỉ cập nhật stock và importPrice
-    const updated = await this.productModel.updateOne(
+    // Cập nhật tồn kho và đồng bộ hóa
+    await this.reconcileStock(product._id as Types.ObjectId, dto.sku, session);
+    
+    // Cập nhật giá nhập mới nhất
+    await this.productModel.updateOne(
       { _id: product._id, 'variants.sku': dto.sku },
-      {
-        $inc: {
-          'variants.$.stock': dto.quantity,
-          totalStock: dto.quantity,
-        },
-        $set: {
-          'variants.$.importPrice': unitCost,
-        },
-      },
+      { $set: { 'variants.$.importPrice': unitCost } },
       session ? { session } : undefined,
     );
-
-    if (updated.modifiedCount === 0) {
-      throw new BadRequestException('Không thể cập nhật tồn kho sản phẩm');
-    }
 
     // TẠO WARNINGS: Trả về cảnh báo nếu margin bị thấp hoặc bán lỗ
     const warnings: any[] = [];
@@ -252,12 +239,6 @@ export class InventoryService {
       session,
     );
 
-    await this.backfillOpeningLotIfNeeded(
-      product._id as Types.ObjectId,
-      sku,
-      variant.stock || 0,
-      session,
-    );
 
     const lotsQuery = this.inventoryLotModel
       .find({
@@ -316,26 +297,8 @@ export class InventoryService {
       need -= take;
     }
 
-    const updatedProduct = await this.productModel.updateOne(
-      {
-        _id: product._id,
-        'variants.sku': sku,
-        'variants.stock': { $gte: quantity },
-      },
-      {
-        $inc: {
-          'variants.$.stock': -quantity,
-          totalStock: -quantity,
-        },
-      },
-      session ? { session } : undefined,
-    );
-
-    if (updatedProduct.modifiedCount === 0) {
-      throw new BadRequestException(
-        `Không thể đồng bộ stock trên Product cho SKU ${sku}`,
-      );
-    }
+    // Đồng bộ lại tồn kho sau khi xuất
+    await this.reconcileStock(product._id as Types.ObjectId, sku, session);
 
     return { allocations, totalCost };
   }
@@ -578,6 +541,11 @@ export class InventoryService {
     sku?: string, 
     filters?: { startDate?: string; endDate?: string; excludeOpening?: boolean }
   ) {
+    // Tự động đồng bộ kho khi liệt kê lô hàng của 1 sản phẩm cụ thể
+    if (productId && sku) {
+      await this.reconcileStock(new Types.ObjectId(productId), sku);
+    }
+
     const match: any = {};
     if (productId) match.productId = new Types.ObjectId(productId);
     if (sku) match.sku = sku;

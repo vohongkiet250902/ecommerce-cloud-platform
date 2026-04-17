@@ -2,6 +2,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   BarChart,
   Bar,
+  Cell,
   XAxis,
   YAxis,
   CartesianGrid,
@@ -58,6 +59,10 @@ const ProfitChart = ({ data }: Props) => (
               <linearGradient id="colorProfit" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="5%" stopColor="hsl(var(--success))" stopOpacity={0.8}/>
                 <stop offset="95%" stopColor="hsl(var(--success))" stopOpacity={0.5}/>
+              </linearGradient>
+              <linearGradient id="colorLoss" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="5%" stopColor="hsl(var(--destructive))" stopOpacity={0.8}/>
+                <stop offset="95%" stopColor="hsl(var(--destructive))" stopOpacity={0.5}/>
               </linearGradient>
             </defs>
             <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border)/0.1)" />
@@ -121,11 +126,17 @@ const ProfitChart = ({ data }: Props) => (
             />
             <Bar
               dataKey="profit"
-              fill="url(#colorProfit)"
               radius={[4, 4, 0, 0]}
               name="profit"
               barSize={15}
-            />
+            >
+              {data.map((entry, index) => (
+                <Cell 
+                  key={`cell-${index}`} 
+                  fill={entry.profit >= 0 ? "url(#colorProfit)" : "url(#colorLoss)"} 
+                />
+              ))}
+            </Bar>
           </BarChart>
         </ResponsiveContainer>
       </div>

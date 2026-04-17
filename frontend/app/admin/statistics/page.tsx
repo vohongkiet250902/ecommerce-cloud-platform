@@ -201,7 +201,8 @@ const StatisticsPage = () => {
         quantity: sku.quantitySold || 0,
         revenue: sku.grossRevenue || 0,
         shipping: sku.allocatedShipping || 0,
-        image: sku.imageUrl
+        image: sku.imageUrl,
+        profitMargin: sku.grossRevenue > 0 ? ((sku.grossProfit || 0) / sku.grossRevenue) * 100 : 0
       })),
       bestSellers: rawData.topProducts.map((p: any) => ({
         name: p.name,

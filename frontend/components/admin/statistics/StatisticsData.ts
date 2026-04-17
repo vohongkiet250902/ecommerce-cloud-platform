@@ -24,6 +24,7 @@ export interface PeriodData {
     quantity: number;
     revenue: number;
     shipping: number;
+    profitMargin?: number;
     image?: string;
     sku?: string;
   }[];

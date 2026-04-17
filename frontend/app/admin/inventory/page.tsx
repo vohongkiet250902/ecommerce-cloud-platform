@@ -162,6 +162,8 @@ export default function InventoryPage() {
       try {
           const res = await inventoryApi.getLots({ sku: item.sku });
           setLots(res.data.data || res.data);
+          // Tự động làm mới danh sách chính vì Backend đã đồng bộ kho khi gọi getLots
+          fetchInventory();
       } catch (error) {
           console.error(error);
           toast({ title: "Lỗi", description: "Không thể lấy chi tiết nhập kho", variant: "destructive" });
@@ -231,10 +233,11 @@ export default function InventoryPage() {
   // Stats
   const stats = useMemo(() => {
       const totalSKUs = inventory.length;
+      const totalUnits = inventory.reduce((sum, i) => sum + i.stock, 0);
       const outOfStock = inventory.filter(i => i.stock === 0).length;
       const lowStock = inventory.filter(i => i.stock > 0 && i.stock <= LOW_STOCK_THRESHOLD).length;
       const inStock = totalSKUs - outOfStock - lowStock;
-      return { totalSKUs, outOfStock, lowStock, inStock };
+      return { totalSKUs, totalUnits, outOfStock, lowStock, inStock };
   }, [inventory]);
 
   const columns = [
@@ -362,14 +365,14 @@ export default function InventoryPage() {
       )}
 
       {/* Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
         <div className="bg-card rounded-xl p-4 border border-border shadow-sm">
           <div className="flex items-center gap-3">
             <div className="p-2 rounded-lg bg-primary/10">
               <Package className="h-5 w-5 text-primary" />
             </div>
             <div>
-              <p className="text-sm text-muted-foreground font-medium">Tổng Mã Sản phẩm</p>
+              <p className="text-sm text-muted-foreground font-medium">Tổng Mã SKU</p>
               <div className="flex items-baseline gap-2 mt-1">
                  <p className="text-2xl font-bold text-foreground">{stats.totalSKUs}</p>
               </div>
@@ -378,8 +381,21 @@ export default function InventoryPage() {
         </div>
         <div className="bg-card rounded-xl p-4 border border-border shadow-sm">
           <div className="flex items-center gap-3">
+            <div className="p-2 rounded-lg bg-indigo-500/10">
+              <Layers className="h-5 w-5 text-indigo-500" />
+            </div>
+            <div>
+              <p className="text-sm text-muted-foreground font-medium">Tổng Số Lượng</p>
+              <div className="flex items-baseline gap-2 mt-1">
+                  <p className="text-2xl font-bold text-indigo-500">{stats.totalUnits.toLocaleString("vi-VN")}</p>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div className="bg-card rounded-xl p-4 border border-border shadow-sm">
+          <div className="flex items-center gap-3">
             <div className="p-2 rounded-lg bg-success/10">
-              <Package className="h-5 w-5 text-success" />
+              <TrendingDown className="h-5 w-5 text-success rotate-180" />
             </div>
             <div>
               <p className="text-sm text-muted-foreground font-medium">Còn hàng</p>
@@ -627,7 +643,7 @@ export default function InventoryPage() {
                           </div>
                           <p className="text-muted-foreground font-medium">Chưa có thông tin nhập kho chi tiết.</p>
                       </div>
-                  ) : (
+                      ) : (
                       <div className="p-6">
                           <div className="space-y-4">
                               {lots.map((lot, idx) => (

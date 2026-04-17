@@ -105,7 +105,12 @@ const SummaryCards = ({ data, periodLabel }: Props) => (
           </p>
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-1">
-              <span className="text-[10px] font-bold text-success bg-success/10 px-1 rounded">{data.profitMargin}%</span>
+              <span className={cn(
+                "text-[10px] font-bold px-1 rounded",
+                data.profitMargin >= 0 ? "text-success bg-success/10" : "text-destructive bg-destructive/10"
+              )}>
+                {data.profitMargin}%
+              </span>
               <span className="text-[10px] text-muted-foreground font-medium">biên lãi</span>
             </div>
             <GrowthIndicator growth={data.profitGrowth} label="so với kỳ trước" />
