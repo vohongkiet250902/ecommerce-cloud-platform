@@ -67,7 +67,7 @@ const RankBadge = ({ rank }: { rank: number }) => {
 };
 
 const DetailTables = ({ data, periodLabel }: Props) => (
-  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+  <div className="grid grid-cols-1 gap-6">
     <Card className="border-border/20 shadow-md overflow-hidden flex flex-col transition-all hover:shadow-lg group/import">
       <CardHeader className="bg-gradient-to-r from-muted/30 to-background pb-4 border-b border-border/10 relative overflow-hidden">
         <div className="absolute top-0 right-0 p-1 opacity-5 group-hover/import:scale-110 transition-transform">
@@ -86,7 +86,7 @@ const DetailTables = ({ data, periodLabel }: Props) => (
         </div>
       </CardHeader>
       <CardContent className="p-0 flex-1">
-        <div className="max-h-[500px] overflow-y-auto custom-scrollbar">
+        <div className="max-h-[600px] overflow-y-auto custom-scrollbar">
           <Table className="relative">
             <TableHeader className="bg-muted/30 sticky top-0 z-10 shadow-[0_1px_0_0_rgba(0,0,0,0.05)]">
               <TableRow className="border-border/10">
@@ -177,7 +177,7 @@ const DetailTables = ({ data, periodLabel }: Props) => (
         </div>
       </CardHeader>
       <CardContent className="p-0 flex-1">
-        <div className="max-h-[500px] overflow-y-auto custom-scrollbar">
+        <div className="max-h-[600px] overflow-y-auto custom-scrollbar">
           <Table className="relative">
             <TableHeader className="bg-muted/30 sticky top-0 z-10 shadow-[0_1px_0_0_rgba(0,0,0,0.05)]">
               <TableRow className="border-border/10">

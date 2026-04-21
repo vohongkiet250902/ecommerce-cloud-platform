@@ -83,7 +83,7 @@ const StatisticsPage = () => {
 
       const topParams = { 
         ...params,
-        limit: 10,
+        limit: 1000,
         sortBy: "quantity" as const
       };
 
@@ -115,7 +115,7 @@ const StatisticsPage = () => {
 
       const topSkus = topSkusRes?.items || [];
       const topProducts = topProductsRes?.items || [];
-      const recentLots = (Array.isArray(lotsRes) ? lotsRes : []).slice(0, 10);
+      const recentLots = Array.isArray(lotsRes) ? lotsRes : [];
 
       const revChart = rev?.chartData || [];
       const profChart = prof?.chartData || [];
