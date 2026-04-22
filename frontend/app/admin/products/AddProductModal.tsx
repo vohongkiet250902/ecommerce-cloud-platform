@@ -31,7 +31,7 @@ import { z } from "zod";
 import { useSelector } from "react-redux";
 import { RootState } from "@/store";
 import slugify from "slugify";
-import { X, Plus, Upload, Trash2, UploadCloud, Search, ChevronDown, Check, Image as ImageIcon, Loader2 } from "lucide-react";
+import { X, Plus, Upload, Trash2, UploadCloud, Search, ChevronDown, Check, Image as ImageIcon, Loader2, Layers, Box, Package } from "lucide-react";
 import Image from "next/image";
 import { cn } from "@/lib/utils";
 import {
@@ -67,7 +67,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "@/hooks/use-toast";
 import apiClient from "@/services/api";
-import { uploadApi } from "@/services/api";
+import { uploadApi, inventoryApi } from "@/services/api";
 
 const productSchema = z.object({
   name: z.string().min(1, "Tên sản phẩm là bắt buộc"),
@@ -197,6 +197,28 @@ export default function AddProductModal({ open, onOpenChange, initialData, onSuc
   const [showExitConfirm, setShowExitConfirm] = useState(false);
   const catInputRef = useRef<HTMLInputElement>(null);
   const brandInputRef = useRef<HTMLInputElement>(null);
+  
+  // Inventory Lot Detail State
+  const [isLotDetailOpen, setIsLotDetailOpen] = useState(false);
+  const [selectedLotVariant, setSelectedLotVariant] = useState<Variant | null>(null);
+  const [lots, setLots] = useState<any[]>([]);
+  const [lotLoading, setLotLoading] = useState(false);
+
+  const handleOpenLotDetail = async (variant: Variant) => {
+    if (!variant.sku) return;
+    setSelectedLotVariant(variant);
+    setIsLotDetailOpen(true);
+    setLotLoading(true);
+    try {
+        const res = await inventoryApi.getLots({ sku: variant.sku });
+        setLots(res.data.data || res.data);
+    } catch (error) {
+        console.error(error);
+        toast({ title: "Lỗi", description: "Không thể lấy chi tiết nhập kho", variant: "destructive" });
+    } finally {
+        setLotLoading(false);
+    }
+  };
 
   useEffect(() => {
     if (catOpen) {
@@ -955,16 +977,20 @@ export default function AddProductModal({ open, onOpenChange, initialData, onSuc
                             <div className="grid grid-cols-2 gap-4">
                               <div>
                                 <Label htmlFor={`variant-import-price-${i}`}>
-                                  Giá nhập (VNĐ)
+                                  Chi tiết nhập kho
                                 </Label>
-                                <Input
-                                  id={`variant-import-price-${i}`}
-                                  type="number"
-                                  disabled
-                                  value={variant.importPrice === 0 ? "" : variant.importPrice}
-                                  className="mt-1.5 bg-muted/40 cursor-not-allowed"
-                                  title="Giá nhập đồng bộ từ tồn kho"
-                                />
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  disabled={!variant.sku || variant.stock === 0}
+                                  onClick={() => handleOpenLotDetail(variant)}
+                                  className="w-full mt-1.5 h-10 border-border/60 hover:bg-primary/5 hover:text-primary transition-all flex items-center justify-center gap-2"
+                                  title={!variant.sku ? "Cần có SKU để xem chi tiết" : variant.stock === 0 ? "Sản phẩm chưa có tồn kho" : "Xem chi tiết các lô hàng nhập"}
+                                >
+                                  <Layers className="h-4 w-4" />
+                                  <span className="text-xs font-semibold">Xem chi tiết</span>
+                                </Button>
                               </div>
                               <div>
                                 <Label htmlFor={`variant-price-${i}`}>
@@ -1210,6 +1236,97 @@ export default function AddProductModal({ open, onOpenChange, initialData, onSuc
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
+
+    {/* Inventory Lot Detail Dialog */}
+    <Dialog open={isLotDetailOpen} onOpenChange={setIsLotDetailOpen}>
+        <DialogContent className="max-w-2xl p-0 overflow-hidden rounded-2xl shadow-2xl border-none">
+            <DialogHeader className="p-0 border-b border-border/50">
+                <div className="bg-gradient-to-r from-primary/20 to-primary/5 p-6 flex items-center gap-5">
+                    <div className="h-16 w-16 relative rounded-xl overflow-hidden bg-background border-2 border-background shadow-lg shrink-0">
+                        {selectedLotVariant?.image ? (
+                            <Image src={selectedLotVariant.image.url} alt="Variant" fill className="object-cover" />
+                        ) : (
+                            <div className="flex items-center justify-center h-full bg-muted text-muted-foreground">
+                                <Box className="h-6 w-6" />
+                            </div>
+                        )}
+                    </div>
+                    <div className="flex-1 min-w-0 text-left">
+                        <DialogTitle className="font-bold text-lg text-foreground leading-tight">Lịch sử nhập kho: {productName || "Sản phẩm"}</DialogTitle>
+                        <div className="flex wrap items-center gap-2 mt-1">
+                           <Badge variant="secondary" className="px-1.5 py-0 text-[10px] h-4 font-bold uppercase tracking-wider bg-primary/10 text-primary border-none">
+                              {selectedLotVariant?.sku}
+                           </Badge>
+                           <p className="text-[10px] text-muted-foreground font-bold flex items-center gap-1.5 uppercase tracking-widest">
+                              <Layers className="h-3 w-3" />
+                              {selectedLotVariant?.attributes.map(a => `${a.key}: ${a.value}`).join(", ") || "Mặc định"}
+                           </p>
+                        </div>
+                    </div>
+                </div>
+            </DialogHeader>
+
+            <ScrollArea className="max-h-[50vh]">
+                {lotLoading ? (
+                    <div className="py-12 flex flex-col items-center justify-center gap-3">
+                        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                        <p className="text-xs text-muted-foreground animate-pulse font-medium">Đang lấy dữ liệu lô hàng...</p>
+                    </div>
+                ) : lots.length === 0 ? (
+                    <div className="py-12 text-center space-y-3">
+                        <div className="inline-flex p-3 rounded-full bg-muted">
+                            <Package className="h-6 w-6 text-muted-foreground" />
+                        </div>
+                        <p className="text-muted-foreground text-sm font-medium">Chưa có thông tin nhập kho chi tiết cho SKU này.</p>
+                    </div>
+                    ) : (
+                    <div className="p-5">
+                        <div className="space-y-3">
+                            {lots.map((lot, idx) => (
+                                <div key={lot._id} className="group relative border border-border rounded-xl p-3 transition-all hover:bg-muted/5 hover:border-primary/20">
+                                    <div className="absolute -left-1 top-3 w-1 h-10 bg-primary/20 rounded-full group-hover:bg-primary transition-colors" />
+                                    <div className="flex items-start justify-between">
+                                        <div className="space-y-1">
+                                            <div className="flex items-center gap-2">
+                                                <Badge variant="outline" className="bg-primary/5 text-primary border-primary/20 text-[9px] font-bold">Lô #{lots.length - idx}</Badge>
+                                                <span className="text-[10px] font-bold text-muted-foreground">
+                                                    {new Date(lot.receivedAt).toLocaleString("vi-VN", {
+                                                        day: "2-digit",
+                                                        month: "2-digit",
+                                                        year: "numeric",
+                                                        hour: "2-digit",
+                                                        minute: "2-digit"
+                                                    })}
+                                                </span>
+                                            </div>
+                                            <p className="text-xs font-semibold mt-1.5">{lot.note || "Không có ghi chú"}</p>
+                                        </div>
+                                        <div className="text-right space-y-0.5">
+                                            <p className="text-[10px] text-muted-foreground">Số lượng</p>
+                                            <p className="font-bold text-base">+{lot.originalQuantity}</p>
+                                            <p className="text-[9px] text-muted-foreground italic">Còn lại: {lot.remainingQuantity}</p>
+                                        </div>
+                                    </div>
+                                    <div className="mt-3 pt-3 border-t border-border/50 flex justify-between items-center">
+                                        <div>
+                                            <p className="text-[9px] text-muted-foreground uppercase tracking-widest font-bold">Giá nhập</p>
+                                            <p className="font-bold text-xs text-foreground">
+                                                {lot.unitCost.toLocaleString("vi-VN")} <span className="text-[9px]">VNĐ</span>
+                                            </p>
+                                        </div>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                )}
+            </ScrollArea>
+
+            <div className="p-4 bg-muted/10 border-t border-border/50 flex justify-end">
+                <Button variant="outline" size="sm" onClick={() => setIsLotDetailOpen(false)} className="rounded-xl px-4">Đóng</Button>
+            </div>
+        </DialogContent>
+    </Dialog>
   </>
 );
 }
