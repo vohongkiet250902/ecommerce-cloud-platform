@@ -13,6 +13,7 @@ import {
   AlertTriangle,
   Filter,
   Search,
+  DollarSign,
 } from "lucide-react";
 import { useForm } from "react-hook-form";
 import Image from "next/image";
@@ -21,6 +22,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { DataTable } from "@/components/shared/DataTable";
 import AddProductModal from "./AddProductModal";
+import EditPriceModal from "./EditPriceModal";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -191,6 +193,8 @@ export default function ProductsPage() {
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+  const [isPriceModalOpen, setIsPriceModalOpen] = useState(false);
+  const [productToEditPrice, setProductToEditPrice] = useState<Product | null>(null);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [productToDelete, setProductToDelete] = useState<Product | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -560,6 +564,13 @@ export default function ProductsPage() {
                 <Edit className="mr-2 h-4 w-4" /> Chỉnh sửa
               </DropdownMenuItem>
 
+              <DropdownMenuItem onClick={() => {
+                setProductToEditPrice(product);
+                setIsPriceModalOpen(true);
+              }}>
+                <DollarSign className="mr-2 h-4 w-4" /> Cập nhật giá
+              </DropdownMenuItem>
+
               <DropdownMenuItem onClick={() => handleToggleStatus(product, product.status === "active" ? "inactive" : "active")}>
                 <div className="flex items-center gap-2">
                   <div
@@ -805,6 +816,17 @@ export default function ProductsPage() {
           const res = await productApi.getAdminProducts(adminProductFetchOpts);
           setProducts(res.data.data || res.data);
           setSelectedProduct(null);
+        }}
+      />
+
+      <EditPriceModal
+        open={isPriceModalOpen}
+        onOpenChange={setIsPriceModalOpen}
+        product={productToEditPrice}
+        onSuccess={async () => {
+          const res = await productApi.getAdminProducts(adminProductFetchOpts);
+          setProducts(res.data.data || res.data);
+          setProductToEditPrice(null);
         }}
       />
 
