@@ -1,5 +1,5 @@
 services:
-  # 1. Database & Cache Services (Giữ nguyên cấu hình cũ)
+  # 1. Redis
   redis_cache:
     image: redis:7-alpine
     container_name: ecommerce_redis
@@ -8,17 +8,6 @@ services:
       - '6379:6379'
     volumes:
       - redis_data:/data
-
-  meilisearch:
-    image: getmeili/meilisearch:v1.7
-    container_name: ecommerce_meilisearch
-    restart: always
-    ports:
-      - '7700:7700'
-    environment:
-      - MEILI_MASTER_KEY=EcommerceSearchKey_2026_SecretString
-    volumes:
-      - meili_data:/meili_data
 
   # 2. NestJS Backend
   backend:
@@ -29,13 +18,13 @@ services:
       - "8080:8080"
     depends_on:
       - redis_cache
-      - meilisearch
     environment:
+      - MONGODB_URI=mongodb+srv://vohongkiet250902_db_user:nGXQ9pr6Apqe0teK@protech.za9nfna.mongodb.net/?appName=ProTech
       - REDIS_URL=redis://ecommerce_redis:6379
-      - MEILI_HOST=http://ecommerce_meilisearch:7700
-      - MEILI_API_KEY=EcommerceSearchKey_2026_SecretString
+      - MEILI_HOST=https://ms-3ead7f71fd9d-41922.sgp.meilisearch.io
+      - MEILI_API_KEY=6a9959165fe239d76fcbd0c5455b549477164005
 
-  # 3. Next.js Frontend (PHẦN THÊM MỚI)
+  # 3. Next.js Frontend
   frontend:
     build: ./frontend
     container_name: ecommerce_frontend
@@ -45,9 +34,7 @@ services:
     depends_on:
       - backend
     environment:
-      # URL để Frontend gọi API từ phía Browser
-      - NEXT_PUBLIC_API_URL=http://localhost:8080 
+      - NEXT_PUBLIC_API_URL=https://protech.name.vn/api
 
 volumes:
   redis_data:
-  meili_data:
