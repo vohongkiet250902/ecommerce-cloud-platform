@@ -40,11 +40,11 @@ export class PaymentsController {
 
     if (result.success) {
       return res.redirect(
-        `http://localhost:3000/payment-result?status=success&orderId=${result.orderId}`,
+        `${process.env.FRONTEND_URL}/payment-result?status=success&orderId=${result.orderId}`,
       );
     } else {
       return res.redirect(
-        `http://localhost:3000/payment-result?status=failed&message=${result.message}`,
+        `${process.env.FRONTEND_URL}/payment-result?status=failed&message=${result.message}`,
       );
     }
   }

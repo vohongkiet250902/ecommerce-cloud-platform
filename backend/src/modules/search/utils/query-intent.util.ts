@@ -111,6 +111,9 @@ export function detectChatIntent(rawMessage: string): ChatIntent {
     'power bank',
     'pin du phong',
     'sac du phong',
+    'ss',
+    'dth',
+    'ip',
   ];
 
   const hasComparison = includesAny(q, comparisonKeywords);
@@ -141,6 +144,10 @@ export class QueryIntentAnalyzer {
       'redmi',
       'reno',
       'find x',
+      'dt',
+      'dth',
+      'ip',
+      'dtdd',
     ],
     watch: [
       'dong ho',
@@ -160,6 +167,8 @@ export class QueryIntentAnalyzer {
       'airpods',
       'earpods',
       'buds',
+      'tai nghe co day',
+      'tai nghe day',
     ],
     laptop: [
       'laptop',
@@ -170,6 +179,8 @@ export class QueryIntentAnalyzer {
       'inspiron',
       'tuf',
       'loq',
+      'laptop gia re',
+      'may tinh',
     ],
     tablet: ['tablet', 'ipad', 'may tinh bang', 'galaxy tab', 'tab'],
     accessory: [
@@ -180,6 +191,11 @@ export class QueryIntentAnalyzer {
       'bo sac',
       'charger',
       'adapter',
+      'sac 20w',
+      'sac type c',
+      'sac typc c',
+      'sac nhanh',
+      'pk',
     ],
     unknown: [],
   };

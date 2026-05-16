@@ -137,15 +137,31 @@ export class TaxonomyResolver {
 
       case 'cap & sac':
       case 'cap va sac':
-        ['cap sac', 'cu sac', 'bo sac', 'charger', 'adapter', 'cable'].forEach(
-          (x) => aliases.add(x),
-        );
+        [
+          'cap sac',
+          'cu sac',
+          'bo sac',
+          'charger',
+          'adapter',
+          'cable',
+          'sac 20w',
+          'sac type c',
+          'sac typc c',
+          'sac nhanh',
+          'pk',
+        ].forEach((x) => aliases.add(x));
         break;
 
       case 'tai nghe':
-        ['headphone', 'earphone', 'earbuds', 'buds', 'airpods'].forEach((x) =>
-          aliases.add(x),
-        );
+        [
+          'headphone',
+          'earphone',
+          'earbuds',
+          'buds',
+          'airpods',
+          'tai nghe co day',
+          'tai nghe day',
+        ].forEach((x) => aliases.add(x));
         break;
 
       case 'apple watch':
@@ -167,7 +183,15 @@ export class TaxonomyResolver {
           'mobile',
           'dien thoai thong minh',
           'dt',
+          'dth',
+          'dtdd',
         ].forEach((x) => aliases.add(x));
+        break;
+
+      case 'laptop':
+        ['may tinh xach tay', 'notebook', 'may tinh', 'laptop gia re'].forEach(
+          (x) => aliases.add(x),
+        );
         break;
 
       default:
@@ -184,13 +208,15 @@ export class TaxonomyResolver {
 
     switch (normalizedName) {
       case 'apple':
-        ['iphone', 'ipad', 'macbook', 'airpods', 'earpods'].forEach((x) =>
-          aliases.add(x),
+        ['iphone', 'ipad', 'macbook', 'airpods', 'earpods', 'ip', 'ipone'].forEach(
+          (x) => aliases.add(x),
         );
         break;
 
       case 'samsung':
-        ['galaxy s', 'galaxy z', 'buds'].forEach((x) => aliases.add(x));
+        ['galaxy s', 'galaxy z', 'buds', 'ss', 'samsng'].forEach((x) =>
+          aliases.add(x),
+        );
         break;
 
       case 'xiaomi':
