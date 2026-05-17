@@ -513,7 +513,7 @@ function ProductsContent() {
 
             {/* Pagination */}
             {totalPages > 1 && (
-              <div className="flex items-center justify-center gap-2 mt-8">
+              <div className="flex flex-wrap items-center justify-center gap-2 mt-8">
                 <Button
                   variant="outline"
                   size="icon"
@@ -524,19 +524,50 @@ function ProductsContent() {
                   <ChevronLeft className="w-4 h-4" />
                 </Button>
 
-                {Array.from({ length: totalPages }, (_, i) => i + 1).map(
-                  (page) => (
-                    <Button
-                      key={page}
-                      variant={currentPage === page ? "default" : "outline"}
-                      size="icon"
-                      onClick={() => setCurrentPage(page)}
-                      className={`w-10 h-10 ${currentPage !== page ? "border-border/40" : ""}`}
-                    >
-                      {page}
-                    </Button>
-                  )
-                )}
+                {(() => {
+                  let startPage = Math.max(1, currentPage - 2);
+                  let endPage = Math.min(totalPages, currentPage + 2);
+
+                  if (currentPage <= 3) {
+                      endPage = Math.min(totalPages, 5);
+                  } else if (currentPage >= totalPages - 2) {
+                      startPage = Math.max(1, totalPages - 4);
+                  }
+
+                  const pages = [];
+                  
+                  if (startPage > 1) {
+                      pages.push(
+                          <div key="start-ellipsis" className="flex h-10 w-10 items-center justify-center text-muted-foreground">
+                              ...
+                          </div>
+                      );
+                  }
+
+                  for (let i = startPage; i <= endPage; i++) {
+                      pages.push(
+                          <Button
+                            key={i}
+                            variant={currentPage === i ? "default" : "outline"}
+                            size="icon"
+                            onClick={() => setCurrentPage(i)}
+                            className={`w-10 h-10 ${currentPage !== i ? "border-border/40" : ""}`}
+                          >
+                            {i}
+                          </Button>
+                      );
+                  }
+
+                  if (endPage < totalPages) {
+                      pages.push(
+                          <div key="end-ellipsis" className="flex h-10 w-10 items-center justify-center text-muted-foreground">
+                              ...
+                          </div>
+                      );
+                  }
+
+                  return pages;
+                })()}
 
                 <Button
                   variant="outline"

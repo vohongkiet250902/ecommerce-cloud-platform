@@ -457,10 +457,6 @@ export function SearchHub() {
                                          <p className="text-xs font-black text-primary">
                                            {new Intl.NumberFormat('vi-VN').format(p.minPrice || p.price)}đ
                                          </p>
-                                         <span className="w-1 h-1 rounded-full bg-border" />
-                                         <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-tighter opacity-60 line-through">
-                                           {new Intl.NumberFormat('vi-VN').format((p.minPrice || p.price) * 1.2)}đ
-                                         </p>
                                       </div>
                                    </div>
                                       <ArrowUpRight className="h-4 w-4 text-muted-foreground opacity-0 -translate-x-2 group-hover:opacity-100 group-hover:translate-x-0 transition-all mr-2" />

@@ -788,11 +788,48 @@ export default function MyOrdersPage() {
 
           {totalPages > 1 && (
             <div className="pt-8">
-              <Pagination><PaginationContent>
+              <Pagination><PaginationContent className="flex-wrap justify-center gap-y-2">
                   <PaginationItem><PaginationPrevious href="#" onClick={(e: any) => { e.preventDefault(); if(currentPage > 1) setCurrentPage(currentPage - 1); }} className={currentPage === 1 ? "pointer-events-none opacity-50" : "cursor-pointer"} /></PaginationItem>
-                  {[...Array(totalPages)].map((_, i) => (
-                    <PaginationItem key={i}><PaginationLink href="#" isActive={currentPage === i + 1} onClick={(e: any) => { e.preventDefault(); setCurrentPage(i + 1); }} className="cursor-pointer">{i + 1}</PaginationLink></PaginationItem>
-                  ))}
+                  {(() => {
+                    let startPage = Math.max(1, currentPage - 2);
+                    let endPage = Math.min(totalPages, currentPage + 2);
+
+                    if (currentPage <= 3) {
+                        endPage = Math.min(totalPages, 5);
+                    } else if (currentPage >= totalPages - 2) {
+                        startPage = Math.max(1, totalPages - 4);
+                    }
+
+                    const pages = [];
+                    
+                    if (startPage > 1) {
+                        pages.push(
+                            <PaginationItem key="start-ellipsis">
+                                <PaginationEllipsis />
+                            </PaginationItem>
+                        );
+                    }
+
+                    for (let i = startPage; i <= endPage; i++) {
+                        pages.push(
+                            <PaginationItem key={i}>
+                                <PaginationLink href="#" isActive={currentPage === i} onClick={(e: any) => { e.preventDefault(); setCurrentPage(i); }} className="cursor-pointer">
+                                    {i}
+                                </PaginationLink>
+                            </PaginationItem>
+                        );
+                    }
+
+                    if (endPage < totalPages) {
+                        pages.push(
+                            <PaginationItem key="end-ellipsis">
+                                <PaginationEllipsis />
+                            </PaginationItem>
+                        );
+                    }
+
+                    return pages;
+                  })()}
                   <PaginationItem><PaginationNext href="#" onClick={(e: any) => { e.preventDefault(); if(currentPage < totalPages) setCurrentPage(currentPage + 1); }} className={currentPage === totalPages ? "pointer-events-none opacity-50" : "cursor-pointer"} /></PaginationItem>
               </PaginationContent></Pagination>
             </div>

@@ -463,7 +463,7 @@ export default function ProductDetailPage() {
         {/* Product Section */}
         <div className="grid lg:grid-cols-2 gap-8 lg:gap-12 mb-12">
           {/* Image Gallery */}
-          <div className="space-y-6">
+          <div className="space-y-6 min-w-0 w-full">
             <div className="relative aspect-video w-full overflow-hidden rounded-[2.5rem] border border-border/60 bg-white shadow-xl shadow-muted/10 group">
               <AnimatePresence mode="wait">
                 {images.length > 0 || activeImageUrl ? (
@@ -471,14 +471,14 @@ export default function ProductDetailPage() {
                     key={activeImageUrl || selectedImage}
                     src={activeImageUrl || images[selectedImage]}
                     alt={product.name}
-                    className="w-full h-full object-contain p-12 group-hover:scale-105 transition-transform duration-700 ease-out"
+                    className="absolute inset-0 w-full h-full max-w-full max-h-full object-contain p-4 sm:p-8 lg:p-12 m-auto group-hover:scale-105 transition-transform duration-700 ease-out"
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
                     exit={{ opacity: 0 }}
                     transition={{ duration: 0.3 }}
                   />
                 ) : (
-                   <div className="flex h-full items-center justify-center text-muted-foreground/30 bg-muted/20">
+                   <div className="absolute inset-0 flex items-center justify-center text-muted-foreground/30 bg-muted/20">
                       <Box className="h-20 w-20" />
                    </div>
                 )}
@@ -563,7 +563,7 @@ export default function ProductDetailPage() {
             )}
           </div>
 
-          <div className="space-y-8">
+          <div className="space-y-8 min-w-0 w-full">
             <div className="space-y-2">
               <div className="flex items-center gap-3 flex-wrap">
                 <p className="text-sm text-primary font-bold tracking-wide uppercase">{product.brandId?.name}</p>
