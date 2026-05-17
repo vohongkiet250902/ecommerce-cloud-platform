@@ -19,4 +19,4 @@ jobs:
             cd ~/ecommerce-cloud-platform
             git pull origin main
             docker compose up -d --build backend
-            docker compose up -d frontend
+            docker compose up -d --build frontend
