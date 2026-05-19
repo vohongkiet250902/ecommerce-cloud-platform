@@ -354,6 +354,7 @@ export default function ProductDetailPage() {
     addItem({
       id: cartId,
       productId: product._id,
+      slug: product.slug,
       name: product.name,
       sku: effectiveSku,
       price: currentPrice,

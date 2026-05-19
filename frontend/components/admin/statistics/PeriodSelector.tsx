@@ -62,6 +62,10 @@ const PeriodSelector = ({
   };
 
   const renderPicker = () => {
+    const currentYear = new Date().getFullYear();
+    // Tạo danh sách năm linh hoạt: từ 5 năm trước đến 2 năm sau năm hiện tại
+    const years = Array.from({ length: 8 }, (_, i) => currentYear - 5 + i);
+
     if (period === "day" || period === "week") {
       return (
         <Popover open={open} onOpenChange={setOpen}>
@@ -94,7 +98,6 @@ const PeriodSelector = ({
 
     if (period === "month") {
       const months = Array.from({ length: 12 }, (_, i) => i);
-      const years = [2024, 2025, 2026];
       return (
         <div className="flex gap-2">
           <Select
@@ -141,7 +144,6 @@ const PeriodSelector = ({
 
     if (period === "quarter") {
       const quarters = [1, 2, 3, 4];
-      const years = [2024, 2025, 2026];
       return (
         <div className="flex gap-2">
           <Select
@@ -187,7 +189,6 @@ const PeriodSelector = ({
     }
 
     if (period === "year") {
-      const years = [2022, 2023, 2024, 2025, 2026];
       return (
         <Select
           value={`${selectedDate.getFullYear()}`}

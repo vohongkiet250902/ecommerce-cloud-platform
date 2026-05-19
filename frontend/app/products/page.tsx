@@ -63,38 +63,6 @@ function ProductsContent() {
   const { data: brandsData } = useSelector((state: RootState) => state.brands);
 
   // Transform for UI
-  // Transform for UI - ONLY ACTIVE ROOT CATEGORIES
-  const categories = useMemo(() => [
-    { value: "all", label: "Tất cả" },
-    ...categoriesData
-      .filter((c: any) => c.isActive) // Only active root categories
-      .map((c: any) => ({ value: c._id, label: c.name }))
-  ], [categoriesData]);
-  
-  const brands = useMemo(() => 
-    brandsData
-      .filter(b => b.isActive) // Only active
-      .map(b => ({ id: b._id, name: b.name })), 
-  [brandsData]);
-
-  // Find active category path
-  const categoryPath = useMemo(() => {
-    if (selectedCategory === "all") return [];
-    
-    const findPath = (id: string, list: any[], path: any[] = []): any[] | null => {
-      for (const item of list) {
-        if (item._id === id) return [...path, item];
-        if (item.children && item.children.length > 0) {
-          const found = findPath(id, item.children, [...path, item]);
-          if (found) return found;
-        }
-      }
-      return null;
-    };
-
-    return findPath(selectedCategory, categoriesData) || [];
-  }, [selectedCategory, categoriesData]);
-
   // Helper to find category and its children
   const getCategoryIds = useCallback((rootId: string, allCategories: any[]) => {
       const findNode = (id: string, list: any[]): any => {
@@ -121,6 +89,67 @@ function ProductsContent() {
       const root = findNode(rootId, allCategories);
       return root ? collectIds(root) : [rootId];
   }, []);
+  // Transform for UI - ONLY ACTIVE ROOT CATEGORIES
+  const categories = useMemo(() => [
+    { value: "all", label: "Tất cả" },
+    ...categoriesData
+      .filter((c: any) => c.isActive) // Only active root categories
+      .map((c: any) => ({ value: c._id, label: c.name }))
+  ], [categoriesData]);
+  
+  const brands = useMemo(() => {
+    let baseBrands = brandsData.filter((b: any) => b.isActive);
+
+    if (selectedCategory === "all" && !searchQuery) {
+      return baseBrands.map((b: any) => ({ id: b._id, name: b.name }));
+    }
+
+    const categoryIds = selectedCategory !== "all" ? getCategoryIds(selectedCategory, categoriesData) : [];
+    const validBrandIds = new Set<string>();
+
+    for (const p of products) {
+      if (p.status !== 'active') continue;
+
+      if (selectedCategory !== "all") {
+        const pCatId = typeof p.categoryId === 'string' ? p.categoryId : p.categoryId?._id || p.category?._id;
+        if (!categoryIds.includes(pCatId)) continue;
+      }
+
+      if (searchQuery) {
+        const query = searchQuery.toLowerCase();
+        if (!p.name.toLowerCase().includes(query) && !(p.description && p.description.toLowerCase().includes(query))) {
+          continue;
+        }
+      }
+
+      const pBrandId = typeof p.brandId === 'string' ? p.brandId : p.brandId?._id || p.brand?._id;
+      if (pBrandId) validBrandIds.add(String(pBrandId));
+    }
+
+    return baseBrands
+      .filter((b: any) => validBrandIds.has(String(b._id)))
+      .map((b: any) => ({ id: b._id, name: b.name }));
+  }, [brandsData, products, selectedCategory, searchQuery, categoriesData, getCategoryIds]);
+
+  // Find active category path
+  const categoryPath = useMemo(() => {
+    if (selectedCategory === "all") return [];
+    
+    const findPath = (id: string, list: any[], path: any[] = []): any[] | null => {
+      for (const item of list) {
+        if (item._id === id) return [...path, item];
+        if (item.children && item.children.length > 0) {
+          const found = findPath(id, item.children, [...path, item]);
+          if (found) return found;
+        }
+      }
+      return null;
+    };
+
+    return findPath(selectedCategory, categoriesData) || [];
+  }, [selectedCategory, categoriesData]);
+
+
 
   // Fetch products
   useEffect(() => {
@@ -517,7 +546,10 @@ function ProductsContent() {
                 <Button
                   variant="outline"
                   size="icon"
-                  onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                  onClick={() => {
+                    setCurrentPage((p) => Math.max(1, p - 1));
+                    window.scrollTo({ top: 0, behavior: "smooth" });
+                  }}
                   disabled={currentPage === 1}
                   className="border-border/40"
                 >
@@ -550,7 +582,10 @@ function ProductsContent() {
                             key={i}
                             variant={currentPage === i ? "default" : "outline"}
                             size="icon"
-                            onClick={() => setCurrentPage(i)}
+                            onClick={() => {
+                              setCurrentPage(i);
+                              window.scrollTo({ top: 0, behavior: "smooth" });
+                            }}
                             className={`w-10 h-10 ${currentPage !== i ? "border-border/40" : ""}`}
                           >
                             {i}
@@ -572,9 +607,10 @@ function ProductsContent() {
                 <Button
                   variant="outline"
                   size="icon"
-                  onClick={() =>
-                    setCurrentPage((p) => Math.min(totalPages, p + 1))
-                  }
+                  onClick={() => {
+                    setCurrentPage((p) => Math.min(totalPages, p + 1));
+                    window.scrollTo({ top: 0, behavior: "smooth" });
+                  }}
                   disabled={currentPage === totalPages}
                   className="border-border/40"
                 >

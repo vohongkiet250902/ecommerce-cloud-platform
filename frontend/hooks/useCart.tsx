@@ -8,6 +8,7 @@ import { toast } from "@/hooks/use-toast";
 export interface CartItem {
   id: string; // Unique key: productId-sku
   productId: string; // The real DB _id
+  slug?: string; // Product slug for direct routing
   name: string;
   sku: string;
   price: number;
@@ -76,6 +77,7 @@ export function CartProvider({ children }: { children: React.ReactNode }): React
             return {
               id: `${it.productId}-${it.sku}`,
               productId: it.productId,
+              slug: it.product?.slug || "",
               name: it.product?.name || "Sản phẩm",
               sku: it.sku,
               price: finalPrice,

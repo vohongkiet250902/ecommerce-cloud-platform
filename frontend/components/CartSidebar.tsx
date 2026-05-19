@@ -1,4 +1,5 @@
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { useState, useEffect } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { orderApi } from "@/services/api";
@@ -14,6 +15,7 @@ import { motion, AnimatePresence } from "framer-motion";
 interface CartItem {
   id: string;
   productId: string;
+  slug?: string;
   name: string;
   sku: string;
   price: number;
@@ -220,7 +222,20 @@ export function CartSidebar({
                         layout
                         className="group flex gap-4 p-3 bg-muted/40 hover:bg-muted/60 transition-colors rounded-xl border border-transparent hover:border-border"
                       >
-                        <div className="w-20 h-20 bg-background rounded-lg overflow-hidden flex-shrink-0 border border-border flex items-center justify-center">
+                        <div 
+                          className="w-20 h-20 bg-background rounded-lg overflow-hidden flex-shrink-0 border border-border flex items-center justify-center cursor-pointer block"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            const routePath = item.slug 
+                              ? `/products/${item.slug}` 
+                              : `/products/${item.productId || (item.id && typeof item.id === 'string' ? item.id.split('-')[0] : '')}${item.name ? `?name=${encodeURIComponent(item.name)}` : ''}`;
+                            onOpenChange(false);
+                            setTimeout(() => {
+                              router.push(routePath);
+                            }, 150);
+                          }}
+                        >
                           {item.image ? (
                             <img
                               src={item.image}
@@ -233,7 +248,20 @@ export function CartSidebar({
                         </div>
                         <div className="flex-1 min-w-0 flex flex-col justify-between">
                           <div>
-                            <h4 className="font-semibold text-sm line-clamp-1 mb-1">
+                            <h4 
+                              className="font-semibold text-sm line-clamp-1 mb-1 cursor-pointer hover:text-primary transition-colors block"
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                const routePath = item.slug 
+                                  ? `/products/${item.slug}` 
+                                  : `/products/${item.productId || (item.id && typeof item.id === 'string' ? item.id.split('-')[0] : '')}${item.name ? `?name=${encodeURIComponent(item.name)}` : ''}`;
+                                onOpenChange(false);
+                                setTimeout(() => {
+                                  router.push(routePath);
+                                }, 150);
+                              }}
+                            >
                               {item.name}
                             </h4>
                             {item.attributes && item.attributes.length > 0 && (
@@ -245,21 +273,28 @@ export function CartSidebar({
                                 ))}
                               </div>
                             )}
-                            <div className="flex items-center gap-2">
-                              <p className="text-primary font-bold text-base">
-                                {formatPrice(item.price)}
-                              </p>
-                              {item.originalPrice && item.originalPrice > item.price && (
-                                <div className="flex items-center gap-1.5">
-                                  <p className="text-xs text-muted-foreground line-through">
-                                    {formatPrice(item.originalPrice)}
-                                  </p>
-                                  {item.discountPercentage && item.discountPercentage > 0 && (
-                                    <span className="text-[10px] font-bold text-destructive bg-destructive/10 px-1 rounded-sm">
-                                      -{item.discountPercentage}%
-                                    </span>
-                                  )}
-                                </div>
+                            <div className="flex flex-col gap-0.5">
+                              <div className="flex items-center gap-2">
+                                <p className="text-primary font-bold text-base">
+                                  {formatPrice(item.price * item.quantity)}
+                                </p>
+                                {item.originalPrice && item.originalPrice > item.price && (
+                                  <div className="flex items-center gap-1.5">
+                                    <p className="text-xs text-muted-foreground line-through">
+                                      {formatPrice(item.originalPrice * item.quantity)}
+                                    </p>
+                                    {item.discountPercentage && item.discountPercentage > 0 && (
+                                      <span className="text-[10px] font-bold text-destructive bg-destructive/10 px-1 rounded-sm">
+                                        -{item.discountPercentage}%
+                                      </span>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                              {item.quantity > 1 && (
+                                <p className="text-[11px] text-muted-foreground font-medium">
+                                  {formatPrice(item.price)} / sản phẩm
+                                </p>
                               )}
                             </div>
                           </div>

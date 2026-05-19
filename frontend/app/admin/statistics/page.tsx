@@ -213,7 +213,14 @@ const StatisticsPage = () => {
       })),
       profitChart: rawData.chartItems.map((item: any) => {
         let label = item.label;
-        if (label.includes('-')) label = label.split('-').slice(-2).join('/');
+        if (label.includes('-')) {
+          const parts = label.split('-');
+          if (parts.length === 3) {
+            label = `${parts[2]}/${parts[1]}`;
+          } else if (parts.length === 2) {
+            label = `${parts[1]}/${parts[0]}`;
+          }
+        }
         return {
           label,
           revenue: item.revenue,

@@ -789,7 +789,7 @@ export default function MyOrdersPage() {
           {totalPages > 1 && (
             <div className="pt-8">
               <Pagination><PaginationContent className="flex-wrap justify-center gap-y-2">
-                  <PaginationItem><PaginationPrevious href="#" onClick={(e: any) => { e.preventDefault(); if(currentPage > 1) setCurrentPage(currentPage - 1); }} className={currentPage === 1 ? "pointer-events-none opacity-50" : "cursor-pointer"} /></PaginationItem>
+                  <PaginationItem><PaginationPrevious href="#" onClick={(e: any) => { e.preventDefault(); if(currentPage > 1) { setCurrentPage(currentPage - 1); window.scrollTo({ top: 0, behavior: "smooth" }); } }} className={currentPage === 1 ? "pointer-events-none opacity-50" : "cursor-pointer"} /></PaginationItem>
                   {(() => {
                     let startPage = Math.max(1, currentPage - 2);
                     let endPage = Math.min(totalPages, currentPage + 2);
@@ -813,7 +813,7 @@ export default function MyOrdersPage() {
                     for (let i = startPage; i <= endPage; i++) {
                         pages.push(
                             <PaginationItem key={i}>
-                                <PaginationLink href="#" isActive={currentPage === i} onClick={(e: any) => { e.preventDefault(); setCurrentPage(i); }} className="cursor-pointer">
+                                <PaginationLink href="#" isActive={currentPage === i} onClick={(e: any) => { e.preventDefault(); setCurrentPage(i); window.scrollTo({ top: 0, behavior: "smooth" }); }} className="cursor-pointer">
                                     {i}
                                 </PaginationLink>
                             </PaginationItem>
@@ -830,7 +830,7 @@ export default function MyOrdersPage() {
 
                     return pages;
                   })()}
-                  <PaginationItem><PaginationNext href="#" onClick={(e: any) => { e.preventDefault(); if(currentPage < totalPages) setCurrentPage(currentPage + 1); }} className={currentPage === totalPages ? "pointer-events-none opacity-50" : "cursor-pointer"} /></PaginationItem>
+                  <PaginationItem><PaginationNext href="#" onClick={(e: any) => { e.preventDefault(); if(currentPage < totalPages) { setCurrentPage(currentPage + 1); window.scrollTo({ top: 0, behavior: "smooth" }); } }} className={currentPage === totalPages ? "pointer-events-none opacity-50" : "cursor-pointer"} /></PaginationItem>
               </PaginationContent></Pagination>
             </div>
           )}

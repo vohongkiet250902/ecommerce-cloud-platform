@@ -1,6 +1,7 @@
 "use client";
 
 import { motion } from "framer-motion";
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { ArrowRight, Zap, Gift, Truck, Shield } from "lucide-react";
 
@@ -52,18 +53,24 @@ export default function PromoBanner() {
             </p>
             <div className="flex flex-col sm:flex-row gap-4">
               <Button
+                asChild
                 size="lg"
                 className="bg-white text-destructive hover:bg-white/90 rounded-full px-8 group cursor-pointer"
               >
-                Mua ngay
-                <ArrowRight className="ml-2 w-5 h-5 group-hover:translate-x-1 transition-transform" />
+                <Link href="/promotions">
+                  Mua ngay
+                  <ArrowRight className="ml-2 w-5 h-5 group-hover:translate-x-1 transition-transform" />
+                </Link>
               </Button>
               <Button
+                asChild
                 size="lg"
                 variant="outline"
                 className="border-white text-white hover:bg-white/10 rounded-full px-8 cursor-pointer"
               >
-                Xem chi tiết
+                <Link href="/promotions">
+                  Xem chi tiết
+                </Link>
               </Button>
             </div>
           </div>

@@ -301,10 +301,12 @@ export default function SearchManagement() {
 
   // Prepare Chart Data
   const dailyChartData = useMemo(() => {
-    return topDaily.map((d) => ({
-      day: format(new Date(d.day), "dd/MM"),
-      count: d.top.reduce((acc, curr) => acc + curr.count, 0),
-    })).reverse();
+    return [...topDaily]
+      .sort((a, b) => new Date(a.day).getTime() - new Date(b.day).getTime())
+      .map((d) => ({
+        day: format(new Date(d.day), "dd/MM"),
+        count: d.top.reduce((acc, curr) => acc + curr.count, 0),
+      }));
   }, [topDaily]);
   
   const handleAiRetrieve = async () => {
