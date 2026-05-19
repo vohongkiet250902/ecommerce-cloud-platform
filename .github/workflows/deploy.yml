@@ -15,7 +15,8 @@ jobs:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_KEY }}
-          command_timeout: 30m
+          command_timeout: 1h
+          script_stop: true
           script: |
             cd ~/ecommerce-cloud-platform
             git fetch origin main
